@@ -26,6 +26,35 @@ Flux additionally provides the ability to monitor Docker registry and automatica
 be a part of GitOps engine. So it is proposed to keep the feature only in Flux for now and then work together to move it into a separate component that would work for both Flux
 and Argo CD.
 
+### Differences in Core Functionality
+
+Even core functionality of Argo CD has some differences. These differences might look minor but affect production systems and cannot be ignored. It is proposed to document all such
+differences, document and propose a resolution. Following three categories are proposed:
+
+- `Feature`. The difference is justified by a real business requirement and affects the user. To resolve it we should contribute a feature into GitOps engine.
+- `Mode`. The is no real business requirement and difference exists because slightly different design decision was made during Argo CD/Flux implementation. To resolve it
+we would have to introduce a setting that switches Engine between Argo CD/Flux mode. Going forward we should try to pick one behavior, deprecate the previous one and eventually migrate
+all users to one behavior.
+- `Random`. The difference is caused by an internal implementation detail and does not affect the user in any way. We can just ignore the difference.
+
+**Differences List (WIP)**:
+
+- `Feature` Policy annotation `fluxcd.io/ignore`. If either resource manifest in Git or live resource in the target cluster has an `fluxcd.io/ignore` then Flux doesn't touch it.
+Argo CD does not have a similar annotation.
+
+- `Feature` Garbage collection/resource pruning. Garbage collection logic in Argo CD and Flux is slightly different. Argo CD inject label `app.kubernetes.io/instance: <appName>`
+to each resource and remove such resources during next syncing if they are no longer in Git. Flux inject label `fluxcd.io/sync-gc-mark -> sha256.<checksum>`  where `<sha>` is a
+sha256 of the Git repo url, branch name, and paths and uses that label to identify if the resource can be garbage collected after it is no longer in Git. So if repo/branch and paths
+change then Flux won't delete resources deployed before the change. Additionally, Flux applies `fluxcd.io/sync-checksum` annotation. The annotation is also used to prevent
+accidental pruning.
+
+- `Random` Apply Order Both Argo CD and Flux execute tasks in a predefined order. The order is slightly different:
+  - Argo CD: https://github.com/argoproj/argo-cd/blob/4cb84b37ce4ac9e91b242a2250e8425d4977a961/controller/sync_tasks.go#L22
+  - Flux: https://github.com/fluxcd/flux/blob/c8484d4553a674d54b74e61d974537799459e44e/pkg/cluster/kubernetes/sync.go#L433
+The difference is very minor. I don't think it will affect the user and we can just ignore it.
+
+- `Feature` Delete Order. Flux deletes resources in the reverse order, Argo CD does not.
+
 ### Hypothesis and assumptions
 
 The proposed solution is based on the assumption that despite implementation differences the core functionality of Argo CD and Flux behaves in the same way. Both projects
