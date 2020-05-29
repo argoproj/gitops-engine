@@ -39,9 +39,14 @@ func (r *reconciledResource) key() kube.ResourceKey {
 	return kube.GetResourceKey(r.Target)
 }
 
+// SyncContext defines an interface that allows to execute sync operation step or terminate it.
 type SyncContext interface {
+	// Terminate terminates sync operation. The method is asynchronous: it starts deletion is related K8S resources
+	// such as in-flight resource hooks, updates operation status, and exists without waiting for resource completion.
 	Terminate()
+	// Executes next synchronization step and updates operation status.
 	Sync()
+	// Returns current sync operation state and information about resources synchronized so far.
 	GetState() (common.OperationPhase, string, []common.ResourceSyncResult)
 }
 
@@ -55,7 +60,7 @@ func WithPermissionValidator(validator common.PermissionValidator) SyncOpt {
 	}
 }
 
-// WithPermissionValidator sets specified health override
+// WithHealthOverride sets specified health override
 func WithHealthOverride(override health.HealthOverride) SyncOpt {
 	return func(ctx *syncContext) {
 		ctx.healthOverride = override
@@ -105,6 +110,7 @@ func WithManifestValidation(enabled bool) SyncOpt {
 	}
 }
 
+//  NewSyncContext creates new instance of a SyncContext
 func NewSyncContext(
 	revision string,
 	reconciliationResult ReconciliationResult,
