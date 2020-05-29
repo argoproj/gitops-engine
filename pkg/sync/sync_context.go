@@ -495,7 +495,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 			// and the CRD is part of this sync or the resource is annotated with SkipDryRunOnMissingResource=true,
 			// then skip verification during `kubectl apply --dry-run` since we expect the CRD
 			// to be created during app synchronization.
-			skipDryRunOnMissingResource := resourceutil.HasAnnotationOption(task.targetObj, common.AnnotationSyncOptions, "SkipDryRunOnMissingResource=true")
+			skipDryRunOnMissingResource := resourceutil.HasAnnotationOption(task.targetObj, common.AnnotationSyncOptions, common.SyncOptionSkipDryRunOnMissingResource)
 			if apierr.IsNotFound(err) && (skipDryRunOnMissingResource || sc.hasCRDOfGroupKind(task.group(), task.kind())) {
 				sc.log.WithFields(log.Fields{"task": task}).Debug("skip dry-run for custom resource")
 				task.skipDryRun = true
@@ -576,7 +576,7 @@ func (sc *syncContext) applyObject(targetObj *unstructured.Unstructured, dryRun 
 func (sc *syncContext) pruneObject(liveObj *unstructured.Unstructured, prune, dryRun bool) (common.ResultCode, string) {
 	if !prune {
 		return common.ResultCodePruneSkipped, "ignored (requires pruning)"
-	} else if resourceutil.HasAnnotationOption(liveObj, common.AnnotationSyncOptions, "Prune=false") {
+	} else if resourceutil.HasAnnotationOption(liveObj, common.AnnotationSyncOptions, common.SyncOptionDisablePrune) {
 		return common.ResultCodePruneSkipped, "ignored (no prune)"
 	} else {
 		if dryRun {
@@ -772,7 +772,7 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 					defer createWg.Done()
 					logCtx := sc.log.WithFields(log.Fields{"dryRun": dryRun, "task": t})
 					logCtx.Debug("applying")
-					validate := sc.validate && !resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, "Validate=false")
+					validate := sc.validate && !resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionsDisableValidation)
 					result, message := sc.applyObject(t.targetObj, dryRun, sc.force, validate)
 					if result == common.ResultCodeSyncFailed {
 						logCtx.WithField("message", message).Info("apply failed")

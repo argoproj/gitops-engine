@@ -4,6 +4,7 @@ Package implements Kubernetes resources synchronization and provides the followi
   - resource pruning
   - resource hooks
   - sync waves
+  - sync options
 
 Basic Syncing
 
@@ -73,6 +74,15 @@ that runs before all other resources. The `argocd.argoproj.io/sync-wave` annotat
   metadata:
     annotations:
       argocd.argoproj.io/sync-wave: "5"
+
+Sync Options
+
+The sync options allows customizing the synchronization of selected resources. The options are specified using the
+annotation 'argocd.argoproj.io/sync-options'. Following sync options are supported:
+
+- SkipDryRunOnMissingResource=true - disables dry run in resource is missing in the cluster
+- Prune=false - disables resource pruning
+- Validate=false - disables resource validation (equivalent to 'kubectl apply --validate=false')
 
 How Does It Work Together?
 
