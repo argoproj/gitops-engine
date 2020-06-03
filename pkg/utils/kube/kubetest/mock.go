@@ -24,11 +24,24 @@ type MockKubectlCmd struct {
 	APIResources     []kube.APIResourceInfo
 	Commands         map[string]KubectlOutput
 	Events           chan watch.Event
-	LastValidate     bool
+	lastValidate     bool
 	Version          string
 	DynamicClient    dynamic.Interface
 	APIGroups        []metav1.APIGroup
-	lastValidateLock sync.Mutex
+	lastValidateLock sync.RWMutex
+}
+
+func (k *MockKubectlCmd) SetLastValidate(validate bool) {
+	k.lastValidateLock.Lock()
+	k.lastValidate = validate
+	k.lastValidateLock.Unlock()
+}
+
+func (k *MockKubectlCmd) GetLastValidate() bool {
+	k.lastValidateLock.RLock()
+	validate := k.lastValidate
+	k.lastValidateLock.RUnlock()
+	return validate
 }
 
 func (k *MockKubectlCmd) NewDynamicClient(config *rest.Config) (dynamic.Interface, error) {
@@ -56,9 +69,7 @@ func (k *MockKubectlCmd) DeleteResource(config *rest.Config, gvk schema.GroupVer
 }
 
 func (k *MockKubectlCmd) ApplyResource(config *rest.Config, obj *unstructured.Unstructured, namespace string, dryRun, force, validate bool) (string, error) {
-	k.lastValidateLock.Lock()
-	k.LastValidate = validate
-	k.lastValidateLock.Unlock()
+	k.SetLastValidate(validate)
 	command, ok := k.Commands[obj.GetName()]
 	if !ok {
 		return "", nil
