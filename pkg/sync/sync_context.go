@@ -651,7 +651,7 @@ func (sc *syncContext) Terminate() {
 				sc.setResourceResult(task, "", common.OperationFailed, fmt.Sprintf("Failed to delete: %v", err))
 				terminateSuccessful = false
 			} else {
-				sc.setResourceResult(task, "", common.OperationSucceeded, fmt.Sprintf("Deleted"))
+				sc.setResourceResult(task, "", common.OperationSucceeded, "Deleted")
 			}
 		} else {
 			sc.setResourceResult(task, "", phase, msg)
