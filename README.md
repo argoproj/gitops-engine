@@ -5,9 +5,8 @@
 
 </div>
 
-Various GitOps operators address different use-cases, provide different user experience but all have the same set of features in the core. Teams behind
-[Argo CD](https://github.com/argoproj/argo-cd) and [Flux CD](https://github.com/fluxcd/flux) joining forces to implement the reusable library that implements core GitOps
-features and make it available for everyone. This repository is intended to host the implementation of for the following core GitOps features:
+Various GitOps operators address different use-cases and provide different user experiences but all have the same similar set of core features. The teams behind
+[Argo CD](https://github.com/argoproj/argo-cd) and [Flux CD](https://github.com/fluxcd/flux) have implemented a reusable library that implements core GitOps features:
 
 - Kubernetes resource cache ✅
 - Resources reconciliation ✅
@@ -17,7 +16,7 @@ features and make it available for everyone. This repository is intended to host
 
 ## Proposals, specifications and ideas
 
-Would you want to propose one more feature and want to enhance the existing one?
+Do you want to propose one more feature and want to enhance the existing one?
 Proposals and ideas are in markdown docs in the [`specs/`](specs/) directory.
 To create a new proposal, simply copy the spec [`template`](specs/template.md),
 name the file corresponding to the title of your proposal, and place it in the
