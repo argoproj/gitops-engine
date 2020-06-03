@@ -125,7 +125,7 @@ func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCa
 	cache := &clusterCache{
 		settings:                Settings{ResourceHealthOverride: &noopSettings{}, ResourcesFilter: &noopSettings{}},
 		apisMeta:                sync.Map{},
-		resources:               make(map[kube.ResourceKey]*Resource),
+		resources:               sync.Map{},
 		nsIndex:                 make(map[string]map[kube.ResourceKey]*Resource),
 		config:                  config,
 		kubectl:                 &kube.KubectlCmd{},
@@ -151,7 +151,7 @@ type clusterCache struct {
 
 	// lock is a rw lock which protects the fields of clusterInfo
 	lock      sync.RWMutex
-	resources map[kube.ResourceKey]*Resource
+	resources sync.Map
 	nsIndex   map[string]map[kube.ResourceKey]*Resource
 
 	kubectl    kube.Kubectl
@@ -195,6 +195,41 @@ func (c *clusterCache) DeleteApisMeta(key schema.GroupKind) {
 func (c *clusterCache) ApisMetaLength() int {
 	var cnt int
 	c.apisMeta.Range(func(key, value interface{}) bool {
+		cnt++
+		return true
+	})
+	return cnt
+}
+
+func (c *clusterCache) StoreResources(key kube.ResourceKey, value *Resource) {
+	c.resources.Store(key, value)
+}
+
+func (c *clusterCache) LoadResources(key kube.ResourceKey) (*Resource, error) {
+	v, ok := c.resources.Load(key)
+	if !ok {
+		return nil, fmt.Errorf("not found key: %s in resources map", key.String())
+	}
+
+	res, ok := v.(*Resource)
+	if !ok {
+		return nil, fmt.Errorf("stored type is invalid in resources map")
+	}
+
+	if res == nil {
+		return nil, fmt.Errorf("stored type is nil in resources map")
+	}
+
+	return res, nil
+}
+
+func (c *clusterCache) DeleteResources(key kube.ResourceKey) {
+	c.resources.Delete(key)
+}
+
+func (c *clusterCache) ResourcesLength() int {
+	var cnt int
+	c.resources.Range(func(key, value interface{}) bool {
 		cnt++
 		return true
 	})
@@ -272,17 +307,33 @@ func (c *clusterCache) replaceResourceCache(gk schema.GroupKind, resourceVersion
 		for i := range objs {
 			obj := &objs[i]
 			key := kube.GetResourceKey(&objs[i])
-			c.onNodeUpdated(c.resources[key], obj)
+			res, _ := c.LoadResources(key)
+			c.onNodeUpdated(res, obj)
 		}
 
-		for key := range c.resources {
-			if key.Kind != gk.Kind || key.Group != gk.Group || ns != "" && key.Namespace != ns {
-				continue
+		var err error
+		c.resources.Range(func(key, value interface{}) bool {
+			k, ok := key.(kube.ResourceKey)
+			if !ok {
+				err = fmt.Errorf("stored type is invalid in apiMeta map")
+				return false
 			}
 
-			if _, ok := objByKey[key]; !ok {
-				c.onNodeRemoved(key)
+			if k.Kind != gk.Kind || k.Group != gk.Group || ns != "" && k.Namespace != ns {
+				return true
 			}
+
+			if _, ok := objByKey[k]; !ok {
+				err = c.onNodeRemoved(k)
+				if err != nil {
+					return false
+				}
+			}
+
+			return true
+		})
+		if err != nil {
+			return err
 		}
 		info.resourceVersion = resourceVersion
 	}
@@ -365,7 +416,7 @@ func (c *clusterCache) newResource(un *unstructured.Unstructured) *Resource {
 
 func (c *clusterCache) setNode(n *Resource) {
 	key := n.ResourceKey()
-	c.resources[key] = n
+	c.StoreResources(key, n)
 	ns, ok := c.nsIndex[key.Namespace]
 	if !ok {
 		ns = make(map[kube.ResourceKey]*Resource)
@@ -585,7 +636,7 @@ func (c *clusterCache) sync() error {
 	})
 
 	c.apisMeta = sync.Map{}
-	c.resources = make(map[kube.ResourceKey]*Resource)
+	c.resources = sync.Map{}
 	c.namespacedResources = make(map[schema.GroupKind]bool)
 	config := c.config
 	version, err := c.kubectl.GetServerVersion(config)
@@ -700,7 +751,8 @@ func (c *clusterCache) GetNamespaceTopLevelResources(namespace string) map[kube.
 func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(resource *Resource, namespaceResources map[kube.ResourceKey]*Resource)) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	if res, ok := c.resources[key]; ok {
+	res, _ := c.LoadResources(key)
+	if res != nil {
 		nsNodes := c.nsIndex[key.Namespace]
 		action(res, nsNodes)
 		childrenByUID := make(map[types.UID][]*Resource)
@@ -745,14 +797,33 @@ func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructure
 
 	managedObjs := make(map[kube.ResourceKey]*unstructured.Unstructured)
 	// iterate all objects in live state cache to find ones associated with app
-	for key, o := range c.resources {
-		if isManaged(o) && o.Resource != nil && len(o.OwnerRefs) == 0 {
-			managedObjs[key] = o.Resource
+	var err error
+	c.resources.Range(func(key, value interface{}) bool {
+		k, ok := key.(kube.ResourceKey)
+		if !ok {
+			err = fmt.Errorf("stored type is invalid in resources map")
+			return false
 		}
+
+		r, ok := value.(*Resource)
+		if !ok {
+			err = fmt.Errorf("stored type is invalid in resources map")
+			return false
+		}
+
+		if isManaged(r) && r.Resource != nil && len(r.OwnerRefs) == 0 {
+			managedObjs[k] = r.Resource
+		}
+
+		return true
+	})
+	if err != nil {
+		return nil, err
 	}
+
 	// but are simply missing our label
 	lock := &sync.Mutex{}
-	err := kube.RunAllAsync(len(targetObjs), func(i int) error {
+	err = kube.RunAllAsync(len(targetObjs), func(i int) error {
 		targetObj := targetObjs[i]
 		key := kube.GetResourceKey(targetObj)
 		lock.Lock()
@@ -760,7 +831,11 @@ func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructure
 		lock.Unlock()
 
 		if managedObj == nil {
-			if existingObj, exists := c.resources[key]; exists {
+			existingObj, err := c.LoadResources(key)
+			if err != nil {
+				return err
+			}
+			if existingObj != nil {
 				if existingObj.Resource != nil {
 					managedObj = existingObj.Resource
 				} else {
@@ -830,10 +905,10 @@ func (c *clusterCache) processEvent(event watch.EventType, un *unstructured.Unst
 
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	existingNode, exists := c.resources[key]
+	existingNode, _ := c.LoadResources(key)
 	if event == watch.Deleted {
-		if exists {
-			c.onNodeRemoved(key)
+		if existingNode != nil {
+			_ = c.onNodeRemoved(key)
 		}
 	} else if event != watch.Deleted {
 		c.onNodeUpdated(existingNode, un)
@@ -848,10 +923,13 @@ func (c *clusterCache) onNodeUpdated(oldRes *Resource, un *unstructured.Unstruct
 	}
 }
 
-func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) {
-	existing, ok := c.resources[key]
-	if ok {
-		delete(c.resources, key)
+func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) error {
+	existing, err := c.LoadResources(key)
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		c.DeleteResources(key)
 		ns, ok := c.nsIndex[key.Namespace]
 		if ok {
 			delete(ns, key)
@@ -863,6 +941,8 @@ func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) {
 			h(nil, existing, ns)
 		}
 	}
+
+	return nil
 }
 
 var (
@@ -878,7 +958,7 @@ func (c *clusterCache) GetClusterInfo() ClusterInfo {
 	return ClusterInfo{
 		APIsCount:         c.ApisMetaLength(),
 		K8SVersion:        c.serverVersion,
-		ResourcesCount:    len(c.resources),
+		ResourcesCount:    c.ResourcesLength(),
 		Server:            c.config.Host,
 		LastCacheSyncTime: c.syncTime,
 		SyncError:         c.syncError,

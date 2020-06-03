@@ -141,11 +141,13 @@ func TestEnsureSynced(t *testing.T) {
 	err := cluster.EnsureSynced()
 	assert.Nil(t, err)
 
-	assert.Len(t, cluster.resources, 2)
+	assert.Equal(t, cluster.ResourcesLength(), 2)
 	var names []string
-	for k := range cluster.resources {
+	cluster.resources.Range(func(key, value interface{}) bool {
+		k, _ := key.(kube.ResourceKey)
 		names = append(names, k.Name)
-	}
+		return true
+	})
 	assert.ElementsMatch(t, []string{"helm-guestbook1", "helm-guestbook2"}, names)
 }
 
@@ -166,11 +168,13 @@ func TestEnsureSyncedSingleNamespace(t *testing.T) {
 	err := cluster.EnsureSynced()
 	assert.Nil(t, err)
 
-	assert.Len(t, cluster.resources, 1)
+	assert.Equal(t, cluster.ResourcesLength(), 1)
 	var names []string
-	for k := range cluster.resources {
+	cluster.resources.Range(func(key, value interface{}) bool {
+		k, _ := key.(kube.ResourceKey)
 		names = append(names, k.Name)
-	}
+		return true
+	})
 	assert.ElementsMatch(t, []string{"helm-guestbook1"}, names)
 }
 
@@ -256,6 +260,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: helm-guestbook
+  namespace: default
   labels:
     app: helm-guestbook`)
 
@@ -359,7 +364,7 @@ func TestWatchCacheUpdated(t *testing.T) {
 	err = cluster.replaceResourceCache(podGroupKind, "updated-list-version", []unstructured.Unstructured{*updated, *added}, "")
 	assert.Nil(t, err)
 
-	_, ok := cluster.resources[kube.GetResourceKey(removed)]
+	_, ok := cluster.resources.Load(kube.GetResourceKey(removed))
 	assert.False(t, ok)
 }
 
@@ -379,10 +384,10 @@ func TestNamespaceModeReplace(t *testing.T) {
 	err = cluster.replaceResourceCache(podGroupKind, "", nil, "ns1")
 	assert.Nil(t, err)
 
-	_, ok := cluster.resources[kube.GetResourceKey(ns1Pod)]
+	_, ok := cluster.resources.Load(kube.GetResourceKey(ns1Pod))
 	assert.False(t, ok)
 
-	_, ok = cluster.resources[kube.GetResourceKey(ns2Pod)]
+	_, ok = cluster.resources.Load(kube.GetResourceKey(ns2Pod))
 	assert.True(t, ok)
 }
 
