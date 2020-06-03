@@ -5,7 +5,7 @@
 
 </div>
 
-Various GitOps operators address different use-cases and provide different user experiences but all have the same similar set of core features. The teams behind
+Various GitOps operators address different use-cases and provide different user experiences but all have similar set of core features. The teams behind
 [Argo CD](https://github.com/argoproj/argo-cd) and [Flux CD](https://github.com/fluxcd/flux) have implemented a reusable library that implements core GitOps features:
 
 - Kubernetes resource cache ✅
