@@ -356,7 +356,8 @@ func TestWatchCacheUpdated(t *testing.T) {
 	podGroupKind := testPod.GroupVersionKind().GroupKind()
 
 	cluster.lock.Lock()
-	cluster.replaceResourceCache(podGroupKind, "updated-list-version", []unstructured.Unstructured{*updated, *added}, "")
+	err = cluster.replaceResourceCache(podGroupKind, "updated-list-version", []unstructured.Unstructured{*updated, *added}, "")
+	assert.Nil(t, err)
 
 	_, ok := cluster.resources[kube.GetResourceKey(removed)]
 	assert.False(t, ok)
@@ -375,7 +376,8 @@ func TestNamespaceModeReplace(t *testing.T) {
 	err := cluster.EnsureSynced()
 	assert.Nil(t, err)
 
-	cluster.replaceResourceCache(podGroupKind, "", nil, "ns1")
+	err = cluster.replaceResourceCache(podGroupKind, "", nil, "ns1")
+	assert.Nil(t, err)
 
 	_, ok := cluster.resources[kube.GetResourceKey(ns1Pod)]
 	assert.False(t, ok)
