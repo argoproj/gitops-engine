@@ -1,6 +1,8 @@
 package kubetest
 
 import (
+	"sync"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -19,13 +21,14 @@ type KubectlOutput struct {
 }
 
 type MockKubectlCmd struct {
-	APIResources  []kube.APIResourceInfo
-	Commands      map[string]KubectlOutput
-	Events        chan watch.Event
-	LastValidate  bool
-	Version       string
-	DynamicClient dynamic.Interface
-	APIGroups     []metav1.APIGroup
+	APIResources     []kube.APIResourceInfo
+	Commands         map[string]KubectlOutput
+	Events           chan watch.Event
+	LastValidate     bool
+	Version          string
+	DynamicClient    dynamic.Interface
+	APIGroups        []metav1.APIGroup
+	lastValidateLock sync.Mutex
 }
 
 func (k *MockKubectlCmd) NewDynamicClient(config *rest.Config) (dynamic.Interface, error) {
@@ -53,7 +56,9 @@ func (k *MockKubectlCmd) DeleteResource(config *rest.Config, gvk schema.GroupVer
 }
 
 func (k *MockKubectlCmd) ApplyResource(config *rest.Config, obj *unstructured.Unstructured, namespace string, dryRun, force, validate bool) (string, error) {
+	k.lastValidateLock.Lock()
 	k.LastValidate = validate
+	k.lastValidateLock.Unlock()
 	command, ok := k.Commands[obj.GetName()]
 	if !ok {
 		return "", nil
