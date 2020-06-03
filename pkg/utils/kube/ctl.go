@@ -2,7 +2,6 @@ package kube
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -502,19 +501,12 @@ func (k *KubectlCmd) SetOnKubectlRun(onKubectlRun func(command string) (io.Close
 }
 
 func RunAllAsync(count int, action func(i int) error) error {
-	g, ctx := errgroup.WithContext(context.Background())
-loop:
+	var eg errgroup.Group
 	for i := 0; i < count; i++ {
 		index := i
-		g.Go(func() error {
+		eg.Go(func() error {
 			return action(index)
 		})
-		select {
-		case <-ctx.Done():
-			// Something went wrong already, stop spawning tasks.
-			break loop
-		default:
-		}
 	}
-	return g.Wait()
+	return eg.Wait()
 }

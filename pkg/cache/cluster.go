@@ -3,7 +3,6 @@ package cache
 import (
 	"context"
 	"fmt"
-	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -412,14 +411,8 @@ func runSynced(lock sync.Locker, action func() error) error {
 }
 
 func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo, info *apiMeta, resClient dynamic.ResourceInterface, ns string) {
-	kube.RetryUntilSucceed(func() (err error) {
-		defer func() {
-			if r := recover(); r != nil {
-				err = fmt.Errorf("Recovered from panic: %+v\n%s", r, debug.Stack())
-			}
-		}()
-
-		err = runSynced(&c.lock, func() error {
+	kube.RetryUntilSucceed(func() error {
+		err := runSynced(&c.lock, func() error {
 			if info.resourceVersion == "" {
 				listPager := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 					res, err := list(resClient, opts)
@@ -429,7 +422,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 					return res, err
 				})
 				var items []unstructured.Unstructured
-				err = listPager.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
+				err := listPager.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
 					if un, ok := obj.(*unstructured.Unstructured); !ok {
 						return fmt.Errorf("object %s/%s has an unexpected type", un.GroupVersionKind().String(), un.GetName())
 					} else {
@@ -521,7 +514,7 @@ func (c *clusterCache) processApi(client dynamic.Interface, api kube.APIResource
 	return nil
 }
 
-func (c *clusterCache) sync() (err error) {
+func (c *clusterCache) sync() error {
 	c.log.Info("Start syncing cluster")
 
 	for i := range c.apisMeta {
@@ -574,7 +567,7 @@ func (c *clusterCache) sync() (err error) {
 				return res, err
 			})
 
-			err = listPager.EachListItem(context.Background(), metav1.ListOptions{}, func(obj runtime.Object) error {
+			err := listPager.EachListItem(context.Background(), metav1.ListOptions{}, func(obj runtime.Object) error {
 				if un, ok := obj.(*unstructured.Unstructured); !ok {
 					return fmt.Errorf("object %s/%s has an unexpected type", un.GroupVersionKind().String(), un.GetName())
 				} else {
@@ -631,6 +624,7 @@ func (c *clusterCache) GetNamespaceTopLevelResources(namespace string) map[kube.
 	defer c.lock.RUnlock()
 	resources := make(map[kube.ResourceKey]*Resource)
 	for _, res := range c.nsIndex[namespace] {
+		res := res
 		if len(res.OwnerRefs) == 0 {
 			resources[res.ResourceKey()] = res
 		}
@@ -647,6 +641,7 @@ func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(resour
 		action(res, nsNodes)
 		childrenByUID := make(map[types.UID][]*Resource)
 		for _, child := range nsNodes {
+			child := child
 			if res.isParentOf(child) {
 				childrenByUID[child.Ref.UID] = append(childrenByUID[child.Ref.UID], child)
 			}
