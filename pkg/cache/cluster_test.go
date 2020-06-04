@@ -119,7 +119,7 @@ func newCluster(objs ...*unstructured.Unstructured) *clusterCache {
 
 func getChildren(cluster *clusterCache, un *unstructured.Unstructured) []*Resource {
 	hierarchy := make([]*Resource, 0)
-	cluster.IterateHierarchy(kube.GetResourceKey(un), func(child *Resource, _ map[kube.ResourceKey]*Resource) {
+	cluster.IterateHierarchy(kube.GetResourceKey(un), func(child *Resource, _ *Resources) {
 		hierarchy = append(hierarchy, child)
 	})
 	return hierarchy[1:]
@@ -200,13 +200,22 @@ func TestGetNamespaceResources(t *testing.T) {
 	assert.Nil(t, err)
 
 	resources := cluster.GetNamespaceTopLevelResources("default")
-	assert.Len(t, resources, 2)
-	assert.Equal(t, resources[kube.GetResourceKey(defaultNamespaceTopLevel1)].Ref.Name, "helm-guestbook1")
-	assert.Equal(t, resources[kube.GetResourceKey(defaultNamespaceTopLevel2)].Ref.Name, "helm-guestbook2")
+	assert.Equal(t, resources.Length(), 2)
+
+	default1, err := resources.LoadResources(kube.GetResourceKey(defaultNamespaceTopLevel1))
+	assert.Nil(t, err)
+	assert.Equal(t, default1.Ref.Name, "helm-guestbook1")
+
+	default2, err := resources.LoadResources(kube.GetResourceKey(defaultNamespaceTopLevel2))
+	assert.Nil(t, err)
+	assert.Equal(t, default2.Ref.Name, "helm-guestbook2")
 
 	resources = cluster.GetNamespaceTopLevelResources("kube-system")
-	assert.Len(t, resources, 1)
-	assert.Equal(t, resources[kube.GetResourceKey(kubesystemNamespaceTopLevel2)].Ref.Name, "helm-guestbook3")
+	assert.Equal(t, resources.Length(), 1)
+
+	system2, err := resources.LoadResources(kube.GetResourceKey(kubesystemNamespaceTopLevel2))
+	assert.Nil(t, err)
+	assert.Equal(t, system2.Ref.Name, "helm-guestbook3")
 }
 
 func TestGetChildren(t *testing.T) {
@@ -433,11 +442,19 @@ func ExampleNewClusterCache_inspectNamespaceResources() {
 		panic(err)
 	}
 	// Iterate default namespace resources tree
-	for _, root := range clusterCache.GetNamespaceTopLevelResources("default") {
-		clusterCache.IterateHierarchy(root.ResourceKey(), func(resource *Resource, _ map[kube.ResourceKey]*Resource) {
+	res := clusterCache.GetNamespaceTopLevelResources("default")
+	res.Range(func(key, value interface{}) bool {
+		root, ok := value.(*Resource)
+		if !ok {
+			return false
+		}
+
+		clusterCache.IterateHierarchy(root.ResourceKey(), func(resource *Resource, _ *Resources) {
 			println(fmt.Sprintf("resource: %s, info: %v", resource.Ref.String(), resource.Info))
 		})
-	}
+
+		return true
+	})
 }
 
 func ExampleNewClusterCache_resourceUpdatedEvents() {
@@ -449,7 +466,7 @@ func ExampleNewClusterCache_resourceUpdatedEvents() {
 	if err := clusterCache.EnsureSynced(); err != nil {
 		panic(err)
 	}
-	unsubscribe := clusterCache.OnResourceUpdated(func(newRes *Resource, oldRes *Resource, _ map[kube.ResourceKey]*Resource) {
+	unsubscribe := clusterCache.OnResourceUpdated(func(newRes *Resource, oldRes *Resource, _ *Resources) {
 		if newRes == nil {
 			println(fmt.Sprintf("%s deleted", oldRes.Ref.String()))
 		} else if oldRes == nil {

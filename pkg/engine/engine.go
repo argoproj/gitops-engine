@@ -89,7 +89,7 @@ func (e *gitOpsEngine) Sync(ctx context.Context,
 	}
 
 	resUpdated := make(chan bool)
-	unsubscribe := e.cache.OnResourceUpdated(func(newRes *cache.Resource, oldRes *cache.Resource, namespaceResources map[kube.ResourceKey]*cache.Resource) {
+	unsubscribe := e.cache.OnResourceUpdated(func(newRes *cache.Resource, oldRes *cache.Resource, namespaceResources *cache.Resources) {
 		var key kube.ResourceKey
 		if newRes != nil {
 			key = newRes.ResourceKey()

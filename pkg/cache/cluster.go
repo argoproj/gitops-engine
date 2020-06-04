@@ -90,7 +90,7 @@ type OnEventHandler func(event watch.EventType, un *unstructured.Unstructured)
 type OnPopulateResourceInfoHandler func(un *unstructured.Unstructured, isRoot bool) (info interface{}, cacheManifest bool)
 
 // OnResourceUpdatedHandler handlers resource update event
-type OnResourceUpdatedHandler func(newRes *Resource, oldRes *Resource, namespaceResources map[kube.ResourceKey]*Resource)
+type OnResourceUpdatedHandler func(newRes *Resource, oldRes *Resource, namespaceResources *Resources)
 type Unsubscribe func()
 
 type ClusterCache interface {
@@ -103,9 +103,9 @@ type ClusterCache interface {
 	// Invalidate cache and executes callback that optionally might update cache settings
 	Invalidate(opts ...UpdateSettingsFunc)
 	// GetNamespaceTopLevelResources returns top level resources in the specified namespace
-	GetNamespaceTopLevelResources(namespace string) map[kube.ResourceKey]*Resource
+	GetNamespaceTopLevelResources(namespace string) *Resources
 	// IterateHierarchy iterates resource tree starting from the specified top level resource and executes callback for each resource in the tree
-	IterateHierarchy(key kube.ResourceKey, action func(resource *Resource, namespaceResources map[kube.ResourceKey]*Resource))
+	IterateHierarchy(key kube.ResourceKey, action func(resource *Resource, namespaceResources *Resources))
 	// IsNamespaced answers if specified group/kind is a namespaced resource API or not
 	IsNamespaced(gk schema.GroupKind) (bool, error)
 	// GetManagedLiveObjs helps finding matching live K8S resources for a given resources list.
@@ -125,8 +125,8 @@ func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCa
 	cache := &clusterCache{
 		settings:                Settings{ResourceHealthOverride: &noopSettings{}, ResourcesFilter: &noopSettings{}},
 		apisMeta:                sync.Map{},
-		resources:               resources{},
-		nsIndex:                 make(map[string]map[kube.ResourceKey]*Resource),
+		resources:               Resources{},
+		nsIndex:                 sync.Map{},
 		config:                  config,
 		kubectl:                 &kube.KubectlCmd{},
 		syncTime:                nil,
@@ -140,37 +140,37 @@ func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCa
 	return cache
 }
 
-type resources struct {
+type Resources struct {
 	sync.Map
 }
 
-func (r *resources) StoreResources(key kube.ResourceKey, value *Resource) {
+func (r *Resources) StoreResources(key kube.ResourceKey, value *Resource) {
 	r.Store(key, value)
 }
 
-func (r *resources) LoadResources(key kube.ResourceKey) (*Resource, error) {
+func (r *Resources) LoadResources(key kube.ResourceKey) (*Resource, error) {
 	v, ok := r.Load(key)
 	if !ok {
-		return nil, fmt.Errorf("not found key: %s in resources map", key.String())
+		return nil, fmt.Errorf("not found key: %s in Resources map", key.String())
 	}
 
 	res, ok := v.(*Resource)
 	if !ok {
-		return nil, fmt.Errorf("stored type is invalid in resources map")
+		return nil, fmt.Errorf("stored type is invalid in Resources map")
 	}
 
 	if res == nil {
-		return nil, fmt.Errorf("stored type is nil in resources map")
+		return nil, fmt.Errorf("stored type is nil in Resources map")
 	}
 
 	return res, nil
 }
 
-func (r *resources) DeleteResources(key kube.ResourceKey) {
+func (r *Resources) DeleteResources(key kube.ResourceKey) {
 	r.Delete(key)
 }
 
-func (r *resources) Length() int {
+func (r *Resources) Length() int {
 	var cnt int
 	r.Range(func(key, value interface{}) bool {
 		cnt++
@@ -189,10 +189,9 @@ type clusterCache struct {
 	namespacedResources map[schema.GroupKind]bool
 
 	// lock is a rw lock which protects the fields of clusterInfo
-	lock        sync.RWMutex
-	resources   resources
-	nsIndex     map[string]map[kube.ResourceKey]*Resource
-	nsIndexSync sync.Map
+	lock      sync.RWMutex
+	resources Resources
+	nsIndex   sync.Map
 
 	kubectl    kube.Kubectl
 	log        *log.Entry
@@ -241,17 +240,17 @@ func (c *clusterCache) ApisMetaLength() int {
 	return cnt
 }
 
-func (c *clusterCache) StoreNsIndex(key string, value map[kube.ResourceKey]*Resource) {
-	c.nsIndexSync.Store(key, value)
+func (c *clusterCache) StoreNsIndex(key string, value *Resources) {
+	c.nsIndex.Store(key, value)
 }
 
-func (c *clusterCache) LoadNsIndex(key string) (map[kube.ResourceKey]*Resource, error) {
-	v, ok := c.nsIndexSync.Load(key)
+func (c *clusterCache) LoadNsIndex(key string) (*Resources, error) {
+	v, ok := c.nsIndex.Load(key)
 	if !ok {
 		return nil, fmt.Errorf("not found key: %s in nsIndex map", key)
 	}
 
-	res, ok := v.(map[kube.ResourceKey]*Resource)
+	res, ok := v.(*Resources)
 	if !ok {
 		return nil, fmt.Errorf("stored type is invalid in nsIndex map")
 	}
@@ -264,7 +263,7 @@ func (c *clusterCache) LoadNsIndex(key string) (map[kube.ResourceKey]*Resource, 
 }
 
 func (c *clusterCache) DeleteNsIndex(key string) {
-	c.nsIndexSync.Delete(key)
+	c.nsIndex.Delete(key)
 }
 
 // OnResourceUpdated register event handler that is executed every time when resource get's updated in the cache
@@ -448,12 +447,12 @@ func (c *clusterCache) newResource(un *unstructured.Unstructured) *Resource {
 func (c *clusterCache) setNode(n *Resource) {
 	key := n.ResourceKey()
 	c.resources.StoreResources(key, n)
-	ns, ok := c.nsIndex[key.Namespace]
-	if !ok {
-		ns = make(map[kube.ResourceKey]*Resource)
-		c.nsIndex[key.Namespace] = ns
+	ns, _ := c.LoadNsIndex(key.Namespace)
+	if ns == nil {
+		ns = &Resources{}
+		c.StoreNsIndex(key.Namespace, ns)
 	}
-	ns[key] = n
+	ns.StoreResources(key, n)
 }
 
 // Invalidate cache and executes callback that optionally might update cache settings
@@ -667,7 +666,7 @@ func (c *clusterCache) sync() error {
 	})
 
 	c.apisMeta = sync.Map{}
-	c.resources = resources{}
+	c.resources = Resources{}
 	c.namespacedResources = make(map[schema.GroupKind]bool)
 	config := c.config
 	version, err := c.kubectl.GetServerVersion(config)
@@ -765,34 +764,54 @@ func (c *clusterCache) EnsureSynced() error {
 }
 
 // GetNamespaceTopLevelResources returns top level resources in the specified namespace
-func (c *clusterCache) GetNamespaceTopLevelResources(namespace string) map[kube.ResourceKey]*Resource {
+func (c *clusterCache) GetNamespaceTopLevelResources(namespace string) *Resources {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
-	resources := make(map[kube.ResourceKey]*Resource)
-	for _, res := range c.nsIndex[namespace] {
-		res := res
-		if len(res.OwnerRefs) == 0 {
-			resources[res.ResourceKey()] = res
+	res, _ := c.LoadNsIndex(namespace)
+	res.Range(func(key, value interface{}) bool {
+		k, ok := key.(kube.ResourceKey)
+		if !ok {
+			return false
 		}
-	}
-	return resources
+
+		r, ok := value.(*Resource)
+		if !ok {
+			return false
+		}
+
+		if len(r.OwnerRefs) == 0 {
+			res.StoreResources(k, r)
+		}
+
+		return true
+	})
+
+	return res
 }
 
 // IterateHierarchy iterates resource tree starting from the specified top level resource and executes callback for each resource in the tree
-func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(resource *Resource, namespaceResources map[kube.ResourceKey]*Resource)) {
+func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(resource *Resource, namespaceResources *Resources)) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	res, _ := c.resources.LoadResources(key)
 	if res != nil {
-		nsNodes := c.nsIndex[key.Namespace]
+		nsNodes, _ := c.LoadNsIndex(key.Namespace)
 		action(res, nsNodes)
 		childrenByUID := make(map[types.UID][]*Resource)
-		for _, child := range nsNodes {
-			child := child
+
+		nsNodes.Range(func(key, value interface{}) bool {
+			child, ok := value.(*Resource)
+			if !ok {
+				return false
+			}
+
 			if res.isParentOf(child) {
 				childrenByUID[child.Ref.UID] = append(childrenByUID[child.Ref.UID], child)
 			}
-		}
+
+			return true
+		})
+
 		// make sure children has no duplicates
 		for _, children := range childrenByUID {
 			if len(children) > 0 {
@@ -832,13 +851,13 @@ func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructure
 	c.resources.Range(func(key, value interface{}) bool {
 		k, ok := key.(kube.ResourceKey)
 		if !ok {
-			err = fmt.Errorf("stored type is invalid in resources map")
+			err = fmt.Errorf("stored type is invalid in Resources map")
 			return false
 		}
 
 		r, ok := value.(*Resource)
 		if !ok {
-			err = fmt.Errorf("stored type is invalid in resources map")
+			err = fmt.Errorf("stored type is invalid in Resources map")
 			return false
 		}
 
@@ -950,7 +969,8 @@ func (c *clusterCache) onNodeUpdated(oldRes *Resource, un *unstructured.Unstruct
 	newRes := c.newResource(un)
 	c.setNode(newRes)
 	for _, h := range c.getResourceUpdatedHandlers() {
-		h(newRes, oldRes, c.nsIndex[newRes.Ref.Namespace])
+		r, _ := c.LoadNsIndex(newRes.Ref.Namespace)
+		h(newRes, oldRes, r)
 	}
 }
 
@@ -961,11 +981,15 @@ func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) error {
 	}
 	if existing != nil {
 		c.resources.DeleteResources(key)
-		ns, ok := c.nsIndex[key.Namespace]
-		if ok {
-			delete(ns, key)
-			if len(ns) == 0 {
-				delete(c.nsIndex, key.Namespace)
+		ns, err := c.LoadNsIndex(key.Namespace)
+		if err != nil {
+			return err
+		}
+
+		if ns != nil {
+			ns.DeleteResources(key)
+			if ns.Length() == 0 {
+				c.DeleteNsIndex(key.Namespace)
 			}
 		}
 		for _, h := range c.getResourceUpdatedHandlers() {
