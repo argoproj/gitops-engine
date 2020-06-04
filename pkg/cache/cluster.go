@@ -201,8 +201,6 @@ type clusterCache struct {
 	// namespacedResources is a simple map which indicates a groupKind is namespaced
 	namespacedResources map[schema.GroupKind]bool
 
-	// lock is a rw lock which protects the fields of clusterInfo
-	lock      sync.RWMutex
 	resources Resources
 	nsIndex   sync.Map
 
@@ -309,8 +307,8 @@ func (c *clusterCache) OnEvent(handler OnEventHandler) Unsubscribe {
 	key := atomic.AddUint64(&handlerKey, 1)
 	c.eventHandlers[key] = handler
 	return func() {
-		c.lock.Lock()
-		defer c.lock.Unlock()
+		c.handlersLock.Lock()
+		defer c.handlersLock.Unlock()
 		delete(c.eventHandlers, key)
 	}
 }
@@ -470,8 +468,6 @@ func (c *clusterCache) setNode(n *Resource) {
 
 // Invalidate cache and executes callback that optionally might update cache settings
 func (c *clusterCache) Invalidate(opts ...UpdateSettingsFunc) {
-	c.lock.Lock()
-	defer c.lock.Unlock()
 	c.syncTime = nil
 	c.apisMeta.Range(func(key, value interface{}) bool {
 		meta, ok := value.(*apiMeta)
@@ -501,8 +497,6 @@ func (c *clusterCache) synced() bool {
 }
 
 func (c *clusterCache) stopWatching(gk schema.GroupKind, ns string) error {
-	c.lock.Lock()
-	defer c.lock.Unlock()
 	info, err := c.LoadApisMeta(gk)
 	if err != nil {
 		return err
@@ -550,15 +544,13 @@ func (c *clusterCache) startMissingWatches() error {
 	return nil
 }
 
-func runSynced(lock sync.Locker, action func() error) error {
-	lock.Lock()
-	defer lock.Unlock()
+func runSynced(action func() error) error {
 	return action()
 }
 
 func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo, info *apiMeta, resClient dynamic.ResourceInterface, ns string) {
 	kube.RetryUntilSucceed(func() error {
-		err := runSynced(&c.lock, func() error {
+		err := runSynced(func() error {
 			if info.GetResourceVersion() == "" {
 				listPager := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 					res, err := list(resClient, opts)
@@ -629,7 +621,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 								}
 							}
 						} else {
-							err = runSynced(&c.lock, func() error {
+							err = runSynced(func() error {
 								return c.startMissingWatches()
 							})
 
@@ -727,9 +719,7 @@ func (c *clusterCache) sync() error {
 				if un, ok := obj.(*unstructured.Unstructured); !ok {
 					return fmt.Errorf("object %s/%s has an unexpected type", un.GroupVersionKind().String(), un.GetName())
 				} else {
-					lock.Lock()
 					c.setNode(c.newResource(un))
-					lock.Unlock()
 				}
 				return nil
 			})
@@ -760,8 +750,6 @@ func (c *clusterCache) EnsureSynced() error {
 		return c.syncError
 	}
 
-	c.lock.Lock()
-	defer c.lock.Unlock()
 	// before doing any work, check once again now that we have the lock, to see if it got
 	// synced between the first check and now
 	if c.synced() {
@@ -776,8 +764,6 @@ func (c *clusterCache) EnsureSynced() error {
 
 // GetNamespaceTopLevelResources returns top level resources in the specified namespace
 func (c *clusterCache) GetNamespaceTopLevelResources(namespace string) *Resources {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
 	res, _ := c.LoadNsIndex(namespace)
 	res.Range(func(key, value interface{}) bool {
 		k, ok := key.(kube.ResourceKey)
@@ -802,8 +788,6 @@ func (c *clusterCache) GetNamespaceTopLevelResources(namespace string) *Resource
 
 // IterateHierarchy iterates resource tree starting from the specified top level resource and executes callback for each resource in the tree
 func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(resource *Resource, namespaceResources *Resources)) {
-	c.lock.Lock()
-	defer c.lock.Unlock()
 	res, _ := c.resources.LoadResources(key)
 	if res != nil {
 		nsNodes, _ := c.LoadNsIndex(key.Namespace)
@@ -853,9 +837,6 @@ func (c *clusterCache) IsNamespaced(gk schema.GroupKind) (bool, error) {
 // The function returns all resources from cache for those `isManaged` function returns true and resources
 // specified in targetObjs list.
 func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructured, isManaged func(r *Resource) bool) (map[kube.ResourceKey]*unstructured.Unstructured, error) {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
-
 	managedObjs := make(map[kube.ResourceKey]*unstructured.Unstructured)
 	// iterate all objects in live state cache to find ones associated with app
 	var err error
@@ -964,8 +945,6 @@ func (c *clusterCache) processEvent(event watch.EventType, un *unstructured.Unst
 		return
 	}
 
-	c.lock.Lock()
-	defer c.lock.Unlock()
 	existingNode, _ := c.resources.LoadResources(key)
 	if event == watch.Deleted {
 		if existingNode != nil {
@@ -1019,8 +998,6 @@ var (
 
 // GetClusterInfo returns cluster cache statistics
 func (c *clusterCache) GetClusterInfo() ClusterInfo {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
 	return ClusterInfo{
 		APIsCount:         c.ApisMetaLength(),
 		K8SVersion:        c.serverVersion,
