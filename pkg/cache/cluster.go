@@ -125,7 +125,7 @@ func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCa
 	cache := &clusterCache{
 		settings:                Settings{ResourceHealthOverride: &noopSettings{}, ResourcesFilter: &noopSettings{}},
 		apisMeta:                sync.Map{},
-		resources:               sync.Map{},
+		resources:               resources{},
 		nsIndex:                 make(map[string]map[kube.ResourceKey]*Resource),
 		config:                  config,
 		kubectl:                 &kube.KubectlCmd{},
@@ -140,6 +140,45 @@ func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCa
 	return cache
 }
 
+type resources struct {
+	sync.Map
+}
+
+func (r *resources) StoreResources(key kube.ResourceKey, value *Resource) {
+	r.Store(key, value)
+}
+
+func (r *resources) LoadResources(key kube.ResourceKey) (*Resource, error) {
+	v, ok := r.Load(key)
+	if !ok {
+		return nil, fmt.Errorf("not found key: %s in resources map", key.String())
+	}
+
+	res, ok := v.(*Resource)
+	if !ok {
+		return nil, fmt.Errorf("stored type is invalid in resources map")
+	}
+
+	if res == nil {
+		return nil, fmt.Errorf("stored type is nil in resources map")
+	}
+
+	return res, nil
+}
+
+func (r *resources) DeleteResources(key kube.ResourceKey) {
+	r.Delete(key)
+}
+
+func (r *resources) Length() int {
+	var cnt int
+	r.Range(func(key, value interface{}) bool {
+		cnt++
+		return true
+	})
+	return cnt
+}
+
 type clusterCache struct {
 	syncTime      *time.Time
 	syncError     error
@@ -150,9 +189,10 @@ type clusterCache struct {
 	namespacedResources map[schema.GroupKind]bool
 
 	// lock is a rw lock which protects the fields of clusterInfo
-	lock      sync.RWMutex
-	resources sync.Map
-	nsIndex   map[string]map[kube.ResourceKey]*Resource
+	lock        sync.RWMutex
+	resources   resources
+	nsIndex     map[string]map[kube.ResourceKey]*Resource
+	nsIndexSync sync.Map
 
 	kubectl    kube.Kubectl
 	log        *log.Entry
@@ -201,39 +241,30 @@ func (c *clusterCache) ApisMetaLength() int {
 	return cnt
 }
 
-func (c *clusterCache) StoreResources(key kube.ResourceKey, value *Resource) {
-	c.resources.Store(key, value)
+func (c *clusterCache) StoreNsIndex(key string, value map[kube.ResourceKey]*Resource) {
+	c.nsIndexSync.Store(key, value)
 }
 
-func (c *clusterCache) LoadResources(key kube.ResourceKey) (*Resource, error) {
-	v, ok := c.resources.Load(key)
+func (c *clusterCache) LoadNsIndex(key string) (map[kube.ResourceKey]*Resource, error) {
+	v, ok := c.nsIndexSync.Load(key)
 	if !ok {
-		return nil, fmt.Errorf("not found key: %s in resources map", key.String())
+		return nil, fmt.Errorf("not found key: %s in nsIndex map", key)
 	}
 
-	res, ok := v.(*Resource)
+	res, ok := v.(map[kube.ResourceKey]*Resource)
 	if !ok {
-		return nil, fmt.Errorf("stored type is invalid in resources map")
+		return nil, fmt.Errorf("stored type is invalid in nsIndex map")
 	}
 
 	if res == nil {
-		return nil, fmt.Errorf("stored type is nil in resources map")
+		return nil, fmt.Errorf("stored type is nil in nsIndex map")
 	}
 
 	return res, nil
 }
 
-func (c *clusterCache) DeleteResources(key kube.ResourceKey) {
-	c.resources.Delete(key)
-}
-
-func (c *clusterCache) ResourcesLength() int {
-	var cnt int
-	c.resources.Range(func(key, value interface{}) bool {
-		cnt++
-		return true
-	})
-	return cnt
+func (c *clusterCache) DeleteNsIndex(key string) {
+	c.nsIndexSync.Delete(key)
 }
 
 // OnResourceUpdated register event handler that is executed every time when resource get's updated in the cache
@@ -307,7 +338,7 @@ func (c *clusterCache) replaceResourceCache(gk schema.GroupKind, resourceVersion
 		for i := range objs {
 			obj := &objs[i]
 			key := kube.GetResourceKey(&objs[i])
-			res, _ := c.LoadResources(key)
+			res, _ := c.resources.LoadResources(key)
 			c.onNodeUpdated(res, obj)
 		}
 
@@ -416,7 +447,7 @@ func (c *clusterCache) newResource(un *unstructured.Unstructured) *Resource {
 
 func (c *clusterCache) setNode(n *Resource) {
 	key := n.ResourceKey()
-	c.StoreResources(key, n)
+	c.resources.StoreResources(key, n)
 	ns, ok := c.nsIndex[key.Namespace]
 	if !ok {
 		ns = make(map[kube.ResourceKey]*Resource)
@@ -636,7 +667,7 @@ func (c *clusterCache) sync() error {
 	})
 
 	c.apisMeta = sync.Map{}
-	c.resources = sync.Map{}
+	c.resources = resources{}
 	c.namespacedResources = make(map[schema.GroupKind]bool)
 	config := c.config
 	version, err := c.kubectl.GetServerVersion(config)
@@ -751,7 +782,7 @@ func (c *clusterCache) GetNamespaceTopLevelResources(namespace string) map[kube.
 func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(resource *Resource, namespaceResources map[kube.ResourceKey]*Resource)) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	res, _ := c.LoadResources(key)
+	res, _ := c.resources.LoadResources(key)
 	if res != nil {
 		nsNodes := c.nsIndex[key.Namespace]
 		action(res, nsNodes)
@@ -831,7 +862,7 @@ func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructure
 		lock.Unlock()
 
 		if managedObj == nil {
-			existingObj, err := c.LoadResources(key)
+			existingObj, err := c.resources.LoadResources(key)
 			if err != nil {
 				return err
 			}
@@ -905,7 +936,7 @@ func (c *clusterCache) processEvent(event watch.EventType, un *unstructured.Unst
 
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	existingNode, _ := c.LoadResources(key)
+	existingNode, _ := c.resources.LoadResources(key)
 	if event == watch.Deleted {
 		if existingNode != nil {
 			_ = c.onNodeRemoved(key)
@@ -924,12 +955,12 @@ func (c *clusterCache) onNodeUpdated(oldRes *Resource, un *unstructured.Unstruct
 }
 
 func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) error {
-	existing, err := c.LoadResources(key)
+	existing, err := c.resources.LoadResources(key)
 	if err != nil {
 		return err
 	}
 	if existing != nil {
-		c.DeleteResources(key)
+		c.resources.DeleteResources(key)
 		ns, ok := c.nsIndex[key.Namespace]
 		if ok {
 			delete(ns, key)
@@ -958,7 +989,7 @@ func (c *clusterCache) GetClusterInfo() ClusterInfo {
 	return ClusterInfo{
 		APIsCount:         c.ApisMetaLength(),
 		K8SVersion:        c.serverVersion,
-		ResourcesCount:    c.ResourcesLength(),
+		ResourcesCount:    c.resources.Length(),
 		Server:            c.config.Host,
 		LastCacheSyncTime: c.syncTime,
 		SyncError:         c.syncError,

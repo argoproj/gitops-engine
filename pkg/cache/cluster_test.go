@@ -141,7 +141,7 @@ func TestEnsureSynced(t *testing.T) {
 	err := cluster.EnsureSynced()
 	assert.Nil(t, err)
 
-	assert.Equal(t, cluster.ResourcesLength(), 2)
+	assert.Equal(t, cluster.resources.Length(), 2)
 	var names []string
 	cluster.resources.Range(func(key, value interface{}) bool {
 		k, _ := key.(kube.ResourceKey)
@@ -168,7 +168,7 @@ func TestEnsureSyncedSingleNamespace(t *testing.T) {
 	err := cluster.EnsureSynced()
 	assert.Nil(t, err)
 
-	assert.Equal(t, cluster.ResourcesLength(), 1)
+	assert.Equal(t, cluster.resources.Length(), 1)
 	var names []string
 	cluster.resources.Range(func(key, value interface{}) bool {
 		k, _ := key.(kube.ResourceKey)
