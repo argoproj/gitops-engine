@@ -692,10 +692,10 @@ var operationPhases = map[common.ResultCode]common.OperationPhase{
 }
 
 // tri-state
-type runState = int
+type runState int
 
 const (
-	successful = iota
+	successful runState = iota
 	pending
 	failed
 )
