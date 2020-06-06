@@ -810,7 +810,7 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 
 	sc.log.WithFields(log.Fields{"numTasks": len(tasks), "dryRun": dryRun}).Debug("running tasks")
 
-	runState := successful
+	state := successful
 	var createTasks syncTasks
 	var pruneTasks syncTasks
 
@@ -823,34 +823,33 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 	}
 	// prune first
 	{
-		var wg sync.WaitGroup
+		ss := newStateSync(state)
 		for _, task := range pruneTasks {
-			wg.Add(1)
-			go func(t *syncTask) {
-				defer wg.Done()
+			t := task
+			ss.Go(func(state runState) runState {
 				logCtx := sc.log.WithFields(log.Fields{"dryRun": dryRun, "task": t})
 				logCtx.Debug("pruning")
 				result, message := sc.pruneObject(t.liveObj, sc.prune, dryRun)
 				if result == common.ResultCodeSyncFailed {
-					runState = failed
+					state = failed
 					logCtx.WithField("message", message).Info("pruning failed")
 				}
 				if !dryRun || sc.dryRun || result == common.ResultCodeSyncFailed {
 					sc.setResourceResult(t, result, operationPhases[result], message)
 				}
-			}(task)
+				return state
+			})
 		}
-		wg.Wait()
+		state = ss.Wait()
 	}
 
 	hooksPendingDeletion := createTasks.Filter(func(t *syncTask) bool { return t.deleteBeforeCreation() })
 	// delete anything that need deleting
-	if runState == successful && hooksPendingDeletion.Len() > 0 {
-		var wg sync.WaitGroup
+	if state == successful && hooksPendingDeletion.Len() > 0 {
+		ss := newStateSync(state)
 		for _, task := range hooksPendingDeletion {
-			wg.Add(1)
-			go func(t *syncTask) {
-				defer wg.Done()
+			t := task
+			ss.Go(func(state runState) runState {
 				sc.log.WithFields(log.Fields{"dryRun": dryRun, "task": t}).Debug("deleting")
 				if !dryRun {
 					err := sc.deleteResource(t)
@@ -858,44 +857,45 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 						// it is possible to get a race condition here, such that the resource does not exist when
 						// delete is requested, we treat this as a nop
 						if !apierr.IsNotFound(err) {
-							runState = failed
+							state = failed
 							sc.setResourceResult(t, "", common.OperationError, fmt.Sprintf("failed to delete resource: %v", err))
 						}
 					} else {
 						// if there is anything that needs deleting, we are at best now in pending and
 						// want to return and wait for sync to be invoked again
-						runState = pending
+						state = pending
 					}
 				}
-			}(task)
+				return state
+			})
 		}
-		wg.Wait()
+		state = ss.Wait()
 	}
 	// finally create resources
-	if runState == successful {
+	if state == successful {
 		processCreateTasks := func(tasks syncTasks) {
-			var createWg sync.WaitGroup
+			ss := newStateSync(state)
 			for _, task := range tasks {
 				if dryRun && task.skipDryRun {
 					continue
 				}
-				createWg.Add(1)
-				go func(t *syncTask) {
-					defer createWg.Done()
+				t := task
+				ss.Go(func(state runState) runState {
 					logCtx := sc.log.WithFields(log.Fields{"dryRun": dryRun, "task": t})
 					logCtx.Debug("applying")
 					validate := sc.validate && !resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionsDisableValidation)
 					result, message := sc.applyObject(t.targetObj, dryRun, sc.force, validate)
 					if result == common.ResultCodeSyncFailed {
 						logCtx.WithField("message", message).Info("apply failed")
-						runState = failed
+						state = failed
 					}
 					if !dryRun || sc.dryRun || result == common.ResultCodeSyncFailed {
 						sc.setResourceResult(t, result, operationPhases[result], message)
 					}
-				}(task)
+					return state
+				})
 			}
-			createWg.Wait()
+			state = ss.Wait()
 		}
 
 		var tasksGroup syncTasks
@@ -912,7 +912,7 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 			processCreateTasks(tasksGroup)
 		}
 	}
-	return runState
+	return state
 }
 
 // setResourceResult sets a resource details in the SyncResult.Resources list
@@ -961,4 +961,50 @@ func (sc *syncContext) setResourceResult(task *syncTask, syncStatus common.Resul
 
 func resourceResultKey(key kubeutil.ResourceKey, phase common.SyncPhase) string {
 	return fmt.Sprintf("%s:%s", key.String(), phase)
+}
+
+type stateSync struct {
+	wg           sync.WaitGroup
+	results      chan runState
+	currentState runState
+}
+
+func newStateSync(currentState runState) *stateSync {
+	return &stateSync{
+		results:      make(chan runState),
+		currentState: currentState,
+	}
+}
+
+func (s *stateSync) Go(f func(runState) runState) {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.results <- f(s.currentState)
+	}()
+}
+
+func (s *stateSync) Wait() runState {
+	go func() {
+		s.wg.Wait()
+		close(s.results)
+	}()
+	res := s.currentState
+	for result := range s.results {
+		switch res {
+		case failed:
+			// Terminal state, not moving anywhere
+		case pending:
+			// Can only move to failed
+			if result == failed {
+				res = failed
+			}
+		case successful:
+			switch result {
+			case pending, failed:
+				res = result
+			}
+		}
+	}
+	return res
 }
