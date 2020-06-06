@@ -843,9 +843,13 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 		state = ss.Wait()
 	}
 
-	hooksPendingDeletion := createTasks.Filter(func(t *syncTask) bool { return t.deleteBeforeCreation() })
+	if state != successful {
+		return state
+	}
+
 	// delete anything that need deleting
-	if state == successful && hooksPendingDeletion.Len() > 0 {
+	hooksPendingDeletion := createTasks.Filter(func(t *syncTask) bool { return t.deleteBeforeCreation() })
+	if hooksPendingDeletion.Len() > 0 {
 		ss := newStateSync(state)
 		for _, task := range hooksPendingDeletion {
 			t := task
@@ -871,48 +875,51 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 		}
 		state = ss.Wait()
 	}
-	// finally create resources
-	if state == successful {
-		processCreateTasks := func(tasks syncTasks) {
-			ss := newStateSync(state)
-			for _, task := range tasks {
-				if dryRun && task.skipDryRun {
-					continue
-				}
-				t := task
-				ss.Go(func(state runState) runState {
-					logCtx := sc.log.WithFields(log.Fields{"dryRun": dryRun, "task": t})
-					logCtx.Debug("applying")
-					validate := sc.validate && !resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionsDisableValidation)
-					result, message := sc.applyObject(t.targetObj, dryRun, sc.force, validate)
-					if result == common.ResultCodeSyncFailed {
-						logCtx.WithField("message", message).Info("apply failed")
-						state = failed
-					}
-					if !dryRun || sc.dryRun || result == common.ResultCodeSyncFailed {
-						sc.setResourceResult(t, result, operationPhases[result], message)
-					}
-					return state
-				})
-			}
-			state = ss.Wait()
-		}
 
-		var tasksGroup syncTasks
-		for _, task := range createTasks {
-			//Only wait if the type of the next task is different than the previous type
-			if len(tasksGroup) > 0 && tasksGroup[0].targetObj.GetKind() != task.kind() {
-				processCreateTasks(tasksGroup)
-				tasksGroup = syncTasks{task}
-			} else {
-				tasksGroup = append(tasksGroup, task)
-			}
-		}
-		if len(tasksGroup) > 0 {
-			processCreateTasks(tasksGroup)
+	if state != successful {
+		return state
+	}
+
+	// finally create resources
+	var tasksGroup syncTasks
+	for _, task := range createTasks {
+		//Only wait if the type of the next task is different than the previous type
+		if len(tasksGroup) > 0 && tasksGroup[0].targetObj.GetKind() != task.kind() {
+			state = sc.processCreateTasks(state, tasksGroup, dryRun)
+			tasksGroup = syncTasks{task}
+		} else {
+			tasksGroup = append(tasksGroup, task)
 		}
 	}
+	if len(tasksGroup) > 0 {
+		state = sc.processCreateTasks(state, tasksGroup, dryRun)
+	}
 	return state
+}
+
+func (sc *syncContext) processCreateTasks(state runState, tasks syncTasks, dryRun bool) runState {
+	ss := newStateSync(state)
+	for _, task := range tasks {
+		if dryRun && task.skipDryRun {
+			continue
+		}
+		t := task
+		ss.Go(func(state runState) runState {
+			logCtx := sc.log.WithFields(log.Fields{"dryRun": dryRun, "task": t})
+			logCtx.Debug("applying")
+			validate := sc.validate && !resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionsDisableValidation)
+			result, message := sc.applyObject(t.targetObj, dryRun, sc.force, validate)
+			if result == common.ResultCodeSyncFailed {
+				logCtx.WithField("message", message).Info("apply failed")
+				state = failed
+			}
+			if !dryRun || sc.dryRun || result == common.ResultCodeSyncFailed {
+				sc.setResourceResult(t, result, operationPhases[result], message)
+			}
+			return state
+		})
+	}
+	return ss.Wait()
 }
 
 // setResourceResult sets a resource details in the SyncResult.Resources list
