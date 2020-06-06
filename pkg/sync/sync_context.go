@@ -706,13 +706,11 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 
 	sc.log.WithFields(log.Fields{"numTasks": len(tasks), "dryRun": dryRun}).Debug("running tasks")
 
-	runState := successful
-	var runStateMutex sync.Mutex
+	state := successful
 	var createTasks syncTasks
 	var pruneTasks syncTasks
 
 	for _, task := range tasks {
-		task := task
 		if task.isPrune() {
 			pruneTasks = append(pruneTasks, task)
 		} else {
@@ -721,37 +719,32 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 	}
 	// prune first
 	{
-		var wg sync.WaitGroup
+		ss := newStateSync(state)
 		for _, task := range pruneTasks {
-			task := task
-			wg.Add(1)
-			go func(t *syncTask) {
-				defer wg.Done()
+			t := task
+			ss.Go(func(state runState) runState {
 				logCtx := sc.log.WithFields(log.Fields{"dryRun": dryRun, "task": t})
 				logCtx.Debug("pruning")
 				result, message := sc.pruneObject(t.liveObj, sc.prune, dryRun)
 				if result == common.ResultCodeSyncFailed {
-					runStateMutex.Lock()
-					runState = failed
-					runStateMutex.Unlock()
+					state = failed
 					logCtx.WithField("message", message).Info("pruning failed")
 				}
 				if !dryRun || sc.dryRun || result == common.ResultCodeSyncFailed {
 					sc.setResourceResult(t, result, operationPhases[result], message)
 				}
-			}(task)
+				return state
+			})
 		}
-		wg.Wait()
+		state = ss.Wait()
 	}
 
 	// delete anything that need deleting
-	if runState == successful && createTasks.Any(func(t *syncTask) bool { return t.needsDeleting() }) {
-		var wg sync.WaitGroup
+	if state == successful && createTasks.Any(func(t *syncTask) bool { return t.needsDeleting() }) {
+		ss := newStateSync(state)
 		for _, task := range createTasks.Filter(func(t *syncTask) bool { return t.needsDeleting() }) {
-			task := task
-			wg.Add(1)
-			go func(t *syncTask) {
-				defer wg.Done()
+			t := task
+			ss.Go(func(state runState) runState {
 				sc.log.WithFields(log.Fields{"dryRun": dryRun, "task": t}).Debug("deleting")
 				if !dryRun {
 					err := sc.deleteResource(t)
@@ -759,72 +752,62 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 						// it is possible to get a race condition here, such that the resource does not exist when
 						// delete is requested, we treat this as a nop
 						if !apierr.IsNotFound(err) {
-							runStateMutex.Lock()
-							runState = failed
-							runStateMutex.Unlock()
+							state = failed
 							sc.setResourceResult(t, "", common.OperationError, fmt.Sprintf("failed to delete resource: %v", err))
 						}
 					} else {
 						// if there is anything that needs deleting, we are at best now in pending and
 						// want to return and wait for sync to be invoked again
-						runStateMutex.Lock()
-						runState = pending
-						runStateMutex.Unlock()
+						state = pending
 					}
 				}
-			}(task)
+				return state
+			})
 		}
-		wg.Wait()
+		state = ss.Wait()
 	}
-
-	if runState != successful {
-		return runState
-	}
-
 	// finally create resources
-	processCreateTasks := func(tasks syncTasks) {
-		var createWg sync.WaitGroup
-		for _, task := range tasks {
-			task := task
-			if dryRun && task.skipDryRun {
-				continue
+	if state == successful {
+		processCreateTasks := func(tasks syncTasks) {
+			ss := newStateSync(state)
+			for _, task := range tasks {
+				if dryRun && task.skipDryRun {
+					continue
+				}
+				t := task
+				ss.Go(func(state runState) runState {
+					logCtx := sc.log.WithFields(log.Fields{"dryRun": dryRun, "task": t})
+					logCtx.Debug("applying")
+					validate := sc.validate && !resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionsDisableValidation)
+					result, message := sc.applyObject(t.targetObj, dryRun, sc.force, validate)
+					if result == common.ResultCodeSyncFailed {
+						logCtx.WithField("message", message).Info("apply failed")
+						state = failed
+					}
+					if !dryRun || sc.dryRun || result == common.ResultCodeSyncFailed {
+						sc.setResourceResult(t, result, operationPhases[result], message)
+					}
+					return state
+				})
 			}
-			createWg.Add(1)
-			go func(t *syncTask) {
-				defer createWg.Done()
-				logCtx := sc.log.WithFields(log.Fields{"dryRun": dryRun, "task": t})
-				logCtx.Debug("applying")
-				validate := sc.validate && !resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionsDisableValidation)
-				result, message := sc.applyObject(t.targetObj, dryRun, sc.force, validate)
-				if result == common.ResultCodeSyncFailed {
-					logCtx.WithField("message", message).Info("apply failed")
-					runStateMutex.Lock()
-					runState = failed
-					runStateMutex.Unlock()
-				}
-				if !dryRun || sc.dryRun || result == common.ResultCodeSyncFailed {
-					sc.setResourceResult(t, result, operationPhases[result], message)
-				}
-			}(task)
+			state = ss.Wait()
 		}
-		createWg.Wait()
-	}
 
-	var tasksGroup syncTasks
-	for _, task := range createTasks {
-		task := task
-		//Only wait if the type of the next task is different than the previous type
-		if len(tasksGroup) > 0 && tasksGroup[0].targetObj.GetKind() != task.kind() {
+		var tasksGroup syncTasks
+		for _, task := range createTasks {
+			//Only wait if the type of the next task is different than the previous type
+			if len(tasksGroup) > 0 && tasksGroup[0].targetObj.GetKind() != task.kind() {
+				processCreateTasks(tasksGroup)
+				tasksGroup = syncTasks{task}
+			} else {
+				tasksGroup = append(tasksGroup, task)
+			}
+		}
+		if len(tasksGroup) > 0 {
 			processCreateTasks(tasksGroup)
-			tasksGroup = syncTasks{task}
-		} else {
-			tasksGroup = append(tasksGroup, task)
 		}
 	}
-	if len(tasksGroup) > 0 {
-		processCreateTasks(tasksGroup)
-	}
-	return runState
+	return state
 }
 
 // setResourceResult sets a resource details in the SyncResult.Resources list
@@ -873,4 +856,50 @@ func (sc *syncContext) setResourceResult(task *syncTask, syncStatus common.Resul
 
 func resourceResultKey(key kubeutil.ResourceKey, phase common.SyncPhase) string {
 	return fmt.Sprintf("%s:%s", key.String(), phase)
+}
+
+type stateSync struct {
+	wg           sync.WaitGroup
+	results      chan runState
+	currentState runState
+}
+
+func newStateSync(currentState runState) *stateSync {
+	return &stateSync{
+		results:      make(chan runState),
+		currentState: currentState,
+	}
+}
+
+func (s *stateSync) Go(f func(runState) runState) {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.results <- f(s.currentState)
+	}()
+}
+
+func (s *stateSync) Wait() runState {
+	go func() {
+		s.wg.Wait()
+		close(s.results)
+	}()
+	res := s.currentState
+	for result := range s.results {
+		switch res {
+		case failed:
+			// Terminal state, not moving anywhere
+		case pending:
+			// Can only move to failed
+			if result == failed {
+				res = failed
+			}
+		case successful:
+			switch result {
+			case pending, failed:
+				res = result
+			}
+		}
+	}
+	return res
 }
