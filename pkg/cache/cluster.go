@@ -40,6 +40,7 @@ var (
 )
 
 // SetMaxConcurrentList set maximum number of concurrent K8S list calls.
+// If set to 0 then no limit is enforced.
 // Note: method is not thread safe. Use it during initialization before executing ClusterCache.EnsureSynced method.
 func SetMaxConcurrentList(val int64) {
 	if val > 0 {
