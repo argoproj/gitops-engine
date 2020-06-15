@@ -545,13 +545,9 @@ func (c *clusterCache) startMissingWatches() error {
 	return nil
 }
 
-func runSynced(action func() error) error {
-	return action()
-}
-
 func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo, info *apiMeta, resClient dynamic.ResourceInterface, ns string) {
 	kube.RetryUntilSucceed(func() error {
-		err := runSynced(func() error {
+		err := func() error {
 			version, err := info.LoadResourceVersion()
 			if err != nil {
 				return err
@@ -588,7 +584,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 				}
 			}
 			return nil
-		})
+		}()
 
 		if err != nil {
 			return err
@@ -638,10 +634,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 								}
 							}
 						} else {
-							err = runSynced(func() error {
-								return c.startMissingWatches()
-							})
-
+							err = c.startMissingWatches()
 						}
 					}
 					if err != nil {
