@@ -60,22 +60,23 @@ func list(resClient dynamic.ResourceInterface, opts metav1.ListOptions) (*unstru
 }
 
 type apiMeta struct {
-	lock            sync.Mutex
 	namespaced      bool
-	resourceVersion string
+	resourceVersion atomic.Value
 	watchCancel     context.CancelFunc
 }
 
-func (a *apiMeta) GetResourceVersion() string {
-	a.lock.Lock()
-	defer a.lock.Unlock()
-	return a.resourceVersion
+func (a *apiMeta) LoadResourceVersion() (string, error) {
+	v := a.resourceVersion.Load()
+	version, ok := v.(string)
+	if ok {
+		return version, nil
+	}
+
+	return "", fmt.Errorf("stored type is invalid in resourceVersion")
 }
 
-func (a *apiMeta) UpdateResourceVersion(new string) {
-	a.lock.Lock()
-	defer a.lock.Unlock()
-	a.resourceVersion = new
+func (a *apiMeta) StoreResourceVersion(resourceVersion string) {
+	a.resourceVersion.Store(resourceVersion)
 }
 
 // ClusterInfo holds cluster cache stats
@@ -376,7 +377,7 @@ func (c *clusterCache) replaceResourceCache(gk schema.GroupKind, resourceVersion
 		if err != nil {
 			return err
 		}
-		info.UpdateResourceVersion(resourceVersion)
+		info.StoreResourceVersion(resourceVersion)
 	}
 
 	return nil
@@ -551,11 +552,16 @@ func runSynced(action func() error) error {
 func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo, info *apiMeta, resClient dynamic.ResourceInterface, ns string) {
 	kube.RetryUntilSucceed(func() error {
 		err := runSynced(func() error {
-			if info.GetResourceVersion() == "" {
+			version, err := info.LoadResourceVersion()
+			if err != nil {
+				return err
+			}
+
+			if version == "" {
 				listPager := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 					res, err := list(resClient, opts)
 					if err == nil {
-						info.UpdateResourceVersion(res.GetResourceVersion())
+						info.StoreResourceVersion(res.GetResourceVersion())
 					}
 					return res, err
 				})
@@ -571,7 +577,13 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 				if err != nil {
 					return fmt.Errorf("failed to load initial state of resource %s: %v", api.GroupKind.String(), err)
 				}
-				if err := c.replaceResourceCache(api.GroupKind, info.GetResourceVersion(), items, ns); err != nil {
+
+				version, err := info.LoadResourceVersion()
+				if err != nil {
+					return err
+				}
+
+				if err := c.replaceResourceCache(api.GroupKind, version, items, ns); err != nil {
 					return err
 				}
 			}
@@ -582,7 +594,12 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 			return err
 		}
 
-		w, err := resClient.Watch(metav1.ListOptions{ResourceVersion: info.GetResourceVersion()})
+		version, err := info.LoadResourceVersion()
+		if err != nil {
+			return err
+		}
+
+		w, err := resClient.Watch(metav1.ListOptions{ResourceVersion: version})
 		if errors.IsNotFound(err) {
 			if err := c.stopWatching(api.GroupKind, ns); err != nil {
 				return err
@@ -591,7 +608,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 		}
 
 		if errors.IsGone(err) {
-			info.UpdateResourceVersion("")
+			info.StoreResourceVersion("")
 			c.log.Warnf("Resource version of %s is too old", api.GroupKind)
 		}
 
@@ -607,7 +624,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 			case event, ok := <-w.ResultChan():
 				if ok {
 					obj := event.Object.(*unstructured.Unstructured)
-					info.UpdateResourceVersion(obj.GetResourceVersion())
+					info.StoreResourceVersion(obj.GetResourceVersion())
 					c.processEvent(event.Type, obj)
 					if kube.IsCRD(obj) {
 						if event.Type == watch.Deleted {
@@ -710,7 +727,7 @@ func (c *clusterCache) sync() error {
 			listPager := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 				res, err := list(resClient, opts)
 				if err == nil {
-					info.UpdateResourceVersion(res.GetResourceVersion())
+					info.StoreResourceVersion(res.GetResourceVersion())
 				}
 				return res, err
 			})
