@@ -31,7 +31,8 @@ import (
 // Holds diffing settings
 type DiffOptions struct {
 	// If set to true then differences caused by aggregated roles in RBAC resources are ignored.
-	IgnoreAggregatedRoles bool `json:"ignoreAggregatedRoles,omitempty"`
+	IgnoreAggregatedRoles     bool   `json:"ignoreAggregatedRoles,omitempty"`
+	IgnoreResourceStatusField string `json:"ignoreResourceStatusField,omitempty"`
 }
 
 // Holds diffing result of two resources
