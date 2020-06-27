@@ -138,7 +138,7 @@ type ClusterCache interface {
 func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCache {
 	cache := &clusterCache{
 		settings:                Settings{ResourceHealthOverride: &noopSettings{}, ResourcesFilter: &noopSettings{}},
-		apisMeta:                sync.Map{},
+		apisMeta:                make(map[schema.GroupKind]*apiMeta),
 		resources:               Resources{},
 		nsIndex:                 sync.Map{},
 		config:                  config,
@@ -194,9 +194,12 @@ func (r *Resources) length() int {
 }
 
 type clusterCache struct {
-	syncTime      *time.Time
-	syncError     error
-	apisMeta      sync.Map
+	syncTime  *time.Time
+	syncError error
+
+	apisMeta      map[schema.GroupKind]*apiMeta
+	apisMetaMutex sync.Mutex
+
 	serverVersion string
 	apiGroups     []metav1.APIGroup
 	// namespacedResources is a simple map which indicates a groupKind is namespaced
@@ -218,38 +221,15 @@ type clusterCache struct {
 }
 
 func (c *clusterCache) storeApisMeta(key schema.GroupKind, value *apiMeta) {
-	c.apisMeta.Store(key, value)
-}
-
-func (c *clusterCache) loadApisMeta(key schema.GroupKind) (*apiMeta, error) {
-	v, ok := c.apisMeta.Load(key)
-	if !ok {
-		return nil, fmt.Errorf("not found key: %s in apiMeta map", key.String())
-	}
-
-	meta, ok := v.(*apiMeta)
-	if !ok {
-		return nil, fmt.Errorf("stored type is invalid in apiMeta map")
-	}
-
-	if meta == nil {
-		return nil, fmt.Errorf("stored type is nil in apiMeta map")
-	}
-
-	return meta, nil
+	c.apisMetaMutex.Lock()
+	defer c.apisMetaMutex.Unlock()
+	c.apisMeta[key] = value
 }
 
 func (c *clusterCache) deleteApisMeta(key schema.GroupKind) {
-	c.apisMeta.Delete(key)
-}
-
-func (c *clusterCache) apisMetaLength() int {
-	var cnt int
-	c.apisMeta.Range(func(key, value interface{}) bool {
-		cnt++
-		return true
-	})
-	return cnt
+	c.apisMetaMutex.Lock()
+	defer c.apisMetaMutex.Unlock()
+	delete(c.apisMeta, key)
 }
 
 func (c *clusterCache) storeNsIndex(key string, value *Resources) {
@@ -335,11 +315,8 @@ func (c *clusterCache) GetAPIGroups() []metav1.APIGroup {
 }
 
 func (c *clusterCache) replaceResourceCache(gk schema.GroupKind, resourceVersion string, objs []unstructured.Unstructured, ns string) error {
-	info, err := c.loadApisMeta(gk)
-	if err != nil {
-		return err
-	}
-	if info != nil {
+	info, ok := c.apisMeta[gk]
+	if ok {
 		objByKey := make(map[kube.ResourceKey]*unstructured.Unstructured)
 		for i := range objs {
 			objByKey[kube.GetResourceKey(&objs[i])] = &objs[i]
@@ -470,18 +447,13 @@ func (c *clusterCache) setNode(n *Resource) {
 // Invalidate cache and executes callback that optionally might update cache settings
 func (c *clusterCache) Invalidate(opts ...UpdateSettingsFunc) {
 	c.syncTime = nil
-	c.apisMeta.Range(func(key, value interface{}) bool {
-		meta, ok := value.(*apiMeta)
-		if !ok {
-			c.log.Warnf("stored type is invalid in apiMeta map")
-		}
-		meta.watchCancel()
-		return true
-	})
+	for i := range c.apisMeta {
+		c.apisMeta[i].watchCancel()
+	}
 	for i := range opts {
 		opts[i](c)
 	}
-	c.apisMeta = sync.Map{}
+	c.apisMeta = nil
 	c.namespacedResources = nil
 	c.log.Warnf("invalidated cluster")
 }
@@ -497,20 +469,13 @@ func (c *clusterCache) synced() bool {
 	return time.Now().Before(syncTime.Add(clusterSyncTimeout))
 }
 
-func (c *clusterCache) stopWatching(gk schema.GroupKind, ns string) error {
-	info, err := c.loadApisMeta(gk)
-	if err != nil {
-		return err
+func (c *clusterCache) stopWatching(gk schema.GroupKind, ns string) {
+	if info, ok := c.apisMeta[gk]; ok {
+		info.watchCancel()
+		c.deleteApisMeta(gk)
+		_ = c.replaceResourceCache(gk, "", []unstructured.Unstructured{}, ns)
+		c.log.Warnf("Stop watching: %s not found", gk)
 	}
-
-	info.watchCancel()
-	c.deleteApisMeta(gk)
-	if err := c.replaceResourceCache(gk, "", []unstructured.Unstructured{}, ns); err != nil {
-		return err
-	}
-	c.log.Warnf("Stop watching: %s not found", gk)
-
-	return nil
 }
 
 // startMissingWatches lists supported cluster resources and start watching for changes unless watch is already running
@@ -527,10 +492,10 @@ func (c *clusterCache) startMissingWatches() error {
 	for i := range apis {
 		api := apis[i]
 		namespacedResources[api.GroupKind] = api.Meta.Namespaced
-		if _, ok := c.apisMeta.Load(api.GroupKind); !ok {
+		if _, ok := c.apisMeta[api.GroupKind]; !ok {
 			ctx, cancel := context.WithCancel(context.Background())
 			info := &apiMeta{namespaced: api.Meta.Namespaced, watchCancel: cancel}
-			c.apisMeta.Store(api.GroupKind, info)
+			c.apisMeta[api.GroupKind] = info
 
 			err = c.processApi(client, api, func(resClient dynamic.ResourceInterface, ns string) error {
 				go c.watchEvents(ctx, api, info, resClient, ns)
@@ -597,9 +562,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 
 		w, err := resClient.Watch(metav1.ListOptions{ResourceVersion: version})
 		if errors.IsNotFound(err) {
-			if err := c.stopWatching(api.GroupKind, ns); err != nil {
-				return err
-			}
+			c.stopWatching(api.GroupKind, ns)
 			return nil
 		}
 
@@ -629,9 +592,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 
 							if groupOk && groupErr == nil && kindOk && kindErr == nil {
 								gk := schema.GroupKind{Group: group, Kind: kind}
-								if err := c.stopWatching(gk, ns); err != nil {
-									return err
-								}
+								c.stopWatching(gk, ns)
 							}
 						} else {
 							err = c.startMissingWatches()
@@ -671,16 +632,11 @@ func (c *clusterCache) processApi(client dynamic.Interface, api kube.APIResource
 func (c *clusterCache) sync() error {
 	c.log.Info("Start syncing cluster")
 
-	c.apisMeta.Range(func(key, value interface{}) bool {
-		meta, ok := value.(*apiMeta)
-		if !ok {
-			c.log.Warnf("stored type is invalid in apiMeta map")
-		}
-		meta.watchCancel()
-		return true
-	})
+	for i := range c.apisMeta {
+		c.apisMeta[i].watchCancel()
+	}
 
-	c.apisMeta = sync.Map{}
+	c.apisMeta = make(map[schema.GroupKind]*apiMeta)
 	c.resources = Resources{}
 	c.namespacedResources = make(map[schema.GroupKind]bool)
 	config := c.config
@@ -900,20 +856,14 @@ func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructure
 						return err
 					}
 				}
-			} else {
-				meta, err := c.loadApisMeta(key.GroupKind())
+			} else if _, watched := c.apisMeta[key.GroupKind()]; !watched {
+				var err error
+				managedObj, err = c.kubectl.GetResource(c.config, targetObj.GroupVersionKind(), targetObj.GetName(), targetObj.GetNamespace())
 				if err != nil {
-					return err
-				}
-				if meta == nil {
-					var err error
-					managedObj, err = c.kubectl.GetResource(c.config, targetObj.GroupVersionKind(), targetObj.GetName(), targetObj.GetNamespace())
-					if err != nil {
-						if errors.IsNotFound(err) {
-							return nil
-						}
-						return err
+					if errors.IsNotFound(err) {
+						return nil
 					}
+					return err
 				}
 			}
 		}
@@ -1009,7 +959,7 @@ var (
 // GetClusterInfo returns cluster cache statistics
 func (c *clusterCache) GetClusterInfo() ClusterInfo {
 	return ClusterInfo{
-		APIsCount:         c.apisMetaLength(),
+		APIsCount:         len(c.apisMeta),
 		K8SVersion:        c.serverVersion,
 		ResourcesCount:    c.resources.length(),
 		Server:            c.config.Host,
