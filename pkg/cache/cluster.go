@@ -65,7 +65,7 @@ type apiMeta struct {
 	watchCancel     context.CancelFunc
 }
 
-func (a *apiMeta) LoadResourceVersion() (string, error) {
+func (a *apiMeta) loadResourceVersion() (string, error) {
 	v := a.resourceVersion.Load()
 	version, ok := v.(string)
 	if ok {
@@ -75,7 +75,7 @@ func (a *apiMeta) LoadResourceVersion() (string, error) {
 	return "", fmt.Errorf("stored type is invalid in resourceVersion")
 }
 
-func (a *apiMeta) StoreResourceVersion(resourceVersion string) {
+func (a *apiMeta) storeResourceVersion(resourceVersion string) {
 	a.resourceVersion.Store(resourceVersion)
 }
 
@@ -158,11 +158,11 @@ type Resources struct {
 	sync.Map
 }
 
-func (r *Resources) StoreResources(key kube.ResourceKey, value *Resource) {
+func (r *Resources) storeResources(key kube.ResourceKey, value *Resource) {
 	r.Store(key, value)
 }
 
-func (r *Resources) LoadResources(key kube.ResourceKey) (*Resource, error) {
+func (r *Resources) loadResources(key kube.ResourceKey) (*Resource, error) {
 	v, ok := r.Load(key)
 	if !ok {
 		return nil, fmt.Errorf("not found key: %s in Resources map", key.String())
@@ -180,11 +180,11 @@ func (r *Resources) LoadResources(key kube.ResourceKey) (*Resource, error) {
 	return res, nil
 }
 
-func (r *Resources) DeleteResources(key kube.ResourceKey) {
+func (r *Resources) deleteResources(key kube.ResourceKey) {
 	r.Delete(key)
 }
 
-func (r *Resources) Length() int {
+func (r *Resources) length() int {
 	var cnt int
 	r.Range(func(key, value interface{}) bool {
 		cnt++
@@ -217,11 +217,11 @@ type clusterCache struct {
 	eventHandlers               map[uint64]OnEventHandler
 }
 
-func (c *clusterCache) StoreApisMeta(key schema.GroupKind, value *apiMeta) {
+func (c *clusterCache) storeApisMeta(key schema.GroupKind, value *apiMeta) {
 	c.apisMeta.Store(key, value)
 }
 
-func (c *clusterCache) LoadApisMeta(key schema.GroupKind) (*apiMeta, error) {
+func (c *clusterCache) loadApisMeta(key schema.GroupKind) (*apiMeta, error) {
 	v, ok := c.apisMeta.Load(key)
 	if !ok {
 		return nil, fmt.Errorf("not found key: %s in apiMeta map", key.String())
@@ -239,11 +239,11 @@ func (c *clusterCache) LoadApisMeta(key schema.GroupKind) (*apiMeta, error) {
 	return meta, nil
 }
 
-func (c *clusterCache) DeleteApisMeta(key schema.GroupKind) {
+func (c *clusterCache) deleteApisMeta(key schema.GroupKind) {
 	c.apisMeta.Delete(key)
 }
 
-func (c *clusterCache) ApisMetaLength() int {
+func (c *clusterCache) apisMetaLength() int {
 	var cnt int
 	c.apisMeta.Range(func(key, value interface{}) bool {
 		cnt++
@@ -252,11 +252,11 @@ func (c *clusterCache) ApisMetaLength() int {
 	return cnt
 }
 
-func (c *clusterCache) StoreNsIndex(key string, value *Resources) {
+func (c *clusterCache) storeNsIndex(key string, value *Resources) {
 	c.nsIndex.Store(key, value)
 }
 
-func (c *clusterCache) LoadNsIndex(key string) (*Resources, error) {
+func (c *clusterCache) loadNsIndex(key string) (*Resources, error) {
 	v, ok := c.nsIndex.Load(key)
 	if !ok {
 		return nil, fmt.Errorf("not found key: %s in nsIndex map", key)
@@ -274,7 +274,7 @@ func (c *clusterCache) LoadNsIndex(key string) (*Resources, error) {
 	return res, nil
 }
 
-func (c *clusterCache) DeleteNsIndex(key string) {
+func (c *clusterCache) deleteNsIndex(key string) {
 	c.nsIndex.Delete(key)
 }
 
@@ -335,7 +335,7 @@ func (c *clusterCache) GetAPIGroups() []metav1.APIGroup {
 }
 
 func (c *clusterCache) replaceResourceCache(gk schema.GroupKind, resourceVersion string, objs []unstructured.Unstructured, ns string) error {
-	info, err := c.LoadApisMeta(gk)
+	info, err := c.loadApisMeta(gk)
 	if err != nil {
 		return err
 	}
@@ -349,7 +349,7 @@ func (c *clusterCache) replaceResourceCache(gk schema.GroupKind, resourceVersion
 		for i := range objs {
 			obj := &objs[i]
 			key := kube.GetResourceKey(&objs[i])
-			res, _ := c.resources.LoadResources(key)
+			res, _ := c.resources.loadResources(key)
 			c.onNodeUpdated(res, obj)
 		}
 
@@ -377,7 +377,7 @@ func (c *clusterCache) replaceResourceCache(gk schema.GroupKind, resourceVersion
 		if err != nil {
 			return err
 		}
-		info.StoreResourceVersion(resourceVersion)
+		info.storeResourceVersion(resourceVersion)
 	}
 
 	return nil
@@ -458,13 +458,13 @@ func (c *clusterCache) newResource(un *unstructured.Unstructured) *Resource {
 
 func (c *clusterCache) setNode(n *Resource) {
 	key := n.ResourceKey()
-	c.resources.StoreResources(key, n)
-	ns, _ := c.LoadNsIndex(key.Namespace)
+	c.resources.storeResources(key, n)
+	ns, _ := c.loadNsIndex(key.Namespace)
 	if ns == nil {
 		ns = &Resources{}
-		c.StoreNsIndex(key.Namespace, ns)
+		c.storeNsIndex(key.Namespace, ns)
 	}
-	ns.StoreResources(key, n)
+	ns.storeResources(key, n)
 }
 
 // Invalidate cache and executes callback that optionally might update cache settings
@@ -498,13 +498,13 @@ func (c *clusterCache) synced() bool {
 }
 
 func (c *clusterCache) stopWatching(gk schema.GroupKind, ns string) error {
-	info, err := c.LoadApisMeta(gk)
+	info, err := c.loadApisMeta(gk)
 	if err != nil {
 		return err
 	}
 
 	info.watchCancel()
-	c.DeleteApisMeta(gk)
+	c.deleteApisMeta(gk)
 	if err := c.replaceResourceCache(gk, "", []unstructured.Unstructured{}, ns); err != nil {
 		return err
 	}
@@ -548,7 +548,7 @@ func (c *clusterCache) startMissingWatches() error {
 func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo, info *apiMeta, resClient dynamic.ResourceInterface, ns string) {
 	kube.RetryUntilSucceed(func() error {
 		err := func() error {
-			version, err := info.LoadResourceVersion()
+			version, err := info.loadResourceVersion()
 			if err != nil {
 				return err
 			}
@@ -557,7 +557,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 				listPager := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 					res, err := list(resClient, opts)
 					if err == nil {
-						info.StoreResourceVersion(res.GetResourceVersion())
+						info.storeResourceVersion(res.GetResourceVersion())
 					}
 					return res, err
 				})
@@ -574,7 +574,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 					return fmt.Errorf("failed to load initial state of resource %s: %v", api.GroupKind.String(), err)
 				}
 
-				version, err := info.LoadResourceVersion()
+				version, err := info.loadResourceVersion()
 				if err != nil {
 					return err
 				}
@@ -590,7 +590,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 			return err
 		}
 
-		version, err := info.LoadResourceVersion()
+		version, err := info.loadResourceVersion()
 		if err != nil {
 			return err
 		}
@@ -604,7 +604,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 		}
 
 		if errors.IsGone(err) {
-			info.StoreResourceVersion("")
+			info.storeResourceVersion("")
 			c.log.Warnf("Resource version of %s is too old", api.GroupKind)
 		}
 
@@ -620,7 +620,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 			case event, ok := <-w.ResultChan():
 				if ok {
 					obj := event.Object.(*unstructured.Unstructured)
-					info.StoreResourceVersion(obj.GetResourceVersion())
+					info.storeResourceVersion(obj.GetResourceVersion())
 					c.processEvent(event.Type, obj)
 					if kube.IsCRD(obj) {
 						if event.Type == watch.Deleted {
@@ -711,7 +711,7 @@ func (c *clusterCache) sync() error {
 		lock.Lock()
 		ctx, cancel := context.WithCancel(context.Background())
 		info := &apiMeta{namespaced: api.Meta.Namespaced, watchCancel: cancel}
-		c.StoreApisMeta(api.GroupKind, info)
+		c.storeApisMeta(api.GroupKind, info)
 		c.namespacedResources[api.GroupKind] = api.Meta.Namespaced
 		lock.Unlock()
 
@@ -720,7 +720,7 @@ func (c *clusterCache) sync() error {
 			listPager := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 				res, err := list(resClient, opts)
 				if err == nil {
-					info.StoreResourceVersion(res.GetResourceVersion())
+					info.storeResourceVersion(res.GetResourceVersion())
 				}
 				return res, err
 			})
@@ -774,7 +774,7 @@ func (c *clusterCache) EnsureSynced() error {
 
 // GetNamespaceTopLevelResources returns top level resources in the specified namespace
 func (c *clusterCache) GetNamespaceTopLevelResources(namespace string) *Resources {
-	res, _ := c.LoadNsIndex(namespace)
+	res, _ := c.loadNsIndex(namespace)
 	res.Range(func(key, value interface{}) bool {
 		k, ok := key.(kube.ResourceKey)
 		if !ok {
@@ -787,7 +787,7 @@ func (c *clusterCache) GetNamespaceTopLevelResources(namespace string) *Resource
 		}
 
 		if len(r.OwnerRefs) == 0 {
-			res.StoreResources(k, r)
+			res.storeResources(k, r)
 		}
 
 		return true
@@ -798,9 +798,9 @@ func (c *clusterCache) GetNamespaceTopLevelResources(namespace string) *Resource
 
 // IterateHierarchy iterates resource tree starting from the specified top level resource and executes callback for each resource in the tree
 func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(resource *Resource, namespaceResources *Resources)) {
-	res, _ := c.resources.LoadResources(key)
+	res, _ := c.resources.loadResources(key)
 	if res != nil {
-		nsNodes, _ := c.LoadNsIndex(key.Namespace)
+		nsNodes, _ := c.loadNsIndex(key.Namespace)
 		action(res, nsNodes)
 		childrenByUID := make(map[types.UID][]*Resource)
 
@@ -883,7 +883,7 @@ func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructure
 		lock.Unlock()
 
 		if managedObj == nil {
-			existingObj, err := c.resources.LoadResources(key)
+			existingObj, err := c.resources.loadResources(key)
 			if err != nil {
 				return err
 			}
@@ -901,7 +901,7 @@ func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructure
 					}
 				}
 			} else {
-				meta, err := c.LoadApisMeta(key.GroupKind())
+				meta, err := c.loadApisMeta(key.GroupKind())
 				if err != nil {
 					return err
 				}
@@ -955,7 +955,7 @@ func (c *clusterCache) processEvent(event watch.EventType, un *unstructured.Unst
 		return
 	}
 
-	existingNode, _ := c.resources.LoadResources(key)
+	existingNode, _ := c.resources.loadResources(key)
 	if event == watch.Deleted {
 		if existingNode != nil {
 			_ = c.onNodeRemoved(key)
@@ -969,27 +969,27 @@ func (c *clusterCache) onNodeUpdated(oldRes *Resource, un *unstructured.Unstruct
 	newRes := c.newResource(un)
 	c.setNode(newRes)
 	for _, h := range c.getResourceUpdatedHandlers() {
-		r, _ := c.LoadNsIndex(newRes.Ref.Namespace)
+		r, _ := c.loadNsIndex(newRes.Ref.Namespace)
 		h(newRes, oldRes, r)
 	}
 }
 
 func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) error {
-	existing, err := c.resources.LoadResources(key)
+	existing, err := c.resources.loadResources(key)
 	if err != nil {
 		return err
 	}
 	if existing != nil {
-		c.resources.DeleteResources(key)
-		ns, err := c.LoadNsIndex(key.Namespace)
+		c.resources.deleteResources(key)
+		ns, err := c.loadNsIndex(key.Namespace)
 		if err != nil {
 			return err
 		}
 
 		if ns != nil {
-			ns.DeleteResources(key)
-			if ns.Length() == 0 {
-				c.DeleteNsIndex(key.Namespace)
+			ns.deleteResources(key)
+			if ns.length() == 0 {
+				c.deleteNsIndex(key.Namespace)
 			}
 		}
 		for _, h := range c.getResourceUpdatedHandlers() {
@@ -1009,9 +1009,9 @@ var (
 // GetClusterInfo returns cluster cache statistics
 func (c *clusterCache) GetClusterInfo() ClusterInfo {
 	return ClusterInfo{
-		APIsCount:         c.ApisMetaLength(),
+		APIsCount:         c.apisMetaLength(),
 		K8SVersion:        c.serverVersion,
-		ResourcesCount:    c.resources.Length(),
+		ResourcesCount:    c.resources.length(),
 		Server:            c.config.Host,
 		LastCacheSyncTime: c.syncTime,
 		SyncError:         c.syncError,

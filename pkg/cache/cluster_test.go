@@ -141,7 +141,7 @@ func TestEnsureSynced(t *testing.T) {
 	err := cluster.EnsureSynced()
 	assert.Nil(t, err)
 
-	assert.Equal(t, cluster.resources.Length(), 2)
+	assert.Equal(t, cluster.resources.length(), 2)
 	var names []string
 	cluster.resources.Range(func(key, value interface{}) bool {
 		k, _ := key.(kube.ResourceKey)
@@ -168,7 +168,7 @@ func TestEnsureSyncedSingleNamespace(t *testing.T) {
 	err := cluster.EnsureSynced()
 	assert.Nil(t, err)
 
-	assert.Equal(t, cluster.resources.Length(), 1)
+	assert.Equal(t, cluster.resources.length(), 1)
 	var names []string
 	cluster.resources.Range(func(key, value interface{}) bool {
 		k, _ := key.(kube.ResourceKey)
@@ -200,20 +200,20 @@ func TestGetNamespaceResources(t *testing.T) {
 	assert.Nil(t, err)
 
 	resources := cluster.GetNamespaceTopLevelResources("default")
-	assert.Equal(t, resources.Length(), 2)
+	assert.Equal(t, resources.length(), 2)
 
-	default1, err := resources.LoadResources(kube.GetResourceKey(defaultNamespaceTopLevel1))
+	default1, err := resources.loadResources(kube.GetResourceKey(defaultNamespaceTopLevel1))
 	assert.Nil(t, err)
 	assert.Equal(t, default1.Ref.Name, "helm-guestbook1")
 
-	default2, err := resources.LoadResources(kube.GetResourceKey(defaultNamespaceTopLevel2))
+	default2, err := resources.loadResources(kube.GetResourceKey(defaultNamespaceTopLevel2))
 	assert.Nil(t, err)
 	assert.Equal(t, default2.Ref.Name, "helm-guestbook2")
 
 	resources = cluster.GetNamespaceTopLevelResources("kube-system")
-	assert.Equal(t, resources.Length(), 1)
+	assert.Equal(t, resources.length(), 1)
 
-	system2, err := resources.LoadResources(kube.GetResourceKey(kubesystemNamespaceTopLevel2))
+	system2, err := resources.loadResources(kube.GetResourceKey(kubesystemNamespaceTopLevel2))
 	assert.Nil(t, err)
 	assert.Equal(t, system2.Ref.Name, "helm-guestbook3")
 }

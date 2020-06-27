@@ -68,7 +68,7 @@ func (r *Resource) iterateChildren(ns *Resources, parents map[kube.ResourceKey]b
 			return false
 		}
 
-		res, err := ns.LoadResources(childKey)
+		res, err := ns.loadResources(childKey)
 		if err != nil {
 			return false
 		}
