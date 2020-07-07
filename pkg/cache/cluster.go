@@ -113,6 +113,8 @@ type ClusterCache interface {
 	// The function returns all resources from cache for those `isManaged` function returns true and resources
 	// specified in targetObjs list.
 	GetManagedLiveObjs(targetObjs []*unstructured.Unstructured, isManaged func(r *Resource) bool) (map[kube.ResourceKey]*unstructured.Unstructured, error)
+	// GetManagedOjbect retrieves object from cache based on ResourceKey (caches manifest if it isn't already)
+	GetManagedObject(key kube.ResourceKey) (*Resource, bool, error)
 	// GetClusterInfo returns cluster cache statistics
 	GetClusterInfo() ClusterInfo
 	// OnResourceUpdated register event handler that is executed every time when resource get's updated in the cache
@@ -752,6 +754,30 @@ func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructure
 	}
 
 	return managedObjs, nil
+}
+
+// GetManagedOjbect retrieves object from cache based on ResourceKey (caches manifest if it isn't already)
+func (c *clusterCache) GetManagedObject(key kube.ResourceKey) (*Resource, bool, error) {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	resource, ok := c.resources[key]
+
+	var error error
+	if ok {
+		// check if we cached the manifest
+		if resource.Resource == nil {
+			// kind version
+			v := c.apisMeta[key.GroupKind()]
+			manifest, err := c.kubectl.GetResource(c.config, key.GroupKind().WithVersion(v.resourceVersion), key.Name, key.Namespace)
+			if err == nil {
+				// store the manifest
+				resource.Resource = manifest
+			}
+			error = err
+		}
+	}
+
+	return resource, ok, error
 }
 
 func (c *clusterCache) processEvent(event watch.EventType, un *unstructured.Unstructured) {
