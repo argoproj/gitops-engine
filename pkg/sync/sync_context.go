@@ -2,6 +2,7 @@ package sync
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -114,6 +115,13 @@ func WithOperationSettings(dryRun bool, prune bool, force bool, skipHooks bool) 
 func WithManifestValidation(enabled bool) SyncOpt {
 	return func(ctx *syncContext) {
 		ctx.validate = enabled
+	}
+}
+
+// WithNamespaceCreation will create non-exist namespace
+func WithNamespaceCreation(createNamespace bool) SyncOpt {
+	return func(ctx *syncContext) {
+		ctx.createNamespace = createNamespace
 	}
 }
 
@@ -241,6 +249,8 @@ type syncContext struct {
 	log *log.Entry
 	// lock to protect concurrent updates of the result list
 	lock sync.Mutex
+
+	createNamespace bool
 }
 
 func (sc *syncContext) setRunningPhase(tasks []*syncTask, isPendingDeletion bool) {
@@ -810,6 +820,21 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 					logCtx.Debug("applying")
 					validate := sc.validate && !resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionsDisableValidation)
 					result, message := sc.applyObject(t.targetObj, dryRun, sc.force, validate)
+					var nsNotFoundReg = regexp.MustCompile(`namespaces(.*) not found`)
+					if result == common.ResultCodeSyncFailed && nsNotFoundReg.MatchString(message) && sc.createNamespace {
+						logCtx.WithField("message", message).Info("apply failed")
+						ns := t.targetObj.GetNamespace()
+						logCtx.Debug(fmt.Sprintf("creating namespace %s", ns))
+						err := sc.kubectl.CreateNamespace(sc.config, ns)
+						if err == nil {
+							logCtx.Debug(fmt.Sprintf("Successfully created namespace %s", ns))
+							result, message = sc.applyObject(t.targetObj, dryRun, sc.force, validate)
+						} else {
+							logCtx.WithField("message", message).Info(fmt.Sprintf("create namespace %s failed", ns))
+							logCtx.Debug(fmt.Sprintf("Failed creating namespace %s", ns))
+							message = fmt.Sprintf("%s, %s", message, err)
+						}
+					}
 					if result == common.ResultCodeSyncFailed {
 						logCtx.WithField("message", message).Info("apply failed")
 						runState = failed

@@ -13,6 +13,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -45,6 +46,7 @@ type Kubectl interface {
 	GetServerVersion(config *rest.Config) (string, error)
 	NewDynamicClient(config *rest.Config) (dynamic.Interface, error)
 	SetOnKubectlRun(onKubectlRun func(command string) (io.Closer, error))
+	CreateNamespace(config *rest.Config, namespace string) error
 }
 
 type KubectlCmd struct {
@@ -485,6 +487,22 @@ func (k *KubectlCmd) GetServerVersion(config *rest.Config) (string, error) {
 
 func (k *KubectlCmd) NewDynamicClient(config *rest.Config) (dynamic.Interface, error) {
 	return dynamic.NewForConfig(config)
+}
+
+func (k *KubectlCmd) CreateNamespace(config *rest.Config, ns string) error {
+	span := tracing.StartSpan("CreateNamespace")
+	defer span.Finish()
+
+	nsSpec := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return err
+	}
+	_, err = clientset.CoreV1().Namespaces().Create(nsSpec)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (k *KubectlCmd) processKubectlRun(cmd string) (io.Closer, error) {
