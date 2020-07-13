@@ -823,17 +823,7 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 					var nsNotFoundReg = regexp.MustCompile(`namespaces(.*) not found`)
 					if result == common.ResultCodeSyncFailed && nsNotFoundReg.MatchString(message) && sc.createNamespace {
 						logCtx.WithField("message", message).Info("apply failed")
-						ns := t.targetObj.GetNamespace()
-						logCtx.Debug(fmt.Sprintf("creating namespace %s", ns))
-						err := sc.kubectl.CreateNamespace(sc.config, ns)
-						if err == nil {
-							logCtx.Debug(fmt.Sprintf("Successfully created namespace %s", ns))
-							result, message = sc.applyObject(t.targetObj, dryRun, sc.force, validate)
-						} else {
-							logCtx.WithField("message", message).Info(fmt.Sprintf("create namespace %s failed", ns))
-							logCtx.Debug(fmt.Sprintf("Failed creating namespace %s", ns))
-							message = fmt.Sprintf("%s, %s", message, err)
-						}
+						result, message = sc.createNamespaceAndReapply(logCtx, message, t, result, dryRun, validate)
 					}
 					if result == common.ResultCodeSyncFailed {
 						logCtx.WithField("message", message).Info("apply failed")
@@ -862,6 +852,21 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 		}
 	}
 	return runState
+}
+
+func (sc *syncContext) createNamespaceAndReapply(logCtx *log.Entry, message string, t *syncTask, result common.ResultCode, dryRun bool, validate bool) (common.ResultCode, string) {
+	ns := t.targetObj.GetNamespace()
+	logCtx.Debug(fmt.Sprintf("creating namespace %s", ns))
+	err := sc.kubectl.CreateNamespace(sc.config, ns)
+	if err == nil {
+		logCtx.Debug(fmt.Sprintf("Successfully created namespace %s", ns))
+		return sc.applyObject(t.targetObj, dryRun, sc.force, validate)
+	}
+
+	logCtx.WithField("message", message).Info(fmt.Sprintf("create namespace %s failed", ns))
+	logCtx.Debug(fmt.Sprintf("Failed creating namespace %s", ns))
+	message = fmt.Sprintf("%s, %s", message, err)
+	return result, message
 }
 
 // setResourceResult sets a resource details in the SyncResult.Resources list

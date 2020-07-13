@@ -92,3 +92,8 @@ func (k *MockKubectlCmd) GetAPIGroups(config *rest.Config) ([]metav1.APIGroup, e
 
 func (k *MockKubectlCmd) SetOnKubectlRun(onKubectlRun func(command string) (io.Closer, error)) {
 }
+
+// CreateNamespace provides a mock function with given fields: config, namespace
+func (k *MockKubectlCmd) CreateNamespace(config *rest.Config, namespace string) error {
+	return nil
+}
