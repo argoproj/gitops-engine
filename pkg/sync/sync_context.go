@@ -3,6 +3,7 @@ package sync
 import (
 	"encoding/json"
 	"fmt"
+	v1 "k8s.io/api/core/v1"
 	"sort"
 	"strings"
 	"sync"
@@ -300,16 +301,14 @@ func (sc *syncContext) Sync() {
 		}
 	}
 
-	/*
-		//This is to support namespace prehook
-		for _, task := range tasks {
-			if task.syncStatus == common.ResultCodeSynced && task.liveObj == nil {
-				//get the liveObj for task.targetObj
-				task.liveObj = sc.liveObj(task.targetObj)
-			}
+	//This is to support namespace prehook
+	for _, task := range tasks {
+		if task.syncStatus == common.ResultCodeSynced && task.isHook() && task.targetObj.GetKind() == "Namespace" && task.liveObj == nil {
+			message := fmt.Sprintf("%s created", task.targetObj.GetName())
+			sc.setResourceResult(task, "", common.OperationSucceeded, message)
 		}
-		//
-	*/
+	}
+	//
 
 	// update status of any tasks that are running, note that this must exclude pruning tasks
 	for _, task := range tasks.Filter(func(t *syncTask) bool {
@@ -525,22 +524,22 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 			task.targetObj.SetNamespace(sc.namespace)
 		}
 
-		/*
-			if sc.createNamespace {
-				ns := task.targetObj.GetNamespace()
-				nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion:"v1", Kind:"Namespace"}, ObjectMeta: metav1.ObjectMeta{Name: ns}}
-				// convert the runtime.Object to unstructured.Unstructured
-				unstructuredObj, err := toUnstructured(nsSpec)
-				if err == nil {
-					hookTasks = append(hookTasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj})
-				}
-				//TODO: Need to make sure there is only one presync hook for each namesapce, not multiple ones
-				//End createNamespace
+		if sc.createNamespace {
+			annotations := make(map[string]string)
+			annotations["argocd.argoproj.io/hook"] = "PreSync"
+			ns := task.targetObj.GetNamespace()
+			nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"}, ObjectMeta: metav1.ObjectMeta{Name: ns, Annotations: annotations}}
+			// convert the runtime.Object to unstructured.Unstructured
+			unstructuredObj, err := toUnstructured(nsSpec)
+			if err == nil {
+				hookTasks = append(hookTasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj})
 			}
-		*/
+			//TODO: Need to make sure there is only one presync hook for each namesapce, not multiple ones
+			//End createNamespace
+		}
 
 	}
-	//tasks = append(tasks, hookTasks...)
+	tasks = append(tasks, hookTasks...)
 
 	// enrich task with live obj
 	for _, task := range tasks {
