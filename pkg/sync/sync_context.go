@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
+	//v1 "k8s.io/api/core/v1"
 
 	"github.com/argoproj/gitops-engine/pkg/health"
 	"github.com/argoproj/gitops-engine/pkg/sync/common"
@@ -114,6 +116,13 @@ func WithOperationSettings(dryRun bool, prune bool, force bool, skipHooks bool) 
 func WithManifestValidation(enabled bool) SyncOpt {
 	return func(ctx *syncContext) {
 		ctx.validate = enabled
+	}
+}
+
+// WithNamespaceCreation will create non-exist namespace
+func WithNamespaceCreation(createNamespace bool) SyncOpt {
+	return func(ctx *syncContext) {
+		ctx.createNamespace = createNamespace
 	}
 }
 
@@ -241,6 +250,8 @@ type syncContext struct {
 	log *log.Entry
 	// lock to protect concurrent updates of the result list
 	lock sync.Mutex
+
+	createNamespace bool
 }
 
 func (sc *syncContext) setRunningPhase(tasks []*syncTask, isPendingDeletion bool) {
@@ -288,6 +299,17 @@ func (sc *syncContext) Sync() {
 			return
 		}
 	}
+
+	/*
+		//This is to support namespace prehook
+		for _, task := range tasks {
+			if task.syncStatus == common.ResultCodeSynced && task.liveObj == nil {
+				//get the liveObj for task.targetObj
+				task.liveObj = sc.liveObj(task.targetObj)
+			}
+		}
+		//
+	*/
 
 	// update status of any tasks that are running, note that this must exclude pruning tasks
 	for _, task := range tasks.Filter(func(t *syncTask) bool {
@@ -502,7 +524,23 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 			task.targetObj = task.targetObj.DeepCopy()
 			task.targetObj.SetNamespace(sc.namespace)
 		}
+
+		/*
+			if sc.createNamespace {
+				ns := task.targetObj.GetNamespace()
+				nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion:"v1", Kind:"Namespace"}, ObjectMeta: metav1.ObjectMeta{Name: ns}}
+				// convert the runtime.Object to unstructured.Unstructured
+				unstructuredObj, err := toUnstructured(nsSpec)
+				if err == nil {
+					hookTasks = append(hookTasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj})
+				}
+				//TODO: Need to make sure there is only one presync hook for each namesapce, not multiple ones
+				//End createNamespace
+			}
+		*/
+
 	}
+	//tasks = append(tasks, hookTasks...)
 
 	// enrich task with live obj
 	for _, task := range tasks {
@@ -550,6 +588,19 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	sort.Sort(tasks)
 
 	return tasks, successful
+}
+
+func toUnstructured(val interface{}) (*unstructured.Unstructured, error) {
+	data, err := json.Marshal(val)
+	if err != nil {
+		return nil, err
+	}
+	res := make(map[string]interface{})
+	err = json.Unmarshal(data, &res)
+	if err != nil {
+		return nil, err
+	}
+	return &unstructured.Unstructured{Object: res}, nil
 }
 
 func obj(a, b *unstructured.Unstructured) *unstructured.Unstructured {
@@ -886,3 +937,19 @@ func (sc *syncContext) setResourceResult(task *syncTask, syncStatus common.Resul
 func resourceResultKey(key kubeutil.ResourceKey, phase common.SyncPhase) string {
 	return fmt.Sprintf("%s:%s", key.String(), phase)
 }
+
+/*
+apiVersion: v1
+kind: Namespace
+metadata:
+  creationTimestamp: "2020-07-13T18:00:30Z"
+  name: argocd-e2e-test-sync-create-namespace3-bffjz
+  resourceVersion: "454978"
+  selfLink: /api/v1/namespaces/argocd-e2e-test-sync-create-namespace3-bffjz
+  uid: e572414f-6c28-4a8e-b8ec-5c8f12e58e8d
+spec:
+  finalizers:
+  - kubernetes
+status:
+  phase: Active
+*/
