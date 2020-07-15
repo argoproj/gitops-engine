@@ -522,7 +522,9 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 			task.targetObj.SetNamespace(sc.namespace)
 		}
 		ns := task.targetObj.GetNamespace()
-		namespaceMap[ns] = ns
+		if ns != "" {
+			namespaceMap[ns] = ns
+		}
 	}
 	if sc.createNamespace && len(namespaceMap) >= 1 {
 		for _, ns := range namespaceMap {
