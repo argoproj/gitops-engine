@@ -303,7 +303,12 @@ func (sc *syncContext) Sync() {
 	//Since namespace is created by pre-sync task, its task's liveObj is always nil since it did not go through reconciliation.
 	for _, task := range tasks {
 		if task.syncStatus == common.ResultCodeSynced && task.isHook() && task.targetObj.GetKind() == "Namespace" && task.liveObj == nil {
-			sc.setResourceResult(task, task.syncStatus, common.OperationSucceeded, "")
+			_, err := sc.kubectl.GetResource(sc.config, task.targetObj.GroupVersionKind(), task.targetObj.GetName(), "")
+			if err != nil {
+				sc.setResourceResult(task, task.syncStatus, common.OperationError, fmt.Sprintf("failed to get resource: %v", err))
+			} else {
+				sc.setResourceResult(task, task.syncStatus, common.OperationSucceeded, "")
+			}
 		}
 	}
 
