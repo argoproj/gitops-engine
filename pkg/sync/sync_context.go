@@ -2,6 +2,7 @@ package sync
 
 import (
 	"fmt"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sort"
 	"strings"
 	"sync"
@@ -532,7 +533,13 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 		}
 	}
 	if sc.createNamespace && len(namespaceMap) >= 1 {
+		//check if these namespace exists.
 		for _, ns := range namespaceMap {
+			gvk := schema.GroupVersionKind{Version: "v1", Kind: "Namespace"}
+			_, err := sc.kubectl.GetResource(sc.config, gvk, ns, "")
+			if err == nil {
+				continue
+			}
 			annotations := make(map[string]string)
 			annotations["argocd.argoproj.io/hook"] = "PreSync"
 			nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"}, ObjectMeta: metav1.ObjectMeta{Name: ns, Annotations: annotations}}
