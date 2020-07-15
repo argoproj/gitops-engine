@@ -2,7 +2,6 @@ package sync
 
 import (
 	"fmt"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sort"
 	"strings"
 	"sync"
@@ -454,6 +453,10 @@ func (sc *syncContext) containsResource(resource reconciledResource) bool {
 	return sc.resourcesFilter == nil || sc.resourcesFilter(resource.key(), resource.Live, resource.Target)
 }
 
+const (
+	Namespace = "Namespace"
+)
+
 // generates the list of sync tasks we will be performing during this sync.
 func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	resourceTasks := syncTasks{}
@@ -532,17 +535,23 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 			namespaceMap[ns] = ns
 		}
 	}
+
 	if sc.createNamespace && len(namespaceMap) >= 1 {
-		//check if these namespace exists.
 		for _, ns := range namespaceMap {
-			gvk := schema.GroupVersionKind{Version: "v1", Kind: "Namespace"}
-			_, err := sc.kubectl.GetResource(sc.config, gvk, ns, "")
-			if err == nil {
+			existInResources := false
+			//check if namespace exists as part of the resources
+			for _, res := range sc.resources {
+				if res.Target.GetKind() == Namespace && res.Target.GetName() == ns {
+					existInResources = true
+				}
+			}
+			if existInResources {
 				continue
 			}
+
 			annotations := make(map[string]string)
-			annotations["argocd.argoproj.io/hook"] = "PreSync"
-			nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"}, ObjectMeta: metav1.ObjectMeta{Name: ns, Annotations: annotations}}
+			annotations[common.AnnotationKeyHook] = common.SyncPhasePreSync
+			nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: Namespace}, ObjectMeta: metav1.ObjectMeta{Name: ns, Annotations: annotations}}
 			unstructuredObj, err := kube.ToUnstructured(nsSpec)
 			if err == nil {
 				tasks = append(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj})
