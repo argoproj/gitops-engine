@@ -568,7 +568,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 
 			annotations := make(map[string]string)
 			annotations[common.AnnotationKeyHook] = common.SyncPhasePreSync
-			nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: Namespace}, ObjectMeta: metav1.ObjectMeta{Name: ns, Annotations: annotations}}
+			nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: kube.NamespaceKind}, ObjectMeta: metav1.ObjectMeta{Name: ns, Annotations: annotations}}
 			unstructuredObj, err := kube.ToUnstructured(nsSpec)
 			if err == nil {
 				tasks = append(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj})
@@ -576,6 +576,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 				sc.log.Debug(fmt.Sprintf("Failed trying to create a pre-sync task for creating namespace. %s", err))
 			}
 		}
+
 	}
 
 	// enrich task with live obj
