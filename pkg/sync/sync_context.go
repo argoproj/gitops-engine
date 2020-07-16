@@ -499,7 +499,6 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	tasks = append(tasks, hookTasks...)
 
 	// enrich target objects with the namespace
-	namespaceMap := make(map[string]string)
 	for _, task := range tasks {
 		if task.targetObj == nil {
 			continue
@@ -513,37 +512,32 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 			task.targetObj = task.targetObj.DeepCopy()
 			task.targetObj.SetNamespace(sc.namespace)
 		}
-		ns := task.targetObj.GetNamespace()
-		if ns != "" {
-			namespaceMap[ns] = ns
-		}
 	}
 
-	if sc.createNamespace && len(namespaceMap) >= 1 {
-		for _, ns := range namespaceMap {
-			//check if namespace exists as part of the resources
-			for _, res := range sc.resources {
-				if isNamespaceWithName(res.Target, ns) {
-					continue
-				}
+	if sc.createNamespace && sc.namespace != "" {
+		ns := sc.namespace
+		//check if namespace exists as part of the resources
+		for _, res := range sc.resources {
+			if isNamespaceWithName(res.Target, ns) {
+				continue
 			}
-			//check if namespace exists as part of the hooks
-			for _, res := range sc.hooks {
-				if isNamespaceWithName(res, ns) {
-					continue
-				}
+		}
+		//check if namespace exists as part of the hooks
+		for _, res := range sc.hooks {
+			if isNamespaceWithName(res, ns) {
+				continue
 			}
-			annotations := make(map[string]string)
-			annotations[common.AnnotationKeyHook] = common.SyncPhasePreSync
-			nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: kube.NamespaceKind}, ObjectMeta: metav1.ObjectMeta{Name: ns, Annotations: annotations}}
-			unstructuredObj, err := kube.ToUnstructured(nsSpec)
-			if err == nil {
-				tasks = append(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj})
-			} else {
-				message := fmt.Sprintf("Failed trying to create a pre-sync task for creating namespace. %s", err)
-				task := &syncTask{phase: common.SyncPhasePreSync, targetObj: nil}
-				sc.setResourceResult(task, common.ResultCodeSyncFailed, common.OperationError, message)
-			}
+		}
+		annotations := make(map[string]string)
+		annotations[common.AnnotationKeyHook] = common.SyncPhasePreSync
+		nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: kube.NamespaceKind}, ObjectMeta: metav1.ObjectMeta{Name: ns, Annotations: annotations}}
+		unstructuredObj, err := kube.ToUnstructured(nsSpec)
+		if err == nil {
+			tasks = append(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj})
+		} else {
+			message := fmt.Sprintf("Failed trying to create a pre-sync task for creating namespace. %s", err)
+			task := &syncTask{phase: common.SyncPhasePreSync, targetObj: nil}
+			sc.setResourceResult(task, common.ResultCodeSyncFailed, common.OperationError, message)
 		}
 	}
 
@@ -565,8 +559,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 		}
 	}
 
-	//This is to support namespace creation created by pre-sync task.
-	//Since namespace is created by pre-sync task, its task's liveObj is always nil since it did not go through reconciliation.
+	//namespace auto-creation is created by pre-sync task. This task's liveObj is always nil since it did not go through reconciliation.
 	if sc.createNamespace {
 		for _, task := range tasks {
 			if isNamespaceKind(task.targetObj) &&

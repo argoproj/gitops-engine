@@ -507,8 +507,6 @@ func TestObjectsGetANamespace(t *testing.T) {
 func TestNamespaceAutoCreation(t *testing.T) {
 	syncCtx := newTestSyncCtx()
 	pod := NewPod()
-	ns := "podNs"
-	pod.SetNamespace(ns)
 	syncCtx.createNamespace = true
 	syncCtx.resources = groupResources(ReconciliationResult{
 		Live:   []*unstructured.Unstructured{nil},
@@ -518,7 +516,7 @@ func TestNamespaceAutoCreation(t *testing.T) {
 	//Namespace pre-sync task
 	annotations := make(map[string]string)
 	annotations[synccommon.AnnotationKeyHook] = synccommon.SyncPhasePreSync
-	nsSpec := &corev1.Namespace{TypeMeta: v1.TypeMeta{APIVersion: "v1", Kind: kube.NamespaceKind}, ObjectMeta: v1.ObjectMeta{Name: ns, Annotations: annotations}}
+	nsSpec := &corev1.Namespace{TypeMeta: v1.TypeMeta{APIVersion: "v1", Kind: kube.NamespaceKind}, ObjectMeta: v1.ObjectMeta{Name: syncCtx.namespace, Annotations: annotations}}
 	unstructuredObj, err := kube.ToUnstructured(nsSpec)
 	if err != nil {
 		assert.Fail(t, "Failed convert namespace to Unstructured. ")
@@ -530,6 +528,13 @@ func TestNamespaceAutoCreation(t *testing.T) {
 		assert.True(t, successful)
 		assert.Len(t, tasks, 2)
 		assert.Contains(t, tasks, task)
+	})
+	t.Run("Initial_TaskListDoesNotContainsNamespaceTasks", func(t *testing.T) {
+		syncCtx.namespace = ""
+		tasks, successful := syncCtx.getSyncTasks()
+		assert.True(t, successful)
+		assert.Len(t, tasks, 1)
+		assert.NotContains(t, tasks, task)
 	})
 	t.Run("Susequent_UpdatedNamespaceTasksCompleted", func(t *testing.T) {
 		result := synccommon.ResourceSyncResult{
