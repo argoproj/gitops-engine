@@ -7,6 +7,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -30,6 +31,7 @@ func newTestSyncCtx(opts ...SyncOpt) *syncContext {
 			APIResources: []v1.APIResource{
 				{Kind: "Pod", Group: "", Version: "v1", Namespaced: true},
 				{Kind: "Service", Group: "", Version: "v1", Namespaced: true},
+				{Kind: "Namespace", Group: "", Version: "v1", Namespaced: false},
 			},
 		},
 		&v1.APIResourceList{
@@ -500,6 +502,51 @@ func TestObjectsGetANamespace(t *testing.T) {
 	assert.Len(t, tasks, 1)
 	assert.Equal(t, FakeArgoCDNamespace, tasks[0].namespace())
 	assert.Equal(t, "", pod.GetNamespace())
+}
+
+func TestNamespaceAutoCreation(t *testing.T) {
+	syncCtx := newTestSyncCtx()
+	pod := NewPod()
+	ns := "podNs"
+	pod.SetNamespace(ns)
+	syncCtx.createNamespace = true
+	syncCtx.resources = groupResources(ReconciliationResult{
+		Live:   []*unstructured.Unstructured{nil},
+		Target: []*unstructured.Unstructured{pod},
+	})
+
+	//Namespace pre-sync task
+	annotations := make(map[string]string)
+	annotations[synccommon.AnnotationKeyHook] = synccommon.SyncPhasePreSync
+	nsSpec := &corev1.Namespace{TypeMeta: v1.TypeMeta{APIVersion: "v1", Kind: kube.NamespaceKind}, ObjectMeta: v1.ObjectMeta{Name: ns, Annotations: annotations}}
+	unstructuredObj, err := kube.ToUnstructured(nsSpec)
+	if err != nil {
+		assert.Fail(t, "Failed convert namespace to Unstructured. ")
+	}
+	task := &syncTask{phase: synccommon.SyncPhasePreSync, targetObj: unstructuredObj}
+
+	t.Run("Initial_TaskListContainsNamespaceTasks", func(t *testing.T) {
+		tasks, successful := syncCtx.getSyncTasks()
+		assert.True(t, successful)
+		assert.Len(t, tasks, 2)
+		assert.Contains(t, tasks, task)
+	})
+	t.Run("Susequent_UpdatedNamespaceTasksCompleted", func(t *testing.T) {
+		result := synccommon.ResourceSyncResult{
+			ResourceKey: kube.GetResourceKey(task.obj()),
+			Status:      synccommon.ResultCodeSynced,
+			SyncPhase:   synccommon.SyncPhasePreSync,
+			HookPhase:   synccommon.OperationRunning,
+		}
+		syncCtx.syncRes[resourceResultKey(result.ResourceKey, result.SyncPhase)] = result
+		tasks, successful := syncCtx.getSyncTasks()
+		assert.True(t, successful)
+		assert.Len(t, tasks, 2)
+		task.operationState = synccommon.OperationSucceeded
+		task.syncStatus = synccommon.ResultCodeSynced
+		assert.Contains(t, tasks, task)
+	})
+
 }
 
 func TestSyncFailureHookWithSuccessfulSync(t *testing.T) {

@@ -5,6 +5,8 @@ go 1.13
 require (
 	github.com/argoproj/pkg v0.0.0-20200102163130-2dd1f3f6b4de
 	github.com/evanphx/json-patch v4.2.0+incompatible
+	github.com/gogo/protobuf v1.2.2-0.20190723190241-65acae22fc9d
+	github.com/google/gofuzz v1.0.0
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.4.2
