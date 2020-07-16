@@ -524,6 +524,7 @@ func TestNamespaceAutoCreation(t *testing.T) {
 	task := &syncTask{phase: synccommon.SyncPhasePreSync, targetObj: unstructuredObj}
 
 	t.Run("Initial_TaskListContainsNamespaceTasks", func(t *testing.T) {
+		syncCtx.namespace = FakeArgoCDNamespace
 		tasks, successful := syncCtx.getSyncTasks()
 		assert.True(t, successful)
 		assert.Len(t, tasks, 2)
@@ -537,6 +538,7 @@ func TestNamespaceAutoCreation(t *testing.T) {
 		assert.NotContains(t, tasks, task)
 	})
 	t.Run("Susequent_UpdatedNamespaceTasksCompleted", func(t *testing.T) {
+		syncCtx.namespace = FakeArgoCDNamespace
 		result := synccommon.ResourceSyncResult{
 			ResourceKey: kube.GetResourceKey(task.obj()),
 			Status:      synccommon.ResultCodeSynced,
