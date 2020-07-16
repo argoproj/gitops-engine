@@ -299,23 +299,6 @@ func (sc *syncContext) Sync() {
 		}
 	}
 
-	//This is to support namespace creation created by pre-sync task.
-	//Since namespace is created by pre-sync task, its task's liveObj is always nil since it did not go through reconciliation.
-	for _, task := range tasks {
-		if task.targetObj.GetKind() == kube.NamespaceKind &&
-			task.liveObj == nil &&
-			task.syncStatus == common.ResultCodeSynced &&
-			task.isHook() &&
-			task.running() {
-			_, err := sc.kubectl.GetResource(sc.config, task.targetObj.GroupVersionKind(), task.targetObj.GetName(), "")
-			if err != nil {
-				sc.setResourceResult(task, task.syncStatus, common.OperationError, fmt.Sprintf("failed to get resource: %v", err))
-			} else {
-				sc.setResourceResult(task, task.syncStatus, common.OperationSucceeded, "")
-			}
-		}
-	}
-
 	// update status of any tasks that are running, note that this must exclude pruning tasks
 	for _, task := range tasks.Filter(func(t *syncTask) bool {
 		// just occasionally, you can be running yet not have a live resource
@@ -538,34 +521,18 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 
 	if sc.createNamespace && len(namespaceMap) >= 1 {
 		for _, ns := range namespaceMap {
-			exist := false
 			//check if namespace exists as part of the resources
 			for _, res := range sc.resources {
-				if res.Target != nil &&
-					res.Target.GetObjectKind() != nil &&
-					res.Target.GetObjectKind().GroupVersionKind().Group == "" &&
-					res.Target.GetKind() == kube.NamespaceKind &&
-					res.Target.GetName() == ns {
-					exist = true
+				if isNamespaceWithName(res.Target, ns) {
+					continue
 				}
 			}
-			if exist {
-				continue
-			}
-
 			//check if namespace exists as part of the hooks
 			for _, res := range sc.hooks {
-				if res.GetKind() == kube.NamespaceKind &&
-					res.GetName() == ns &&
-					res.GetObjectKind() != nil &&
-					res.GetObjectKind().GroupVersionKind().Group == "" {
-					exist = true
+				if isNamespaceWithName(res, ns) {
+					continue
 				}
 			}
-			if exist {
-				continue
-			}
-
 			annotations := make(map[string]string)
 			annotations[common.AnnotationKeyHook] = common.SyncPhasePreSync
 			nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: kube.NamespaceKind}, ObjectMeta: metav1.ObjectMeta{Name: ns, Annotations: annotations}}
@@ -573,10 +540,11 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 			if err == nil {
 				tasks = append(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj})
 			} else {
-				sc.log.Debug(fmt.Sprintf("Failed trying to create a pre-sync task for creating namespace. %s", err))
+				message := fmt.Sprintf("Failed trying to create a pre-sync task for creating namespace. %s", err)
+				task := &syncTask{phase: common.SyncPhasePreSync, targetObj: nil}
+				sc.setResourceResult(task, common.ResultCodeSyncFailed, common.OperationError, message)
 			}
 		}
-
 	}
 
 	// enrich task with live obj
@@ -594,6 +562,25 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 			task.syncStatus = result.Status
 			task.operationState = result.HookPhase
 			task.message = result.Message
+		}
+	}
+
+	//This is to support namespace creation created by pre-sync task.
+	//Since namespace is created by pre-sync task, its task's liveObj is always nil since it did not go through reconciliation.
+	if sc.createNamespace {
+		for _, task := range tasks {
+			if isNamespaceKind(task.targetObj) &&
+				task.liveObj == nil &&
+				task.syncStatus == common.ResultCodeSynced &&
+				task.isHook() &&
+				task.running() {
+				_, err := sc.kubectl.GetResource(sc.config, task.targetObj.GroupVersionKind(), task.targetObj.GetName(), "")
+				if err != nil {
+					sc.setResourceResult(task, task.syncStatus, common.OperationError, fmt.Sprintf("failed to get resource: %v", err))
+				} else {
+					sc.setResourceResult(task, task.syncStatus, common.OperationSucceeded, "")
+				}
+			}
 		}
 	}
 
@@ -625,6 +612,18 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	sort.Sort(tasks)
 
 	return tasks, successful
+}
+
+func isNamespaceWithName(res *unstructured.Unstructured, ns string) bool {
+	return isNamespaceKind(res) &&
+		res.GetName() == ns
+}
+
+func isNamespaceKind(res *unstructured.Unstructured) bool {
+	return res != nil &&
+		res.GetObjectKind() != nil &&
+		res.GetObjectKind().GroupVersionKind().Group == "" &&
+		res.GetKind() == kube.NamespaceKind
 }
 
 func obj(a, b *unstructured.Unstructured) *unstructured.Unstructured {
