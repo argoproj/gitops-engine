@@ -302,7 +302,11 @@ func (sc *syncContext) Sync() {
 	//This is to support namespace creation created by pre-sync task.
 	//Since namespace is created by pre-sync task, its task's liveObj is always nil since it did not go through reconciliation.
 	for _, task := range tasks {
-		if task.syncStatus == common.ResultCodeSynced && task.isHook() && task.targetObj.GetKind() == "Namespace" && task.liveObj == nil {
+		if task.targetObj.GetKind() == kube.NamespaceKind &&
+			task.liveObj == nil &&
+			task.syncStatus == common.ResultCodeSynced &&
+			task.isHook() &&
+			task.running() {
 			_, err := sc.kubectl.GetResource(sc.config, task.targetObj.GroupVersionKind(), task.targetObj.GetName(), "")
 			if err != nil {
 				sc.setResourceResult(task, task.syncStatus, common.OperationError, fmt.Sprintf("failed to get resource: %v", err))
@@ -453,10 +457,6 @@ func (sc *syncContext) containsResource(resource reconciledResource) bool {
 	return sc.resourcesFilter == nil || sc.resourcesFilter(resource.key(), resource.Live, resource.Target)
 }
 
-const (
-	Namespace = "Namespace"
-)
-
 // generates the list of sync tasks we will be performing during this sync.
 func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	resourceTasks := syncTasks{}
@@ -538,14 +538,31 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 
 	if sc.createNamespace && len(namespaceMap) >= 1 {
 		for _, ns := range namespaceMap {
-			existInResources := false
+			exist := false
 			//check if namespace exists as part of the resources
 			for _, res := range sc.resources {
-				if res.Target.GetKind() == Namespace && res.Target.GetName() == ns {
-					existInResources = true
+				if res.Target != nil &&
+					res.Target.GetObjectKind() != nil &&
+					res.Target.GetObjectKind().GroupVersionKind().Group == "" &&
+					res.Target.GetKind() == kube.NamespaceKind &&
+					res.Target.GetName() == ns {
+					exist = true
 				}
 			}
-			if existInResources {
+			if exist {
+				continue
+			}
+
+			//check if namespace exists as part of the hooks
+			for _, res := range sc.hooks {
+				if res.GetKind() == kube.NamespaceKind &&
+					res.GetName() == ns &&
+					res.GetObjectKind() != nil &&
+					res.GetObjectKind().GroupVersionKind().Group == "" {
+					exist = true
+				}
+			}
+			if exist {
 				continue
 			}
 

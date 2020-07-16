@@ -46,6 +46,7 @@ const (
 	CustomResourceDefinitionKind = "CustomResourceDefinition"
 	PodKind                      = "Pod"
 	APIServiceKind               = "APIService"
+	NamespaceKind                = "Namespace"
 )
 
 type ResourceInfoProvider interface {
