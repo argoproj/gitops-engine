@@ -515,39 +515,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	}
 
 	if sc.createNamespace && sc.namespace != "" {
-		isNamespaceCreationNeeded := true
-
-		var allObjs []*unstructured.Unstructured
-		copy(allObjs, sc.hooks)
-		for _, res := range sc.resources {
-			allObjs = append(allObjs, res.Target)
-		}
-
-		for _, res := range allObjs {
-			if isNamespaceWithName(res, sc.namespace) {
-				isNamespaceCreationNeeded = false
-				break
-			}
-		}
-
-		if isNamespaceCreationNeeded {
-			annotations := make(map[string]string)
-			annotations[common.AnnotationKeyHook] = common.SyncPhasePreSync
-			nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: kube.NamespaceKind}, ObjectMeta: metav1.ObjectMeta{Name: sc.namespace, Annotations: annotations}}
-			unstructuredObj, err := kube.ToUnstructured(nsSpec)
-			if err == nil {
-				liveObj, err := sc.kubectl.GetResource(sc.config, unstructuredObj.GroupVersionKind(), unstructuredObj.GetName(), "")
-				if err == nil || errors.IsNotFound(err) {
-					tasks = append(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj, liveObj: liveObj})
-				} else {
-					task := &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj}
-					sc.setResourceResult(task, common.ResultCodeSyncFailed, common.OperationError, fmt.Sprintf("Namespace auto creation failed: %s", err))
-					tasks = append(tasks, task)
-				}
-			} else {
-				sc.setOperationPhase(common.OperationFailed, fmt.Sprintf("Namespace auto creation failed: %s", err))
-			}
-		}
+		tasks = sc.autoCreateNamespace(tasks)
 	}
 
 	// enrich task with live obj
@@ -596,6 +564,43 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	sort.Sort(tasks)
 
 	return tasks, successful
+}
+
+func (sc *syncContext) autoCreateNamespace(tasks syncTasks) syncTasks {
+	isNamespaceCreationNeeded := true
+
+	var allObjs []*unstructured.Unstructured
+	copy(allObjs, sc.hooks)
+	for _, res := range sc.resources {
+		allObjs = append(allObjs, res.Target)
+	}
+
+	for _, res := range allObjs {
+		if isNamespaceWithName(res, sc.namespace) {
+			isNamespaceCreationNeeded = false
+			break
+		}
+	}
+
+	if isNamespaceCreationNeeded {
+		annotations := make(map[string]string)
+		annotations[common.AnnotationKeyHook] = common.SyncPhasePreSync
+		nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: kube.NamespaceKind}, ObjectMeta: metav1.ObjectMeta{Name: sc.namespace, Annotations: annotations}}
+		unstructuredObj, err := kube.ToUnstructured(nsSpec)
+		if err == nil {
+			liveObj, err := sc.kubectl.GetResource(sc.config, unstructuredObj.GroupVersionKind(), unstructuredObj.GetName(), "")
+			if err == nil || errors.IsNotFound(err) {
+				tasks = append(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj, liveObj: liveObj})
+			} else {
+				task := &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj}
+				sc.setResourceResult(task, common.ResultCodeSyncFailed, common.OperationError, fmt.Sprintf("Namespace auto creation failed: %s", err))
+				tasks = append(tasks, task)
+			}
+		} else {
+			sc.setOperationPhase(common.OperationFailed, fmt.Sprintf("Namespace auto creation failed: %s", err))
+		}
+	}
+	return tasks
 }
 
 func isNamespaceWithName(res *unstructured.Unstructured, ns string) bool {
