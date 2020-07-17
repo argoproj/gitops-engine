@@ -540,14 +540,12 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 				if err == nil || errors.IsNotFound(err) {
 					tasks = append(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj, liveObj: liveObj})
 				} else {
-					message := fmt.Sprintf("Namespace auto creation failed: %s", err)
 					task := &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj}
-					sc.setResourceResult(task, common.ResultCodeSyncFailed, common.OperationError, message)
+					sc.setResourceResult(task, common.ResultCodeSyncFailed, common.OperationError, fmt.Sprintf("Namespace auto creation failed: %s", err))
 					tasks = append(tasks, task)
 				}
 			} else {
-				message := fmt.Sprintf("Namespace auto creation failed: %s", err)
-				sc.setOperationPhase(common.OperationFailed, message)
+				sc.setOperationPhase(common.OperationFailed, fmt.Sprintf("Namespace auto creation failed: %s", err))
 			}
 		}
 	}
