@@ -505,15 +505,12 @@ func TestObjectsGetANamespace(t *testing.T) {
 }
 
 func TestNamespaceAutoCreation(t *testing.T) {
-	syncCtx := newTestSyncCtx()
 	pod := NewPod()
+	namespace := NewNamespace()
+	syncCtx := newTestSyncCtx()
 	syncCtx.createNamespace = true
-	syncCtx.resources = groupResources(ReconciliationResult{
-		Live:   []*unstructured.Unstructured{nil},
-		Target: []*unstructured.Unstructured{pod},
-	})
 
-	//Namespace pre-sync task
+	//Namespace auto creation pre-sync task
 	annotations := make(map[string]string)
 	annotations[synccommon.AnnotationKeyHook] = synccommon.SyncPhasePreSync
 	nsSpec := &corev1.Namespace{TypeMeta: v1.TypeMeta{APIVersion: "v1", Kind: kube.NamespaceKind}, ObjectMeta: v1.ObjectMeta{Name: syncCtx.namespace, Annotations: annotations}}
@@ -523,11 +520,31 @@ func TestNamespaceAutoCreation(t *testing.T) {
 	}
 	task := &syncTask{phase: synccommon.SyncPhasePreSync, targetObj: unstructuredObj}
 
-	syncCtx.namespace = FakeArgoCDNamespace
-	tasks, successful := syncCtx.getSyncTasks()
-	assert.True(t, successful)
-	assert.Len(t, tasks, 2)
-	assert.Contains(t, tasks, task)
+	t.Run("ns creation pre-sync task", func(t *testing.T) {
+		syncCtx.namespace = FakeArgoCDNamespace
+		syncCtx.resources = groupResources(ReconciliationResult{
+			Live:   []*unstructured.Unstructured{nil},
+			Target: []*unstructured.Unstructured{pod},
+		})
+		tasks, successful := syncCtx.getSyncTasks()
+
+		assert.True(t, successful)
+		assert.Len(t, tasks, 2)
+		assert.Contains(t, tasks, task)
+	})
+
+	t.Run("ns creation pre-sync task should not be created", func(t *testing.T) {
+		syncCtx.namespace = namespace.GetNamespace()
+		syncCtx.resources = groupResources(ReconciliationResult{
+			Live:   []*unstructured.Unstructured{nil},
+			Target: []*unstructured.Unstructured{namespace},
+		})
+		tasks, successful := syncCtx.getSyncTasks()
+
+		assert.True(t, successful)
+		assert.Len(t, tasks, 1)
+		assert.NotContains(t, tasks, task)
+	})
 
 }
 

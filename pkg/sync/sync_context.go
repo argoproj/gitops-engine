@@ -516,20 +516,17 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 
 	if sc.createNamespace && sc.namespace != "" {
 		isNamespaceCreationNeeded := true
-		//check if namespace exists as part of the resources
+
+		var allObjs []*unstructured.Unstructured
+		copy(allObjs, sc.hooks)
 		for _, res := range sc.resources {
-			if isNamespaceWithName(res.Target, sc.namespace) {
+			allObjs = append(allObjs, res.Target)
+		}
+
+		for _, res := range allObjs {
+			if isNamespaceWithName(res, sc.namespace) {
 				isNamespaceCreationNeeded = false
 				break
-			}
-		}
-		//check if namespace exists as part of the hooks
-		if isNamespaceCreationNeeded {
-			for _, res := range sc.hooks {
-				if isNamespaceWithName(res, sc.namespace) {
-					isNamespaceCreationNeeded = false
-					break
-				}
 			}
 		}
 
@@ -540,14 +537,17 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 			unstructuredObj, err := kube.ToUnstructured(nsSpec)
 			if err == nil {
 				liveObj, err := sc.kubectl.GetResource(sc.config, unstructuredObj.GroupVersionKind(), unstructuredObj.GetName(), "")
-				if err == nil {
+				if err == nil || errors.IsNotFound(err) {
 					tasks = append(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj, liveObj: liveObj})
 				} else {
-					tasks = addErrorTask(sc, tasks, err)
+					message := fmt.Sprintf("Namespace auto creation failed: %s", err)
+					task := &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj}
+					sc.setResourceResult(task, common.ResultCodeSyncFailed, common.OperationError, message)
+					tasks = append(tasks, task)
 				}
-
 			} else {
-				tasks = addErrorTask(sc, tasks, err)
+				message := fmt.Sprintf("Namespace auto creation failed: %s", err)
+				sc.setOperationPhase(common.OperationFailed, message)
 			}
 		}
 	}
@@ -598,14 +598,6 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	sort.Sort(tasks)
 
 	return tasks, successful
-}
-
-func addErrorTask(sc *syncContext, tasks syncTasks, err error) syncTasks {
-	message := fmt.Sprintf("Failed trying to create a task due to %s", err)
-	task := &syncTask{phase: common.SyncPhasePreSync, targetObj: nil}
-	sc.setResourceResult(task, common.ResultCodeSyncFailed, common.OperationError, message)
-	tasks = append(tasks, task)
-	return tasks
 }
 
 func isNamespaceWithName(res *unstructured.Unstructured, ns string) bool {
