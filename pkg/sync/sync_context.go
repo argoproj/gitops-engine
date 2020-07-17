@@ -515,29 +515,40 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	}
 
 	if sc.createNamespace && sc.namespace != "" {
-		ns := sc.namespace
+		isNamespaceCreationNeeded := true
 		//check if namespace exists as part of the resources
 		for _, res := range sc.resources {
-			if isNamespaceWithName(res.Target, ns) {
-				continue
+			if isNamespaceWithName(res.Target, sc.namespace) {
+				isNamespaceCreationNeeded = false
+				break
 			}
 		}
 		//check if namespace exists as part of the hooks
-		for _, res := range sc.hooks {
-			if isNamespaceWithName(res, ns) {
-				continue
+		if isNamespaceCreationNeeded {
+			for _, res := range sc.hooks {
+				if isNamespaceWithName(res, sc.namespace) {
+					isNamespaceCreationNeeded = false
+					break
+				}
 			}
 		}
-		annotations := make(map[string]string)
-		annotations[common.AnnotationKeyHook] = common.SyncPhasePreSync
-		nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: kube.NamespaceKind}, ObjectMeta: metav1.ObjectMeta{Name: ns, Annotations: annotations}}
-		unstructuredObj, err := kube.ToUnstructured(nsSpec)
-		if err == nil {
-			tasks = append(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj})
-		} else {
-			message := fmt.Sprintf("Failed trying to create a pre-sync task for creating namespace. %s", err)
-			task := &syncTask{phase: common.SyncPhasePreSync, targetObj: nil}
-			sc.setResourceResult(task, common.ResultCodeSyncFailed, common.OperationError, message)
+
+		if isNamespaceCreationNeeded {
+			annotations := make(map[string]string)
+			annotations[common.AnnotationKeyHook] = common.SyncPhasePreSync
+			nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: kube.NamespaceKind}, ObjectMeta: metav1.ObjectMeta{Name: sc.namespace, Annotations: annotations}}
+			unstructuredObj, err := kube.ToUnstructured(nsSpec)
+			if err == nil {
+				liveObj, err := sc.kubectl.GetResource(sc.config, unstructuredObj.GroupVersionKind(), unstructuredObj.GetName(), "")
+				if err == nil {
+					tasks = append(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj, liveObj: liveObj})
+				} else {
+					tasks = addErrorTask(sc, tasks, err)
+				}
+
+			} else {
+				tasks = addErrorTask(sc, tasks, err)
+			}
 		}
 	}
 
@@ -556,24 +567,6 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 			task.syncStatus = result.Status
 			task.operationState = result.HookPhase
 			task.message = result.Message
-		}
-	}
-
-	//namespace auto-creation is created by pre-sync task. This task's liveObj is always nil since it did not go through reconciliation.
-	if sc.createNamespace {
-		for _, task := range tasks {
-			if isNamespaceKind(task.targetObj) &&
-				task.liveObj == nil &&
-				task.syncStatus == common.ResultCodeSynced &&
-				task.isHook() &&
-				task.running() {
-				_, err := sc.kubectl.GetResource(sc.config, task.targetObj.GroupVersionKind(), task.targetObj.GetName(), "")
-				if err != nil {
-					sc.setResourceResult(task, task.syncStatus, common.OperationError, fmt.Sprintf("failed to get resource: %v", err))
-				} else {
-					sc.setResourceResult(task, task.syncStatus, common.OperationSucceeded, "")
-				}
-			}
 		}
 	}
 
@@ -605,6 +598,14 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	sort.Sort(tasks)
 
 	return tasks, successful
+}
+
+func addErrorTask(sc *syncContext, tasks syncTasks, err error) syncTasks {
+	message := fmt.Sprintf("Failed trying to create a task due to %s", err)
+	task := &syncTask{phase: common.SyncPhasePreSync, targetObj: nil}
+	sc.setResourceResult(task, common.ResultCodeSyncFailed, common.OperationError, message)
+	tasks = append(tasks, task)
+	return tasks
 }
 
 func isNamespaceWithName(res *unstructured.Unstructured, ns string) bool {

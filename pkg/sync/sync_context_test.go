@@ -523,36 +523,11 @@ func TestNamespaceAutoCreation(t *testing.T) {
 	}
 	task := &syncTask{phase: synccommon.SyncPhasePreSync, targetObj: unstructuredObj}
 
-	t.Run("Initial_TaskListContainsNamespaceTasks", func(t *testing.T) {
-		syncCtx.namespace = FakeArgoCDNamespace
-		tasks, successful := syncCtx.getSyncTasks()
-		assert.True(t, successful)
-		assert.Len(t, tasks, 2)
-		assert.Contains(t, tasks, task)
-	})
-	t.Run("Initial_TaskListDoesNotContainsNamespaceTasks", func(t *testing.T) {
-		syncCtx.namespace = ""
-		tasks, successful := syncCtx.getSyncTasks()
-		assert.True(t, successful)
-		assert.Len(t, tasks, 1)
-		assert.NotContains(t, tasks, task)
-	})
-	t.Run("Susequent_UpdatedNamespaceTasksCompleted", func(t *testing.T) {
-		syncCtx.namespace = FakeArgoCDNamespace
-		result := synccommon.ResourceSyncResult{
-			ResourceKey: kube.GetResourceKey(task.obj()),
-			Status:      synccommon.ResultCodeSynced,
-			SyncPhase:   synccommon.SyncPhasePreSync,
-			HookPhase:   synccommon.OperationRunning,
-		}
-		syncCtx.syncRes[resourceResultKey(result.ResourceKey, result.SyncPhase)] = result
-		tasks, successful := syncCtx.getSyncTasks()
-		assert.True(t, successful)
-		assert.Len(t, tasks, 2)
-		task.operationState = synccommon.OperationSucceeded
-		task.syncStatus = synccommon.ResultCodeSynced
-		assert.Contains(t, tasks, task)
-	})
+	syncCtx.namespace = FakeArgoCDNamespace
+	tasks, successful := syncCtx.getSyncTasks()
+	assert.True(t, successful)
+	assert.Len(t, tasks, 2)
+	assert.Contains(t, tasks, task)
 
 }
 
