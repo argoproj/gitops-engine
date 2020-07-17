@@ -138,3 +138,21 @@ spec:
 	assert.NoError(t, err)
 	assert.Nil(t, GetDeploymentReplicas(&noDeployment))
 }
+
+func TestSplitYAML_SingleObject(t *testing.T) {
+	objs, err := SplitYAML(depWithLabel)
+	assert.NoError(t, err)
+	assert.Len(t, objs, 1)
+}
+
+func TestSplitYAML_MultipleObjects(t *testing.T) {
+	objs, err := SplitYAML(depWithLabel + "\n---\n" + depWithLabel)
+	assert.NoError(t, err)
+	assert.Len(t, objs, 2)
+}
+
+func TestSplitYAML_TrailingNewLines(t *testing.T) {
+	objs, err := SplitYAML("\n\n\n---" + depWithLabel)
+	assert.NoError(t, err)
+	assert.Len(t, objs, 1)
+}

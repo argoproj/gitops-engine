@@ -290,7 +290,9 @@ func newAuthInfo(restConfig *rest.Config) *clientcmdapi.AuthInfo {
 
 // SplitYAML splits a YAML file into unstructured objects. Returns list of all unstructured objects
 // found in the yaml. If an error occurs, returns objects that have been parsed so far too.
-func SplitYAML(yamlData []byte) (retObjs []*unstructured.Unstructured, retErr error) {
+func SplitYAML(yamlStr string) (retObjs []*unstructured.Unstructured, retErr error) {
+	yamlStr = strings.TrimSpace(yamlStr)
+	yamlData := []byte(yamlStr)
 	decoder := streaming.NewDecoder(kubeyaml.NewDocumentDecoder(ioutil.NopCloser(bytes.NewReader(yamlData))), yamlSerializer)
 	defer func() {
 		if err := decoder.Close(); err != nil && retErr == nil {
