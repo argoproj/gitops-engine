@@ -589,7 +589,7 @@ func (sc *syncContext) autoCreateNamespace(tasks syncTasks) syncTasks {
 		unstructuredObj, err := kube.ToUnstructured(nsSpec)
 		if err == nil {
 			liveObj, err := sc.kubectl.GetResource(sc.config, unstructuredObj.GroupVersionKind(), unstructuredObj.GetName(), "")
-			if err == nil || errors.IsNotFound(err) {
+			if err == nil || apierr.IsNotFound(err) {
 				tasks = append(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj, liveObj: liveObj})
 			} else {
 				task := &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj}
