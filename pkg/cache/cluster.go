@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -81,8 +80,6 @@ type ClusterInfo struct {
 	// SyncError holds most recent cache synchronization error
 	SyncError error
 }
-
-var handlerKey uint64
 
 // OnEventHandler is a function that handles Kubernetes event
 type OnEventHandler func(event watch.EventType, un *unstructured.Unstructured)
@@ -162,6 +159,7 @@ type clusterCache struct {
 	settings   Settings
 
 	handlersLock                sync.Mutex
+	handlerKey                  uint64
 	populateResourceInfoHandler OnPopulateResourceInfoHandler
 	resourceUpdatedHandlers     map[uint64]OnResourceUpdatedHandler
 	eventHandlers               map[uint64]OnEventHandler
@@ -171,7 +169,8 @@ type clusterCache struct {
 func (c *clusterCache) OnResourceUpdated(handler OnResourceUpdatedHandler) Unsubscribe {
 	c.handlersLock.Lock()
 	defer c.handlersLock.Unlock()
-	key := atomic.AddUint64(&handlerKey, 1)
+	key := c.handlerKey
+	c.handlerKey++
 	c.resourceUpdatedHandlers[key] = handler
 	return func() {
 		c.handlersLock.Lock()
@@ -194,7 +193,8 @@ func (c *clusterCache) getResourceUpdatedHandlers() []OnResourceUpdatedHandler {
 func (c *clusterCache) OnEvent(handler OnEventHandler) Unsubscribe {
 	c.handlersLock.Lock()
 	defer c.handlersLock.Unlock()
-	key := atomic.AddUint64(&handlerKey, 1)
+	key := c.handlerKey
+	c.handlerKey++
 	c.eventHandlers[key] = handler
 	return func() {
 		c.lock.Lock()
