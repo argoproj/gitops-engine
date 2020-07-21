@@ -206,7 +206,7 @@ func (c *clusterCache) OnEvent(handler OnEventHandler) Unsubscribe {
 func (c *clusterCache) getEventHandlers() []OnEventHandler {
 	c.handlersLock.Lock()
 	defer c.handlersLock.Unlock()
-	var handlers []OnEventHandler
+	handlers := make([]OnEventHandler, 0, len(c.eventHandlers))
 	for _, h := range c.eventHandlers {
 		handlers = append(handlers, h)
 	}
