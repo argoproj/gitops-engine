@@ -197,8 +197,8 @@ func (c *clusterCache) OnEvent(handler OnEventHandler) Unsubscribe {
 	c.handlerKey++
 	c.eventHandlers[key] = handler
 	return func() {
-		c.lock.Lock()
-		defer c.lock.Unlock()
+		c.handlersLock.Lock()
+		defer c.handlersLock.Unlock()
 		delete(c.eventHandlers, key)
 	}
 }
