@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/argoproj/gitops-engine/pkg/health"
 	"github.com/argoproj/gitops-engine/pkg/sync/common"
@@ -101,11 +103,11 @@ func WithPrune(prune bool) SyncOpt {
 }
 
 // WithOperationSettings allows to set sync operation settings
-func WithOperationSettings(dryRun bool, prune bool, force bool, skipHooks bool) SyncOpt {
+func WithOperationSettings(dryRunStrategy cmdutil.DryRunStrategy, prune bool, force bool, skipHooks bool) SyncOpt {
 	return func(ctx *syncContext) {
 		ctx.prune = prune
 		ctx.skipHooks = skipHooks
-		ctx.dryRun = dryRun
+		ctx.dryRunStrategy = dryRunStrategy
 		ctx.force = force
 	}
 }
@@ -232,7 +234,7 @@ type syncContext struct {
 	kubectl             kube.Kubectl
 	namespace           string
 
-	dryRun          bool
+	dryRunStrategy  cmdutil.DryRunStrategy
 	force           bool
 	validate        bool
 	skipHooks       bool
@@ -292,7 +294,7 @@ func (sc *syncContext) Sync() {
 	// the dry-run for this operation, is if the resource or hook list is empty.
 	if !sc.started() {
 		sc.log.Debug("dry-run")
-		if sc.runTasks(tasks, true) == failed {
+		if sc.runTasks(tasks, cmdutil.DryRunServer) == failed {
 			sc.setOperationPhase(common.OperationFailed, "one or more objects failed to apply (dry run)")
 			return
 		}
@@ -387,7 +389,7 @@ func (sc *syncContext) Sync() {
 	sc.setOperationPhase(common.OperationRunning, "one or more tasks are running")
 
 	sc.log.WithFields(log.Fields{"tasks": tasks}).Debug("wet-run")
-	runState := sc.runTasks(tasks, false)
+	runState := sc.runTasks(tasks, cmdutil.DryRunNone)
 	switch runState {
 	case failed:
 		sc.setOperationFailed(syncFailTasks, "one or more objects failed to apply")
@@ -425,7 +427,7 @@ func (sc *syncContext) setOperationFailed(syncFailTasks syncTasks, message strin
 		// otherwise, we need to start the failure hooks, and then return without setting
 		// the phase, so we make sure we have at least one more sync
 		sc.log.WithFields(log.Fields{"syncFailTasks": syncFailTasks}).Debug("running sync fail tasks")
-		if sc.runTasks(syncFailTasks, false) == failed {
+		if sc.runTasks(syncFailTasks, cmdutil.DryRunNone) == failed {
 			sc.setOperationPhase(common.OperationFailed, message)
 		}
 	} else {
@@ -587,7 +589,7 @@ func (sc *syncContext) autoCreateNamespace(tasks syncTasks) syncTasks {
 		nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: kube.NamespaceKind}, ObjectMeta: metav1.ObjectMeta{Name: sc.namespace}}
 		unstructuredObj, err := kube.ToUnstructured(nsSpec)
 		if err == nil {
-			liveObj, err := sc.kubectl.GetResource(sc.config, unstructuredObj.GroupVersionKind(), unstructuredObj.GetName(), "")
+			liveObj, err := sc.kubectl.GetResource(context.TODO(), sc.config, unstructuredObj.GroupVersionKind(), unstructuredObj.GetName(), "")
 			if err == nil {
 				nsTask := &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj, liveObj: liveObj}
 				_, ok := sc.syncRes[nsTask.resultKey()]
@@ -654,7 +656,7 @@ func (sc *syncContext) setOperationPhase(phase common.OperationPhase, message st
 // ensureCRDReady waits until specified CRD is ready (established condition is true). Method is best effort - it does not fail even if CRD is not ready without timeout.
 func (sc *syncContext) ensureCRDReady(name string) {
 	_ = wait.PollImmediate(time.Duration(100)*time.Millisecond, crdReadinessTimeout, func() (bool, error) {
-		crd, err := sc.extensionsclientset.ApiextensionsV1beta1().CustomResourceDefinitions().Get(name, metav1.GetOptions{})
+		crd, err := sc.extensionsclientset.ApiextensionsV1beta1().CustomResourceDefinitions().Get(context.TODO(), name, metav1.GetOptions{})
 		if err != nil {
 			return false, err
 		}
@@ -667,12 +669,12 @@ func (sc *syncContext) ensureCRDReady(name string) {
 	})
 }
 
-func (sc *syncContext) applyObject(targetObj *unstructured.Unstructured, dryRun bool, force bool, validate bool) (common.ResultCode, string) {
-	message, err := sc.kubectl.ApplyResource(sc.rawConfig, targetObj, targetObj.GetNamespace(), dryRun, force, validate)
+func (sc *syncContext) applyObject(targetObj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force bool, validate bool) (common.ResultCode, string) {
+	message, err := sc.kubectl.ApplyResource(context.TODO(), sc.rawConfig, targetObj, targetObj.GetNamespace(), dryRunStrategy, force, validate)
 	if err != nil {
 		return common.ResultCodeSyncFailed, err.Error()
 	}
-	if kube.IsCRD(targetObj) && !dryRun {
+	if kube.IsCRD(targetObj) && dryRunStrategy == cmdutil.DryRunNone {
 		sc.ensureCRDReady(targetObj.GetName())
 	}
 	return common.ResultCodeSynced, message
@@ -691,7 +693,7 @@ func (sc *syncContext) pruneObject(liveObj *unstructured.Unstructured, prune, dr
 			// Skip deletion if object is already marked for deletion, so we don't cause a resource update hotloop
 			deletionTimestamp := liveObj.GetDeletionTimestamp()
 			if deletionTimestamp == nil || deletionTimestamp.IsZero() {
-				err := sc.kubectl.DeleteResource(sc.config, liveObj.GroupVersionKind(), liveObj.GetName(), liveObj.GetNamespace(), false)
+				err := sc.kubectl.DeleteResource(context.TODO(), sc.config, liveObj.GroupVersionKind(), liveObj.GetName(), liveObj.GetNamespace(), false)
 				if err != nil {
 					return common.ResultCodeSyncFailed, err.Error()
 				}
@@ -770,7 +772,7 @@ func (sc *syncContext) deleteResource(task *syncTask) error {
 		return err
 	}
 	propagationPolicy := metav1.DeletePropagationForeground
-	return resIf.Delete(task.name(), &metav1.DeleteOptions{PropagationPolicy: &propagationPolicy})
+	return resIf.Delete(context.TODO(), task.name(), metav1.DeleteOptions{PropagationPolicy: &propagationPolicy})
 }
 
 func (sc *syncContext) getResourceIf(task *syncTask) (dynamic.ResourceInterface, error) {
@@ -799,9 +801,13 @@ const (
 	failed
 )
 
-func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
+func (sc *syncContext) runTasks(tasks syncTasks, dryRunStrategy cmdutil.DryRunStrategy) runState {
+	dryRunStr := dryRunStrategy
+	if dryRunStr == cmdutil.DryRunNone {
+		dryRunStr = sc.dryRunStrategy
+	}
 
-	dryRun = dryRun || sc.dryRun
+	dryRun := dryRunStr != cmdutil.DryRunNone
 
 	sc.log.WithFields(log.Fields{"numTasks": len(tasks), "dryRun": dryRun}).Debug("running tasks")
 
@@ -830,7 +836,7 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 					runState = failed
 					logCtx.WithField("message", message).Info("pruning failed")
 				}
-				if !dryRun || sc.dryRun || result == common.ResultCodeSyncFailed {
+				if !dryRun || sc.dryRunStrategy != cmdutil.DryRunNone || result == common.ResultCodeSyncFailed {
 					sc.setResourceResult(t, result, operationPhases[result], message)
 				}
 			}(task)
@@ -880,12 +886,12 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 					logCtx := sc.log.WithFields(log.Fields{"dryRun": dryRun, "task": t})
 					logCtx.Debug("applying")
 					validate := sc.validate && !resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionsDisableValidation)
-					result, message := sc.applyObject(t.targetObj, dryRun, sc.force, validate)
+					result, message := sc.applyObject(t.targetObj, dryRunStr, sc.force, validate)
 					if result == common.ResultCodeSyncFailed {
 						logCtx.WithField("message", message).Info("apply failed")
 						runState = failed
 					}
-					if !dryRun || sc.dryRun || result == common.ResultCodeSyncFailed {
+					if !dryRun || sc.dryRunStrategy != cmdutil.DryRunNone || result == common.ResultCodeSyncFailed {
 						sc.setResourceResult(t, result, operationPhases[result], message)
 					}
 				}(task)
