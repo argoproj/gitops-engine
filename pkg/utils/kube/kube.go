@@ -2,8 +2,10 @@
 package kube
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 	"time"
@@ -16,6 +18,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/wait"
+	kubeyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
@@ -275,38 +279,34 @@ func newAuthInfo(restConfig *rest.Config) *clientcmdapi.AuthInfo {
 	return &authInfo
 }
 
-var diffSeparator = regexp.MustCompile(`\n---`)
-
 // SplitYAML splits a YAML file into unstructured objects. Returns list of all unstructured objects
-// found in the yaml. If any errors occurred, returns the first one
-func SplitYAML(out string) ([]*unstructured.Unstructured, error) {
-	parts := diffSeparator.Split(out, -1)
+// found in the yaml. If an error occurs, returns objects that have been parsed so far too.
+func SplitYAML(yamlData []byte) ([]*unstructured.Unstructured, error) {
+	// Similar way to what kubectl does
+	// https://github.com/kubernetes/cli-runtime/blob/master/pkg/resource/visitor.go#L573-L600
+	// Ideally k8s.io/cli-runtime/pkg/resource.Builder should be used instead of this method.
+	// E.g. Builder does list unpacking and flattening and this code does not.
+	d := kubeyaml.NewYAMLOrJSONDecoder(bytes.NewReader(yamlData), 4096)
 	var objs []*unstructured.Unstructured
-	var firstErr error
-	for _, part := range parts {
-		var objMap map[string]interface{}
-		err := yaml.Unmarshal([]byte(part), &objMap)
-		if err != nil {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("Failed to unmarshal manifest: %v", err)
+	for {
+		ext := runtime.RawExtension{}
+		if err := d.Decode(&ext); err != nil {
+			if err == io.EOF {
+				break
 			}
+			return objs, fmt.Errorf("failed to unmarshal manifest: %v", err)
+		}
+		ext.Raw = bytes.TrimSpace(ext.Raw)
+		if len(ext.Raw) == 0 || bytes.Equal(ext.Raw, []byte("null")) {
 			continue
 		}
-		if len(objMap) == 0 {
-			// handles case where theres no content between `---`
-			continue
+		u := &unstructured.Unstructured{}
+		if err := yaml.Unmarshal(ext.Raw, u); err != nil {
+			return objs, fmt.Errorf("failed to unmarshal manifest: %v", err)
 		}
-		var obj unstructured.Unstructured
-		err = yaml.Unmarshal([]byte(part), &obj)
-		if err != nil {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("Failed to unmarshal manifest: %v", err)
-			}
-			continue
-		}
-		objs = append(objs, &obj)
+		objs = append(objs, u)
 	}
-	return objs, firstErr
+	return objs, nil
 }
 
 // WatchWithRetry returns channel of watch events or errors of failed to call watch API.
@@ -368,31 +368,20 @@ func GetDeploymentReplicas(u *unstructured.Unstructured) *int64 {
 	return &val
 }
 
-// RetryUntilSucceed keep retrying given action with specified timeout until action succeed or specified context is done.
-func RetryUntilSucceed(action func() error, desc string, ctx context.Context, timeout time.Duration) {
-	ctxCompleted := false
-	stop := make(chan bool)
-	defer close(stop)
-	go func() {
-		select {
-		case <-ctx.Done():
-			ctxCompleted = true
-		case <-stop:
-		}
-	}()
-	for {
+// RetryUntilSucceed keep retrying given action with specified interval until action succeed or specified context is done.
+func RetryUntilSucceed(ctx context.Context, interval time.Duration, desc string, action func() error) {
+	pollErr := wait.PollImmediateUntil(interval, func() (bool /*done*/, error) {
 		log.Debugf("Start %s", desc)
 		err := action()
 		if err == nil {
 			log.Debugf("Completed %s", desc)
-			return
+			return true, nil
 		}
-		if ctxCompleted {
-			log.Debugf("Stop retrying %s", desc)
-			return
-		}
-		log.Debugf("Failed to %s: %+v, retrying in %v", desc, err, timeout)
-		time.Sleep(timeout)
-
+		log.Debugf("Failed to %s: %+v, retrying in %v", desc, err, interval)
+		return false, nil
+	}, ctx.Done())
+	if pollErr != nil {
+		// The only error that can happen here is wait.ErrWaitTimeout if ctx is done.
+		log.Debugf("Stop retrying %s", desc)
 	}
 }
