@@ -564,7 +564,33 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 
 	sort.Sort(tasks)
 
+	if sc.createNamespace && sc.namespace != "" {
+		tasks = sortNamespaceTaskOnTop(tasks)
+	}
+
 	return tasks, successful
+}
+
+//If there is namespace task, make sure it is the first one
+func sortNamespaceTaskOnTop(tasks syncTasks) syncTasks {
+	exist := false
+	sortedTasks := syncTasks{}
+
+	for index, task := range tasks {
+		if task.targetObj != nil && isNamespaceKind(task.targetObj) && task.phase == common.SyncPhasePreSync {
+			exist = true
+			sortedTasks = append(sortedTasks, task)
+			sortedTasks = append(sortedTasks, tasks[0:index]...)
+			sortedTasks = append(sortedTasks, tasks[index+1:]...)
+			break
+		}
+	}
+
+	if !exist {
+		return tasks
+	}
+
+	return sortedTasks
 }
 
 func (sc *syncContext) autoCreateNamespace(tasks syncTasks) syncTasks {
@@ -584,14 +610,20 @@ func (sc *syncContext) autoCreateNamespace(tasks syncTasks) syncTasks {
 	}
 
 	if isNamespaceCreationNeeded {
-		annotations := make(map[string]string)
-		annotations[common.AnnotationKeyHook] = common.SyncPhasePreSync
-		nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: kube.NamespaceKind}, ObjectMeta: metav1.ObjectMeta{Name: sc.namespace, Annotations: annotations}}
+		nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: kube.NamespaceKind}, ObjectMeta: metav1.ObjectMeta{Name: sc.namespace}}
 		unstructuredObj, err := kube.ToUnstructured(nsSpec)
 		if err == nil {
 			liveObj, err := sc.kubectl.GetResource(sc.config, unstructuredObj.GroupVersionKind(), unstructuredObj.GetName(), "")
-			if err == nil || apierr.IsNotFound(err) {
-				tasks = append(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj, liveObj: liveObj})
+			if err == nil {
+				nsTask := &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj, liveObj: liveObj}
+				_, ok := sc.syncRes[nsTask.resultKey()]
+				if ok {
+					tasks = append(tasks, nsTask)
+				} else {
+					sc.log.Infof("Namespace %s is already existed.", sc.namespace)
+				}
+			} else if apierr.IsNotFound(err) {
+				tasks = append(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj, liveObj: nil})
 			} else {
 				task := &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj}
 				sc.setResourceResult(task, common.ResultCodeSyncFailed, common.OperationError, fmt.Sprintf("Namespace auto creation failed: %s", err))
