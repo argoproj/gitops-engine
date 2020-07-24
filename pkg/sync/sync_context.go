@@ -564,25 +564,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 
 	sort.Sort(tasks)
 
-	if sc.createNamespace && sc.namespace != "" {
-		tasks = sortNamespaceTaskOnTop(tasks)
-	}
-
 	return tasks, successful
-}
-
-//If there is namespace task, make sure it is the first one
-func sortNamespaceTaskOnTop(tasks syncTasks) syncTasks {
-	for index, task := range tasks {
-		if task.targetObj != nil && isNamespaceKind(task.targetObj) && task.phase == common.SyncPhasePreSync {
-			sortedTasks := syncTasks{}
-			sortedTasks = append(sortedTasks, task)
-			sortedTasks = append(sortedTasks, tasks[0:index]...)
-			sortedTasks = append(sortedTasks, tasks[index+1:]...)
-			return sortedTasks
-		}
-	}
-	return tasks
 }
 
 func (sc *syncContext) autoCreateNamespace(tasks syncTasks) syncTasks {

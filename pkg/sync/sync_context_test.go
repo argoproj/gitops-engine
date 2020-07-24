@@ -580,37 +580,6 @@ func createNamespaceTask(namespace string) (*syncTask, error) {
 	return task, err
 }
 
-func TestNamespaceAutoCreationSortTask(t *testing.T) {
-	pod := NewPod()
-	unstructuredPod, err := kube.ToUnstructured(pod)
-	assert.NoError(t, err, "Failed convert pod to Unstructured. ")
-	taskPod := &syncTask{phase: synccommon.SyncPhasePreSync, targetObj: unstructuredPod}
-
-	taskNs, err := createNamespaceTask("namespace")
-	assert.NoError(t, err, "failed creating test data")
-
-	t.Run("namespace task on top after sort", func(t *testing.T) {
-		tasks := syncTasks{}
-		tasks = append(tasks, taskPod)
-		tasks = append(tasks, taskPod)
-		tasks = append(tasks, taskNs)
-		tasks = sortNamespaceTaskOnTop(tasks)
-		assert.Len(t, tasks, 3)
-		assert.Contains(t, tasks, taskNs)
-		assert.Equal(t, tasks[0], taskNs)
-	})
-
-	t.Run("No namespace task", func(t *testing.T) {
-		tasks := syncTasks{}
-		tasks = append(tasks, taskPod)
-		tasks = append(tasks, taskPod)
-		tasks = sortNamespaceTaskOnTop(tasks)
-		assert.Len(t, tasks, 2)
-		assert.NotContains(t, tasks, taskNs)
-		assert.NotEqual(t, tasks[0], taskNs)
-	})
-
-}
 func TestSyncFailureHookWithSuccessfulSync(t *testing.T) {
 	syncCtx := newTestSyncCtx()
 	syncCtx.resources = groupResources(ReconciliationResult{
