@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -14,9 +15,6 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	apiregistrationv1 "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1"
 	apiregistrationv1beta1 "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1beta1"
-	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
-
-	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 )
 
 // Represents resource health status
@@ -507,7 +505,7 @@ func getPodHealth(obj *unstructured.Unstructured) (*HealthStatus, error) {
 		switch pod.Spec.RestartPolicy {
 		case coreV1.RestartPolicyAlways:
 			// if pod is ready, it is automatically healthy
-			if podutil.IsPodReady(pod) {
+			if IsPodReady(pod) {
 				return &HealthStatus{
 					Status:  HealthStatusHealthy,
 					Message: pod.Status.Message,
