@@ -13,7 +13,7 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
-      - uses: actions/setup-go@v2.1.0
+      - uses: actions/setup-go@v2.1.1
         with:
           go-version: '1.13.6'
       - run: make test
@@ -22,7 +22,7 @@ jobs:
           args: run --timeout=5m
         env:
           GOROOT: ""
-      - uses: codecov/codecov-action@v1.0.10
+      - uses: codecov/codecov-action@v1.0.12
         with:
           token: ${{ secrets.CODECOV_TOKEN }} #required
           file: ./coverage.out

@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -64,8 +63,6 @@ type ClusterInfo struct {
 	SyncError error
 }
 
-var handlerKey uint64
-
 // OnEventHandler is a function that handles Kubernetes event
 type OnEventHandler func(event watch.EventType, un *unstructured.Unstructured)
 
@@ -112,6 +109,7 @@ type WeightedSemaphore interface {
 // NewClusterCache creates new instance of cluster cache
 func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCache {
 	cache := &clusterCache{
+		resyncTimeout:           clusterSyncTimeout,
 		settings:                Settings{ResourceHealthOverride: &noopSettings{}, ResourcesFilter: &noopSettings{}},
 		apisMeta:                make(map[schema.GroupKind]*apiMeta),
 		listPageSize:            defaultListPageSize,
@@ -133,6 +131,7 @@ func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCa
 }
 
 type clusterCache struct {
+	resyncTimeout time.Duration
 	syncTime      *time.Time
 	syncError     error
 	apisMeta      map[schema.GroupKind]*apiMeta
@@ -159,6 +158,7 @@ type clusterCache struct {
 	settings   Settings
 
 	handlersLock                sync.Mutex
+	handlerKey                  uint64
 	populateResourceInfoHandler OnPopulateResourceInfoHandler
 	resourceUpdatedHandlers     map[uint64]OnResourceUpdatedHandler
 	eventHandlers               map[uint64]OnEventHandler
@@ -168,7 +168,8 @@ type clusterCache struct {
 func (c *clusterCache) OnResourceUpdated(handler OnResourceUpdatedHandler) Unsubscribe {
 	c.handlersLock.Lock()
 	defer c.handlersLock.Unlock()
-	key := atomic.AddUint64(&handlerKey, 1)
+	key := c.handlerKey
+	c.handlerKey++
 	c.resourceUpdatedHandlers[key] = handler
 	return func() {
 		c.handlersLock.Lock()
@@ -191,11 +192,12 @@ func (c *clusterCache) getResourceUpdatedHandlers() []OnResourceUpdatedHandler {
 func (c *clusterCache) OnEvent(handler OnEventHandler) Unsubscribe {
 	c.handlersLock.Lock()
 	defer c.handlersLock.Unlock()
-	key := atomic.AddUint64(&handlerKey, 1)
+	key := c.handlerKey
+	c.handlerKey++
 	c.eventHandlers[key] = handler
 	return func() {
-		c.lock.Lock()
-		defer c.lock.Unlock()
+		c.handlersLock.Lock()
+		defer c.handlersLock.Unlock()
 		delete(c.eventHandlers, key)
 	}
 }
@@ -203,7 +205,7 @@ func (c *clusterCache) OnEvent(handler OnEventHandler) Unsubscribe {
 func (c *clusterCache) getEventHandlers() []OnEventHandler {
 	c.handlersLock.Lock()
 	defer c.handlersLock.Unlock()
-	var handlers []OnEventHandler
+	handlers := make([]OnEventHandler, 0, len(c.eventHandlers))
 	for _, h := range c.eventHandlers {
 		handlers = append(handlers, h)
 	}
@@ -362,7 +364,7 @@ func (c *clusterCache) synced() bool {
 	if c.syncError != nil {
 		return time.Now().Before(syncTime.Add(ClusterRetryTimeout))
 	}
-	return time.Now().Before(syncTime.Add(clusterSyncTimeout))
+	return time.Now().Before(syncTime.Add(c.resyncTimeout))
 }
 
 func (c *clusterCache) stopWatching(gk schema.GroupKind, ns string) {
@@ -415,7 +417,7 @@ func runSynced(lock sync.Locker, action func() error) error {
 }
 
 func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo, info *apiMeta, resClient dynamic.ResourceInterface, ns string) {
-	kube.RetryUntilSucceed(func() (err error) {
+	kube.RetryUntilSucceed(ctx, watchResourcesRetryTimeout, fmt.Sprintf("watch %s on %s", api.GroupKind, c.config.Host), func() (err error) {
 		defer func() {
 			if r := recover(); r != nil {
 				err = fmt.Errorf("Recovered from panic: %+v\n%s", r, debug.Stack())
@@ -509,8 +511,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 				}
 			}
 		}
-
-	}, fmt.Sprintf("watch %s on %s", api.GroupKind, c.config.Host), ctx, watchResourcesRetryTimeout)
+	})
 }
 
 func (c *clusterCache) processApi(client dynamic.Interface, api kube.APIResourceInfo, callback func(resClient dynamic.ResourceInterface, ns string) error) error {
