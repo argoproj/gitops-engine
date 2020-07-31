@@ -3,12 +3,12 @@ module github.com/argoproj/gitops-engine
 go 1.13
 
 require (
-	github.com/argoproj/pkg v0.0.0-20200102163130-2dd1f3f6b4de
+	github.com/argoproj/pkg v0.0.0-20200729001035-d7e4a06d90f3
 	github.com/evanphx/json-patch v4.2.0+incompatible
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/pkg/errors v0.9.1
-	github.com/sirupsen/logrus v1.4.2
-	github.com/spf13/cobra v0.0.7
+	github.com/sirupsen/logrus v1.6.0
+	github.com/spf13/cobra v1.0.0
 	github.com/stretchr/testify v1.6.1
 	golang.org/x/sync v0.0.0-20190911185100-cd5d95a43a6e
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
