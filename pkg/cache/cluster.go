@@ -502,7 +502,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 							c.log.Warnf("Failed to start missing watch: %v", err)
 						}
 					} else {
-						c.log.Warnf("Failed to convert to *unstructured.Unstructured: %v", event.Object)
+						return fmt.Errorf("Failed to convert to *unstructured.Unstructured: %v", event.Object)
 					}
 				} else {
 					return fmt.Errorf("Watch %s on %s has closed", api.GroupKind, c.config.Host)
