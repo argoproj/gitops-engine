@@ -23,17 +23,19 @@ func (c *clusterCache) resolveResourceReferences(un *unstructured.Unstructured) 
 	var isChildRef func(_ kube.ResourceKey) bool
 	ownerRefs := un.GetOwnerReferences()
 	gvk := un.GroupVersionKind()
+
+	switch {
+
 	// Special case for endpoint. Remove after https://github.com/kubernetes/kubernetes/issues/28483 is fixed
-	if gvk.Group == "" && gvk.Kind == kube.EndpointsKind && len(un.GetOwnerReferences()) == 0 {
+	case gvk.Group == "" && gvk.Kind == kube.EndpointsKind && len(un.GetOwnerReferences()) == 0:
 		ownerRefs = append(ownerRefs, metav1.OwnerReference{
 			Name:       un.GetName(),
 			Kind:       kube.ServiceKind,
 			APIVersion: "v1",
 		})
-	}
 
 	// Special case for Operator Lifecycle Manager ClusterServiceVersion:
-	if un.GroupVersionKind().Group == "operators.coreos.com" && un.GetKind() == "ClusterServiceVersion" {
+	case un.GroupVersionKind().Group == "operators.coreos.com" && un.GetKind() == "ClusterServiceVersion":
 		if un.GetAnnotations()["olm.operatorGroup"] != "" {
 			ownerRefs = append(ownerRefs, metav1.OwnerReference{
 				Name:       un.GetAnnotations()["olm.operatorGroup"],
@@ -41,18 +43,18 @@ func (c *clusterCache) resolveResourceReferences(un *unstructured.Unstructured) 
 				APIVersion: "operators.coreos.com/v1",
 			})
 		}
-	}
 
-	// edge case. Consider auto-created service account tokens as a child of service account objects
-	if yes, ref := isServiceAccountTokenSecret(un); yes {
-		ownerRefs = append(ownerRefs, ref)
-	}
+	// Edge case: consider auto-created service account tokens as a child of service account objects
+	case un.GetKind() == kube.SecretKind && un.GroupVersionKind().Group == "":
+		if yes, ref := isServiceAccountTokenSecret(un); yes {
+			ownerRefs = append(ownerRefs, ref)
+		}
 
-	if un.GroupVersionKind().Group == "" && un.GroupVersionKind().Kind == kube.PersistentVolumeClaimKind {
+	// PVC with matching names should be considered as a child of matching StatefulSet
+	case un.GroupVersionKind().Group == "" && un.GroupVersionKind().Kind == kube.PersistentVolumeClaimKind:
 		ownerRefs = append(ownerRefs, c.getPVCOwnerRefs(un)...)
-	}
 
-	if (un.GroupVersionKind().Group == "apps" || un.GroupVersionKind().Group == "extensions") && un.GetKind() == "StatefulSet" {
+	case (un.GroupVersionKind().Group == "apps" || un.GroupVersionKind().Group == "extensions") && un.GetKind() == kube.StatefulSetKind:
 		if refs, err := isStatefulSetChild(un); err != nil {
 			log.Errorf("Failed to extract StatefulSet %s/%s PVC references: %v", un.GetNamespace(), un.GetName(), err)
 		} else {
@@ -106,9 +108,6 @@ func isServiceAccountTokenSecret(un *unstructured.Unstructured) (bool, metav1.Ow
 	ref := metav1.OwnerReference{
 		APIVersion: "v1",
 		Kind:       kube.ServiceAccountKind,
-	}
-	if un.GetKind() != kube.SecretKind || un.GroupVersionKind().Group != "" {
-		return false, ref
 	}
 
 	if typeVal, ok, err := unstructured.NestedString(un.Object, "type"); !ok || err != nil || typeVal != "kubernetes.io/service-account-token" {
