@@ -103,16 +103,16 @@ func WithPrune(prune bool) SyncOpt {
 }
 
 // WithOperationSettings allows to set sync operation settings
-func WithOperationSettings(dryRunStrategy cmdutil.DryRunStrategy, prune bool, force bool, skipHooks bool) SyncOpt {
+func WithOperationSettings(dryRun bool, prune bool, force bool, skipHooks bool) SyncOpt {
 	return func(ctx *syncContext) {
 		ctx.prune = prune
 		ctx.skipHooks = skipHooks
-		ctx.dryRunStrategy = dryRunStrategy
+		ctx.dryRun = dryRun
 		ctx.force = force
 	}
 }
 
-// WithSkipHooks enables or disables manifest validation
+// WithManifestValidation enables or disables manifest validation
 func WithManifestValidation(enabled bool) SyncOpt {
 	return func(ctx *syncContext) {
 		ctx.validate = enabled
@@ -234,7 +234,7 @@ type syncContext struct {
 	kubectl             kube.Kubectl
 	namespace           string
 
-	dryRunStrategy  cmdutil.DryRunStrategy
+	dryRun          bool
 	force           bool
 	validate        bool
 	skipHooks       bool
@@ -294,7 +294,7 @@ func (sc *syncContext) Sync() {
 	// the dry-run for this operation, is if the resource or hook list is empty.
 	if !sc.started() {
 		sc.log.Debug("dry-run")
-		if sc.runTasks(tasks, cmdutil.DryRunServer) == failed {
+		if sc.runTasks(tasks, true) == failed {
 			sc.setOperationPhase(common.OperationFailed, "one or more objects failed to apply (dry run)")
 			return
 		}
@@ -389,7 +389,7 @@ func (sc *syncContext) Sync() {
 	sc.setOperationPhase(common.OperationRunning, "one or more tasks are running")
 
 	sc.log.WithFields(log.Fields{"tasks": tasks}).Debug("wet-run")
-	runState := sc.runTasks(tasks, cmdutil.DryRunNone)
+	runState := sc.runTasks(tasks, false)
 	switch runState {
 	case failed:
 		sc.setOperationFailed(syncFailTasks, "one or more objects failed to apply")
@@ -427,7 +427,7 @@ func (sc *syncContext) setOperationFailed(syncFailTasks syncTasks, message strin
 		// otherwise, we need to start the failure hooks, and then return without setting
 		// the phase, so we make sure we have at least one more sync
 		sc.log.WithFields(log.Fields{"syncFailTasks": syncFailTasks}).Debug("running sync fail tasks")
-		if sc.runTasks(syncFailTasks, cmdutil.DryRunNone) == failed {
+		if sc.runTasks(syncFailTasks, false) == failed {
 			sc.setOperationPhase(common.OperationFailed, message)
 		}
 	} else {
@@ -669,12 +669,16 @@ func (sc *syncContext) ensureCRDReady(name string) {
 	})
 }
 
-func (sc *syncContext) applyObject(targetObj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force bool, validate bool) (common.ResultCode, string) {
+func (sc *syncContext) applyObject(targetObj *unstructured.Unstructured, dryRun bool, force bool, validate bool) (common.ResultCode, string) {
+	dryRunStrategy := cmdutil.DryRunNone
+	if dryRun {
+		dryRunStrategy = cmdutil.DryRunClient
+	}
 	message, err := sc.kubectl.ApplyResource(context.TODO(), sc.rawConfig, targetObj, targetObj.GetNamespace(), dryRunStrategy, force, validate)
 	if err != nil {
 		return common.ResultCodeSyncFailed, err.Error()
 	}
-	if kube.IsCRD(targetObj) && dryRunStrategy == cmdutil.DryRunNone {
+	if kube.IsCRD(targetObj) && !dryRun {
 		sc.ensureCRDReady(targetObj.GetName())
 	}
 	return common.ResultCodeSynced, message
@@ -801,13 +805,8 @@ const (
 	failed
 )
 
-func (sc *syncContext) runTasks(tasks syncTasks, dryRunStrategy cmdutil.DryRunStrategy) runState {
-	dryRunStr := dryRunStrategy
-	if dryRunStr == cmdutil.DryRunNone {
-		dryRunStr = sc.dryRunStrategy
-	}
-
-	dryRun := dryRunStr != cmdutil.DryRunNone
+func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
+	dryRun = dryRun || sc.dryRun
 
 	sc.log.WithFields(log.Fields{"numTasks": len(tasks), "dryRun": dryRun}).Debug("running tasks")
 
@@ -836,7 +835,7 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRunStrategy cmdutil.DryRunSt
 					runState = failed
 					logCtx.WithField("message", message).Info("pruning failed")
 				}
-				if !dryRun || sc.dryRunStrategy != cmdutil.DryRunNone || result == common.ResultCodeSyncFailed {
+				if !dryRun || sc.dryRun || result == common.ResultCodeSyncFailed {
 					sc.setResourceResult(t, result, operationPhases[result], message)
 				}
 			}(task)
@@ -886,12 +885,12 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRunStrategy cmdutil.DryRunSt
 					logCtx := sc.log.WithFields(log.Fields{"dryRun": dryRun, "task": t})
 					logCtx.Debug("applying")
 					validate := sc.validate && !resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionsDisableValidation)
-					result, message := sc.applyObject(t.targetObj, dryRunStr, sc.force, validate)
+					result, message := sc.applyObject(t.targetObj, dryRun, sc.force, validate)
 					if result == common.ResultCodeSyncFailed {
 						logCtx.WithField("message", message).Info("apply failed")
 						runState = failed
 					}
-					if !dryRun || sc.dryRunStrategy != cmdutil.DryRunNone || result == common.ResultCodeSyncFailed {
+					if !dryRun || sc.dryRun || result == common.ResultCodeSyncFailed {
 						sc.setResourceResult(t, result, operationPhases[result], message)
 					}
 				}(task)

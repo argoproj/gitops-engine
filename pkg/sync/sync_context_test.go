@@ -5,6 +5,12 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/argoproj/gitops-engine/pkg/health"
+	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
+	"github.com/argoproj/gitops-engine/pkg/utils/kube"
+	"github.com/argoproj/gitops-engine/pkg/utils/kube/kubetest"
+	. "github.com/argoproj/gitops-engine/pkg/utils/testing"
+	testingutils "github.com/argoproj/gitops-engine/pkg/utils/testing"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -15,14 +21,6 @@ import (
 	"k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/rest"
 	testcore "k8s.io/client-go/testing"
-	cmdutil "k8s.io/kubectl/pkg/cmd/util"
-
-	"github.com/argoproj/gitops-engine/pkg/health"
-	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
-	"github.com/argoproj/gitops-engine/pkg/utils/kube"
-	"github.com/argoproj/gitops-engine/pkg/utils/kube/kubetest"
-	. "github.com/argoproj/gitops-engine/pkg/utils/testing"
-	testingutils "github.com/argoproj/gitops-engine/pkg/utils/testing"
 )
 
 func newTestSyncCtx(opts ...SyncOpt) *syncContext {
@@ -221,7 +219,7 @@ func TestSyncCustomResources(t *testing.T) {
 }
 
 func TestSyncSuccessfully(t *testing.T) {
-	syncCtx := newTestSyncCtx(WithOperationSettings(cmdutil.DryRunNone, true, false, false))
+	syncCtx := newTestSyncCtx(WithOperationSettings(false, true, false, false))
 	pod := NewPod()
 	pod.SetNamespace(FakeArgoCDNamespace)
 	syncCtx.resources = groupResources(ReconciliationResult{
@@ -249,7 +247,7 @@ func TestSyncSuccessfully(t *testing.T) {
 }
 
 func TestSyncDeleteSuccessfully(t *testing.T) {
-	syncCtx := newTestSyncCtx(WithOperationSettings(cmdutil.DryRunNone, true, false, false))
+	syncCtx := newTestSyncCtx(WithOperationSettings(false, true, false, false))
 	svc := NewService()
 	svc.SetNamespace(FakeArgoCDNamespace)
 	pod := NewPod()
@@ -303,7 +301,7 @@ func TestSyncCreateFailure(t *testing.T) {
 }
 
 func TestSyncPruneFailure(t *testing.T) {
-	syncCtx := newTestSyncCtx(WithOperationSettings(cmdutil.DryRunNone, true, false, false))
+	syncCtx := newTestSyncCtx(WithOperationSettings(false, true, false, false))
 	syncCtx.kubectl = &kubetest.MockKubectlCmd{
 		Commands: map[string]kubetest.KubectlOutput{
 			"test-service": {
@@ -331,7 +329,7 @@ func TestSyncPruneFailure(t *testing.T) {
 }
 
 func TestDontSyncOrPruneHooks(t *testing.T) {
-	syncCtx := newTestSyncCtx(WithOperationSettings(cmdutil.DryRunNone, false, false, true))
+	syncCtx := newTestSyncCtx(WithOperationSettings(false, false, false, true))
 	targetPod := NewPod()
 	targetPod.SetName("dont-create-me")
 	targetPod.SetAnnotations(map[string]string{synccommon.AnnotationKeyHook: "PreSync"})
@@ -349,7 +347,7 @@ func TestDontSyncOrPruneHooks(t *testing.T) {
 
 // make sure that we do not prune resources with Prune=false
 func TestDontPrunePruneFalse(t *testing.T) {
-	syncCtx := newTestSyncCtx(WithOperationSettings(cmdutil.DryRunNone, true, false, false))
+	syncCtx := newTestSyncCtx(WithOperationSettings(false, true, false, false))
 	pod := NewPod()
 	pod.SetAnnotations(map[string]string{synccommon.AnnotationSyncOptions: "Prune=false"})
 	pod.SetNamespace(FakeArgoCDNamespace)
@@ -475,7 +473,7 @@ func TestManagedResourceAreNotNamed(t *testing.T) {
 }
 
 func TestDeDupingTasks(t *testing.T) {
-	syncCtx := newTestSyncCtx(WithOperationSettings(cmdutil.DryRunNone, true, false, false))
+	syncCtx := newTestSyncCtx(WithOperationSettings(false, true, false, false))
 	pod := NewPod()
 	pod.SetAnnotations(map[string]string{synccommon.AnnotationKeyHook: "Sync"})
 	syncCtx.resources = groupResources(ReconciliationResult{
