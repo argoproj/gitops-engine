@@ -6,18 +6,18 @@ require (
 	github.com/evanphx/json-patch v4.2.0+incompatible
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/pkg/errors v0.9.1
-	github.com/sirupsen/logrus v1.4.2
-	github.com/spf13/cobra v0.0.7
+	github.com/sirupsen/logrus v1.6.0
+	github.com/spf13/cobra v1.0.0
 	github.com/stretchr/testify v1.6.1
-	golang.org/x/sync v0.0.0-20190911185100-cd5d95a43a6e
+	golang.org/x/sync v0.0.0-20200625203802-6e8e738ad208
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
-	k8s.io/api v1.17.8
-	k8s.io/apiextensions-apiserver v1.17.8
-	k8s.io/apimachinery v1.17.8
-	k8s.io/cli-runtime v1.17.8
-	k8s.io/client-go v1.17.8
-	k8s.io/kube-aggregator v1.17.8
-	k8s.io/kubectl v1.17.8
+	k8s.io/api v0.17.8
+	k8s.io/apiextensions-apiserver v0.17.8
+	k8s.io/apimachinery v0.17.8
+	k8s.io/cli-runtime v0.17.8
+	k8s.io/client-go v0.17.8
+	k8s.io/kube-aggregator v0.17.8
+	k8s.io/kubectl v0.17.8
 	k8s.io/kubernetes v1.17.8
 	sigs.k8s.io/yaml v1.2.0
 )
