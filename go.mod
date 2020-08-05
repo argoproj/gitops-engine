@@ -3,7 +3,7 @@ module github.com/argoproj/gitops-engine
 go 1.14
 
 require (
-	github.com/evanphx/json-patch v4.2.0+incompatible
+	github.com/evanphx/json-patch v4.5.0+incompatible
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.6.0
