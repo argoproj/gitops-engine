@@ -20,6 +20,8 @@ metadata:
   name: nginx-deployment
   labels:
     foo: bar
+  annotations:
+    foo: bar-annotations
 spec:
   template:
     metadata:
@@ -154,4 +156,37 @@ func TestSplitYAML_TrailingNewLines(t *testing.T) {
 	objs, err := SplitYAML([]byte("\n\n\n---" + depWithLabel))
 	require.NoError(t, err)
 	assert.Len(t, objs, 1)
+}
+
+func TestGetLabels(t *testing.T) {
+	for _, yamlStr := range [][]byte{[]byte(depWithLabel)} {
+		var obj unstructured.Unstructured
+		err := yaml.Unmarshal(yamlStr, &obj)
+		require.NoError(t, err)
+
+		value := GetAppInstanceLabel(&obj, "foo")
+		assert.Equal(t, "bar", value)
+	}
+}
+
+func TestGetAnnotations(t *testing.T) {
+	for _, yamlStr := range [][]byte{[]byte(depWithLabel)} {
+		var obj unstructured.Unstructured
+		err := yaml.Unmarshal(yamlStr, &obj)
+		require.NoError(t, err)
+
+		value := GetAppInstanceAnnotation(&obj, "foo")
+		assert.Equal(t, "bar-annotations", value)
+	}
+}
+
+func TestGetIdentifier(t *testing.T) {
+	for _, yamlStr := range [][]byte{[]byte(depWithLabel)} {
+		var obj unstructured.Unstructured
+		err := yaml.Unmarshal(yamlStr, &obj)
+		require.NoError(t, err)
+
+		value := GetAppInstanceIdentifier(&obj, "foo")
+		assert.Equal(t, "bar-annotations", value)
+	}
 }

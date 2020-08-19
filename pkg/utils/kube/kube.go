@@ -135,6 +135,24 @@ func GetAppInstanceLabel(un *unstructured.Unstructured, key string) string {
 	return ""
 }
 
+// GetAppInstanceAnnotation returns the application instance name from annotations
+func GetAppInstanceAnnotation(un *unstructured.Unstructured, key string) string {
+	if annotations := un.GetAnnotations(); annotations != nil {
+		return annotations[key]
+	}
+
+	return ""
+}
+
+// GetAppInstanceIdentifier returns the application instance name from annotations else labels
+func GetAppInstanceIdentifier(un *unstructured.Unstructured, key string) string {
+	annotation := GetAppInstanceAnnotation(un, key)
+	if annotation != "" {
+		return annotation
+	}
+	return GetAppInstanceLabel(un, key)
+}
+
 // UnsetLabel removes our app labels from an unstructured object
 func UnsetLabel(target *unstructured.Unstructured, key string) {
 	if labels := target.GetLabels(); labels != nil {
