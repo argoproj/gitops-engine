@@ -129,19 +129,12 @@ func MustToUnstructured(obj interface{}) *unstructured.Unstructured {
 
 // GetAppInstanceLabel returns the application instance name from labels
 func GetAppInstanceLabel(un *unstructured.Unstructured, key string) string {
-	if labels := un.GetLabels(); labels != nil {
-		return labels[key]
-	}
-	return ""
+	return un.GetLabels()[key]
 }
 
 // GetAppInstanceAnnotation returns the application instance name from annotations
 func GetAppInstanceAnnotation(un *unstructured.Unstructured, key string) string {
-	if annotations := un.GetAnnotations(); annotations != nil {
-		return annotations[key]
-	}
-
-	return ""
+	return un.GetAnnotations()[key]
 }
 
 // GetAppInstanceIdentifier returns the application instance name from annotations else labels
