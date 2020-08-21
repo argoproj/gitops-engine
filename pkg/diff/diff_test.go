@@ -2,8 +2,8 @@ package diff
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
-	"log"
 	"os"
 	"strings"
 	"testing"
@@ -145,7 +145,7 @@ func TestDiff(t *testing.T) {
 	ascii, err := printDiff(diffRes)
 	assert.Nil(t, err)
 	if ascii != "" {
-		log.Println(ascii)
+		t.Log(ascii)
 	}
 }
 
@@ -162,7 +162,7 @@ func TestDiff_KnownTypeInvalidValue(t *testing.T) {
 		ascii, err := printDiff(diffRes)
 		assert.Nil(t, err)
 		if ascii != "" {
-			log.Println(ascii)
+			t.Log(ascii)
 		}
 	})
 
@@ -274,7 +274,7 @@ func TestThreeWayDiff(t *testing.T) {
 	if !assert.False(t, res.Modified) {
 		ascii, err := printDiff(res)
 		assert.Nil(t, err)
-		log.Println(ascii)
+		t.Log(ascii)
 	}
 
 	// 3. Add a last-applied-configuration annotation in the live. There should still not be any
@@ -288,7 +288,7 @@ func TestThreeWayDiff(t *testing.T) {
 	if !assert.False(t, res.Modified) {
 		ascii, err := printDiff(res)
 		assert.Nil(t, err)
-		log.Println(ascii)
+		t.Log(ascii)
 	}
 
 	// 4. Remove the foo annotation from config and perform the diff again. We should detect a
@@ -310,7 +310,7 @@ func TestThreeWayDiff(t *testing.T) {
 	ascii, err := printDiff(res)
 	assert.Nil(t, err)
 	if ascii != "" {
-		log.Println(ascii)
+		t.Log(ascii)
 	}
 	assert.False(t, res.Modified)
 }
@@ -369,7 +369,7 @@ func TestThreeWayDiffExample1(t *testing.T) {
 	ascii, err := printDiff(dr)
 	assert.Nil(t, err)
 	if ascii != "" {
-		log.Println(ascii)
+		t.Log(ascii)
 	}
 
 }
@@ -384,7 +384,7 @@ func TestDiffOptionIgnoreAggregateRoles(t *testing.T) {
 		assert.False(t, dr.Modified)
 		ascii, err := printDiff(dr)
 		assert.Nil(t, err)
-		log.Println(ascii)
+		t.Log(ascii)
 	}
 	// Test case 2: Ignore option is false, the aggregation should produce a diff
 	{
@@ -394,7 +394,7 @@ func TestDiffOptionIgnoreAggregateRoles(t *testing.T) {
 		assert.True(t, dr.Modified)
 		ascii, err := printDiff(dr)
 		assert.Nil(t, err)
-		log.Println(ascii)
+		t.Log(ascii)
 	}
 }
 
@@ -405,7 +405,7 @@ func TestThreeWayDiffExample2(t *testing.T) {
 	assert.False(t, dr.Modified)
 	ascii, err := printDiff(dr)
 	assert.Nil(t, err)
-	log.Println(ascii)
+	t.Log(ascii)
 }
 
 // Tests a real world example
@@ -418,7 +418,7 @@ func TestThreeWayDiffExample3(t *testing.T) {
 	ascii, err := printDiff(dr)
 	assert.Nil(t, err)
 	if ascii != "" {
-		log.Println(ascii)
+		t.Log(ascii)
 	}
 }
 
@@ -431,7 +431,7 @@ func TestThreeWayDiffExample4(t *testing.T) {
 	ascii, err := printDiff(dr)
 	assert.Nil(t, err)
 	if ascii != "" {
-		log.Println(ascii)
+		t.Log(ascii)
 	}
 }
 
@@ -452,7 +452,7 @@ func TestThreeWayDiffExample2WithDifference(t *testing.T) {
 	assert.True(t, dr.Modified)
 	ascii, err := printDiff(dr)
 	assert.Nil(t, err)
-	log.Println(ascii)
+	t.Log(ascii)
 
 	// Check that we indicate missing/extra/changed correctly
 	showsMissing := 0
@@ -484,7 +484,7 @@ func TestThreeWayDiffExplicitNamespace(t *testing.T) {
 	assert.False(t, dr.Modified)
 	ascii, err := printDiff(dr)
 	assert.Nil(t, err)
-	log.Println(ascii)
+	t.Log(ascii)
 }
 
 func TestRemoveNamespaceAnnotation(t *testing.T) {
@@ -585,7 +585,7 @@ func TestSecretStringData(t *testing.T) {
 	if !assert.False(t, dr.Modified) {
 		ascii, err := printDiff(dr)
 		assert.Nil(t, err)
-		log.Println(ascii)
+		t.Log(ascii)
 	}
 }
 
@@ -636,7 +636,7 @@ func TestNullSecretData(t *testing.T) {
 	if !assert.False(t, dr.Modified) {
 		ascii, err := printDiff(dr)
 		assert.Nil(t, err)
-		log.Println(ascii)
+		t.Log(ascii)
 	}
 }
 
@@ -655,7 +655,7 @@ func TestRedactedSecretData(t *testing.T) {
 	if !assert.True(t, dr.Modified) {
 		ascii, err := printDiff(dr)
 		assert.Nil(t, err)
-		log.Println(ascii)
+		t.Log(ascii)
 	}
 }
 
@@ -666,7 +666,7 @@ func TestNullRoleRule(t *testing.T) {
 	if !assert.False(t, dr.Modified) {
 		ascii, err := printDiff(dr)
 		assert.Nil(t, err)
-		log.Println(ascii)
+		t.Log(ascii)
 	}
 }
 
@@ -677,7 +677,7 @@ func TestNullCreationTimestamp(t *testing.T) {
 	if !assert.False(t, dr.Modified) {
 		ascii, err := printDiff(dr)
 		assert.Nil(t, err)
-		log.Println(ascii)
+		t.Log(ascii)
 	}
 }
 
@@ -790,10 +790,10 @@ spec:
 	err := yaml.Unmarshal(manifest, &un)
 	assert.NoError(t, err)
 	requestsBefore := un.Object["spec"].(map[string]interface{})["containers"].([]interface{})[0].(map[string]interface{})["resources"].(map[string]interface{})["requests"].(map[string]interface{})
-	log.Println(requestsBefore)
+	t.Log(requestsBefore)
 	newUn := remarshal(&un)
 	requestsAfter := newUn.Object["spec"].(map[string]interface{})["containers"].([]interface{})[0].(map[string]interface{})["resources"].(map[string]interface{})["requests"].(map[string]interface{})
-	log.Println(requestsAfter)
+	t.Log(requestsAfter)
 	assert.Equal(t, float64(0.2), requestsBefore["cpu"])
 	assert.Equal(t, "200m", requestsAfter["cpu"])
 }
@@ -843,6 +843,6 @@ spec:
 		panic(err)
 	}
 	if diff.Modified {
-		println("Resources are different")
+		fmt.Println("Resources are different")
 	}
 }
