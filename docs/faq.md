@@ -19,7 +19,7 @@ The latter was deemed to be the most practical solution.
 
 March 2020 the Flux team made a [proof of concept](https://github.com/fluxcd/flux/pull/2886) available, which rebased the Flux on top of the GitOps Engine, but while looking at the breaking changes this was going to introduce the Flux team decided that it was a time for a [more ground-breaking approach](https://www.weave.works/blog/gitops-with-flux-v2) on how to do GitOps. After some experimentation, the GitOps Toolkit was put out as an RFC in June 2020.
 
-The GitOps Engine was and still is the natural evolution for the Argo CD project. A [number of other projects](https://github.com/search?q=argoproj%2Fgitops-engine&type=Code) already started looking at integrating it.
+A [number of other projects](https://github.com/search?q=argoproj%2Fgitops-engine&type=Code) already started looking at integrating the GitOps Engine.
 
 The Argo and Flux teams decided all of this on good terms. All of these discussions were immensely helpful in shaping both projects' future. You might see each of us stealing good ideas from the other in the future and celebrate each others successes. There might be future collaborations, we'll keep you posted.
 
