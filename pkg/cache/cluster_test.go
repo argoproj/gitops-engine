@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/rest"
+	testcore "k8s.io/client-go/testing"
 	"sigs.k8s.io/yaml"
 
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
@@ -103,6 +104,15 @@ func newCluster(objs ...*unstructured.Unstructured) *clusterCache {
 	}
 	scheme := runtime.NewScheme()
 	client := fake.NewSimpleDynamicClient(scheme, runtimeObjs...)
+	reactor := client.ReactionChain[0]
+	client.PrependReactor("list", "*", func(action testcore.Action) (handled bool, ret runtime.Object, err error) {
+		handled, ret, err = reactor.React(action)
+		// make sure list response have resource version
+		if list, ok := ret.(*unstructured.UnstructuredList); ok {
+			list.SetResourceVersion("123")
+		}
+		return
+	})
 
 	apiResources := []kube.APIResourceInfo{{
 		GroupKind:            schema.GroupKind{Group: "", Kind: "Pod"},
