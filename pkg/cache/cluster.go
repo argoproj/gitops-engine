@@ -384,7 +384,6 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 			if err := c.listSemaphore.Acquire(ctx, 1); err != nil {
 				return err
 			}
-			defer c.listSemaphore.Release(1)
 
 			var items []unstructured.Unstructured
 			err = listPager.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
@@ -395,6 +394,9 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 				}
 				return nil
 			})
+
+			c.listSemaphore.Release(1)
+
 			if err != nil {
 				return fmt.Errorf("failed to load initial state of resource %s: %v", api.GroupKind.String(), err)
 			}
@@ -411,14 +413,13 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 
 		w, err := watchutil.NewRetryWatcher(resourceVersion, &cache.ListWatch{
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return resClient.Watch(ctx, options)
+				res, err := resClient.Watch(ctx, options)
+				if errors.IsNotFound(err) {
+					c.stopWatching(api.GroupKind, ns)
+				}
+				return res, err
 			},
 		})
-
-		if errors.IsNotFound(err) {
-			c.stopWatching(api.GroupKind, ns)
-			return nil
-		}
 
 		defer func() {
 			w.Stop()
