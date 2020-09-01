@@ -332,7 +332,7 @@ func getStatefulSetHealth(obj *unstructured.Unstructured) (*HealthStatus, error)
 	if sts.Spec.UpdateStrategy.Type == appsv1.OnDeleteStatefulSetStrategyType {
 		return &HealthStatus{
 			Status:  HealthStatusHealthy,
-			Message: fmt.Sprintf("updateStrategy is OnDelete type."),
+			Message: fmt.Sprintf("statefulset has %d ready pods", sts.Status.ReadyReplicas),
 		}, nil
 	}
 	if sts.Status.UpdateRevision != sts.Status.CurrentRevision {
