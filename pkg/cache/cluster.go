@@ -440,6 +440,9 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 				return res, err
 			},
 		})
+		if err != nil {
+			return err
+		}
 
 		defer func() {
 			w.Stop()
@@ -486,10 +489,10 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 						err = runSynced(&c.lock, func() error {
 							return c.startMissingWatches()
 						})
+						if err != nil {
+							c.log.Warnf("Failed to start missing watch: %v", err)
+						}
 					}
-				}
-				if err != nil {
-					c.log.Warnf("Failed to start missing watch: %v", err)
 				}
 			}
 		}
