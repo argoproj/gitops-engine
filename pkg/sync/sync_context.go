@@ -599,7 +599,6 @@ func (sc *syncContext) autoCreateNamespace(tasks syncTasks) syncTasks {
 					tasks = append(tasks, nsTask)
 				} else {
 					sc.log.Infof("Namespace %s is already existed.", sc.namespace)
-					//We need to remove app label to avoid prunning the namespace
 					liveObjCopy := liveObj.DeepCopy()
 					if sc.namespaceModifier(liveObjCopy) {
 						tasks = append(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: liveObjCopy, liveObj: liveObj})
