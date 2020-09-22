@@ -601,11 +601,9 @@ func (sc *syncContext) autoCreateNamespace(tasks syncTasks) syncTasks {
 					sc.log.Infof("Namespace %s is already existed.", sc.namespace)
 					//We need to remove app label to avoid prunning the namespace
 					if liveObj != nil && sc.appLabelKey != "" && kube.GetAppInstanceLabel(liveObj, sc.appLabelKey) != "" {
-						kube.UnsetLabel(liveObj, sc.appLabelKey)
-						_, err := sc.kubectl.ApplyResource(context.TODO(), sc.rawConfig, liveObj, liveObj.GetNamespace(), cmdutil.DryRunNone, false, true)
-						if err != nil {
-							sc.log.Infof("Removing label %s from Namespace %s failed. %s", sc.appLabelKey, sc.namespace, err.Error())
-						}
+						liveObjCopy := liveObj.DeepCopy()
+						kube.UnsetLabel(liveObjCopy, sc.appLabelKey)
+						tasks = append(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: liveObjCopy, liveObj: liveObj})
 					}
 				}
 			} else if apierr.IsNotFound(err) {
