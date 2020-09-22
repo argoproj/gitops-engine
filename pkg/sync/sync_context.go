@@ -120,10 +120,10 @@ func WithManifestValidation(enabled bool) SyncOpt {
 }
 
 // WithNamespaceCreation will create non-exist namespace
-func WithNamespaceCreation(createNamespace bool, appLabelKey string) SyncOpt {
+func WithNamespaceCreation(createNamespace bool, namespaceModifier func(*unstructured.Unstructured) bool) SyncOpt {
 	return func(ctx *syncContext) {
 		ctx.createNamespace = createNamespace
-		ctx.appLabelKey = appLabelKey
+		ctx.namespaceModifier = namespaceModifier
 	}
 }
 
@@ -252,8 +252,8 @@ type syncContext struct {
 	// lock to protect concurrent updates of the result list
 	lock sync.Mutex
 
-	createNamespace bool
-	appLabelKey     string
+	createNamespace   bool
+	namespaceModifier func(*unstructured.Unstructured) bool
 }
 
 func (sc *syncContext) setRunningPhase(tasks []*syncTask, isPendingDeletion bool) {
@@ -600,9 +600,8 @@ func (sc *syncContext) autoCreateNamespace(tasks syncTasks) syncTasks {
 				} else {
 					sc.log.Infof("Namespace %s is already existed.", sc.namespace)
 					//We need to remove app label to avoid prunning the namespace
-					if liveObj != nil && sc.appLabelKey != "" && kube.GetAppInstanceLabel(liveObj, sc.appLabelKey) != "" {
-						liveObjCopy := liveObj.DeepCopy()
-						kube.UnsetLabel(liveObjCopy, sc.appLabelKey)
+					liveObjCopy := liveObj.DeepCopy()
+					if sc.namespaceModifier(liveObjCopy) {
 						tasks = append(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: liveObjCopy, liveObj: liveObj})
 					}
 				}
