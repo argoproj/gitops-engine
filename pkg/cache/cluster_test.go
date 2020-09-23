@@ -372,6 +372,31 @@ metadata:
 	})
 }
 
+func TestGetManagedLiveObjsNamespacedModeClusterLevelResource(t *testing.T) {
+	cluster := newCluster(testPod, testRS, testDeploy)
+	cluster.Invalidate(SetPopulateResourceInfoHandler(func(un *unstructured.Unstructured, isRoot bool) (info interface{}, cacheManifest bool) {
+		return nil, true
+	}))
+	cluster.namespaces = []string{"default", "production"}
+
+	err := cluster.EnsureSynced()
+	assert.Nil(t, err)
+
+	targetDeploy := strToUnstructured(`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: helm-guestbook
+  labels:
+    app: helm-guestbook`)
+
+	managedObjs, err := cluster.GetManagedLiveObjs([]*unstructured.Unstructured{targetDeploy}, func(r *Resource) bool {
+		return len(r.OwnerRefs) == 0
+	})
+	assert.Nil(t, managedObjs)
+	assert.Equal(t, "Cluster level Deployment \"helm-guestbook\" can not be managed when in namespaced mode", err.Error())
+}
+
 func TestGetManagedLiveObjsAllNamespaces(t *testing.T) {
 	cluster := newCluster(testPod, testRS, testDeploy)
 	cluster.Invalidate(SetPopulateResourceInfoHandler(func(un *unstructured.Unstructured, isRoot bool) (info interface{}, cacheManifest bool) {

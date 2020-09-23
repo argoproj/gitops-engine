@@ -665,8 +665,8 @@ func (c *clusterCache) managesNamespace(namespace string) bool {
 	if len(c.namespaces) == 0 {
 		return true
 	}
-	if len(namespace) == 0 {
-		return true
+	if namespace == "" {
+		return false
 	}
 	for _, ns := range c.namespaces {
 		if ns == namespace {
@@ -685,6 +685,9 @@ func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructure
 
 	for _, o := range targetObjs {
 		if !c.managesNamespace(o.GetNamespace()) {
+			if o.GetNamespace() == "" {
+				return nil, fmt.Errorf("Cluster level %s %q can not be managed when in namespaced mode", o.GetKind(), o.GetName())
+			}
 			return nil, fmt.Errorf("Namespace %q for %s %q is not managed", o.GetNamespace(), o.GetKind(), o.GetName())
 		}
 	}
