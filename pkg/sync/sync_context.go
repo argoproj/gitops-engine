@@ -345,16 +345,10 @@ func (sc *syncContext) Sync() {
 		return
 	}
 
-	// delete all completed hooks which have appropriate delete policy
+	// collect all completed hooks which have appropriate delete policy
 	hooksPendingDeletion := tasks.Filter(func(task *syncTask) bool {
 		return task.isHook() && task.liveObj != nil && !task.running() && task.deleteOnPhaseCompletion()
 	})
-	for _, task := range hooksPendingDeletion {
-		err := sc.deleteResource(task)
-		if err != nil && !apierr.IsNotFound(err) {
-			sc.setResourceResult(task, "", common.OperationError, fmt.Sprintf("failed to delete resource: %v", err))
-		}
-	}
 
 	// syncFailTasks only run during failure, so separate them from regular tasks
 	syncFailTasks, tasks := tasks.Split(func(t *syncTask) bool { return t.phase == common.SyncPhaseSyncFail })
@@ -372,6 +366,8 @@ func (sc *syncContext) Sync() {
 	// If no sync tasks were generated (e.g., in case all application manifests have been removed),
 	// the sync operation is successful.
 	if len(tasks) == 0 {
+		// delete all completed hooks which have appropriate delete policy
+		sc.deleteHooks(hooksPendingDeletion)
 		sc.setOperationPhase(common.OperationSucceeded, "successfully synced (no more tasks)")
 		return
 	}
@@ -397,6 +393,8 @@ func (sc *syncContext) Sync() {
 		sc.setOperationFailed(syncFailTasks, "one or more objects failed to apply")
 	case successful:
 		if remainingTasks.Len() == 0 {
+			// delete all completed hooks which have appropriate delete policy
+			sc.deleteHooks(hooksPendingDeletion)
 			sc.setOperationPhase(common.OperationSucceeded, "successfully synced (all tasks run)")
 		} else {
 			sc.setRunningPhase(remainingTasks, false)
@@ -405,6 +403,15 @@ func (sc *syncContext) Sync() {
 		sc.setRunningPhase(tasks.Filter(func(task *syncTask) bool {
 			return task.deleteOnPhaseCompletion()
 		}), true)
+	}
+}
+
+func (sc *syncContext) deleteHooks(hooksPendingDeletion syncTasks) {
+	for _, task := range hooksPendingDeletion {
+		err := sc.deleteResource(task)
+		if err != nil && !apierr.IsNotFound(err) {
+			sc.setResourceResult(task, "", common.OperationError, fmt.Sprintf("failed to delete resource: %v", err))
+		}
 	}
 }
 
