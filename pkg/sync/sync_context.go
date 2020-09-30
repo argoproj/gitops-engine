@@ -346,8 +346,12 @@ func (sc *syncContext) Sync() {
 	}
 
 	// collect all completed hooks which have appropriate delete policy
-	hooksPendingDeletion := tasks.Filter(func(task *syncTask) bool {
-		return task.isHook() && task.liveObj != nil && !task.running() && task.deleteOnPhaseCompletion()
+	hooksPendingDeletionSuccessful := tasks.Filter(func(task *syncTask) bool {
+		return task.isHook() && task.liveObj != nil && !task.running() && task.deleteOnPhaseSuccessful()
+	})
+
+	hooksPendingDeletionFailed := tasks.Filter(func(task *syncTask) bool {
+		return task.isHook() && task.liveObj != nil && !task.running() && task.deleteOnPhaseFailed()
 	})
 
 	// syncFailTasks only run during failure, so separate them from regular tasks
@@ -355,6 +359,7 @@ func (sc *syncContext) Sync() {
 
 	// if there are any completed but unsuccessful tasks, sync is a failure.
 	if tasks.Any(func(t *syncTask) bool { return t.completed() && !t.successful() }) {
+		sc.deleteHooks(hooksPendingDeletionFailed)
 		sc.setOperationFailed(syncFailTasks, "one or more synchronization tasks completed unsuccessfully")
 		return
 	}
@@ -367,7 +372,7 @@ func (sc *syncContext) Sync() {
 	// the sync operation is successful.
 	if len(tasks) == 0 {
 		// delete all completed hooks which have appropriate delete policy
-		sc.deleteHooks(hooksPendingDeletion)
+		sc.deleteHooks(hooksPendingDeletionSuccessful)
 		sc.setOperationPhase(common.OperationSucceeded, "successfully synced (no more tasks)")
 		return
 	}
@@ -390,11 +395,12 @@ func (sc *syncContext) Sync() {
 	runState := sc.runTasks(tasks, false)
 	switch runState {
 	case failed:
+		sc.deleteHooks(hooksPendingDeletionFailed)
 		sc.setOperationFailed(syncFailTasks, "one or more objects failed to apply")
 	case successful:
 		if remainingTasks.Len() == 0 {
 			// delete all completed hooks which have appropriate delete policy
-			sc.deleteHooks(hooksPendingDeletion)
+			sc.deleteHooks(hooksPendingDeletionSuccessful)
 			sc.setOperationPhase(common.OperationSucceeded, "successfully synced (all tasks run)")
 		} else {
 			sc.setRunningPhase(remainingTasks, false)
