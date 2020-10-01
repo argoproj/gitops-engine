@@ -103,10 +103,6 @@ func (t *syncTask) successful() bool {
 	return t.operationState.Successful()
 }
 
-func (t *syncTask) failed() bool {
-	return t.operationState.Failed()
-}
-
 func (t *syncTask) hookType() common.HookType {
 	if t.isHook() {
 		return common.HookType(t.phase)
