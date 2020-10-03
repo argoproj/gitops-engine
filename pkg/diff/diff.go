@@ -155,7 +155,7 @@ func applyPatch(liveBytes []byte, patchBytes []byte, newVersionedObject func() (
 		return nil, nil, err
 	}
 
-	// Apply the patchBytes patch against liveBytes, using predictedLive to indicate the Go data type
+	// Apply the patchBytes patch against liveBytes, using predictedLive to indicate the k8s data type
 	predictedLiveBytes, err := strategicpatch.StrategicMergePatch(liveBytes, patchBytes, predictedLive)
 	if err != nil {
 		return nil, nil, err
