@@ -170,7 +170,6 @@ func applyPatch(liveBytes []byte, patchBytes []byte, newVersionedObject func() (
 		//
 		// Why do we do this? Since predictedLive is "tainted" (missing extra fields), we cannot use it to populate
 		// predictedLiveBytes, BUT we still need predictedLive itself in order to call the default scheme functions.
-		//
 		// So, we call the default scheme functions on the "tainted" struct, to generate a patch, and then
 		// apply that patch to the untainted JSON.
 		patch, err := generateSchemeDefaultPatch(predictedLive)
@@ -190,7 +189,10 @@ func applyPatch(liveBytes []byte, patchBytes []byte, newVersionedObject func() (
 		// are sorted in a consistent order (we do the same below, so that they can be
 		// lexicographically compared with one another)
 		var result map[string]interface{}
-		json.Unmarshal([]byte(predictedLiveBytes), &result)
+		err = json.Unmarshal([]byte(predictedLiveBytes), &result)
+		if err != nil {
+			return nil, nil, err
+		}
 		predictedLiveBytes, err = json.Marshal(result)
 		if err != nil {
 			return nil, nil, err
@@ -219,8 +221,10 @@ func applyPatch(liveBytes []byte, patchBytes []byte, newVersionedObject func() (
 
 		// Ensure the fields are sorted in a consistent order (as above)
 		var result map[string]interface{}
-		json.Unmarshal([]byte(liveBytes), &result)
-
+		err = json.Unmarshal([]byte(liveBytes), &result)
+		if err != nil {
+			return nil, nil, err
+		}
 		liveBytes, err = json.Marshal(result)
 		if err != nil {
 			return nil, nil, err
@@ -259,7 +263,7 @@ func ThreeWayDiff(orig, config, live *unstructured.Unstructured) (*DiffResult, e
 			return nil, err
 		}
 	} else {
-		// Otherwise, merge path directly as JSON
+		// Otherwise, merge patch directly as JSON
 		predictedLiveBytes, err = jsonpatch.MergePatch(liveBytes, patchBytes)
 		if err != nil {
 			return nil, err
