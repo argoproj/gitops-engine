@@ -3,6 +3,7 @@ module github.com/argoproj/gitops-engine
 go 1.14
 
 require (
+	github.com/MakeNowJust/heredoc v0.0.0-20170808103936-bb23615498cd
 	github.com/evanphx/json-patch v4.9.0+incompatible
 	github.com/go-logr/logr v0.2.1
 	github.com/golang/mock v1.4.4

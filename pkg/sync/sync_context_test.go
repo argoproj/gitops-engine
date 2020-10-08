@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/MakeNowJust/heredoc"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -996,4 +997,47 @@ func TestSyncWaveHookFail(t *testing.T) {
 	assert.Equal(t, synccommon.OperationFailed, phase)
 	assert.Equal(t, "SyncWaveHook failed: intentional error", msg)
 	assert.Equal(t, synccommon.OperationRunning, results[0].HookPhase)
+}
+
+func TestValidateCR(t *testing.T) {
+	crds := []*unstructured.Unstructured{
+		NewBetaCRDWithSchema(),
+		NewV1CRDWithSchema(), // k8s 1.16+ only
+	}
+
+	data := []struct {
+		cr *unstructured.Unstructured
+		err string
+		valid bool
+	}{
+		{
+			cr: Unstructured(heredoc.Doc(`
+			apiVersion: argoproj.io/v1
+			kind: TestCrd
+			spec: {}
+			`,
+			)),
+			err: "",
+		},
+		{
+			cr: Unstructured(heredoc.Doc(`
+			apiVersion: argoproj.io/v1
+			kind: TestCrd
+			spec: 1
+			`,
+			)),
+			err: `spec: Invalid value: "number": spec in body must be of type object: "number"`,
+		},
+	}
+
+	for _, d := range data {
+		for _, crd := range crds {
+			err := validateCR(crd, d.cr)
+			if d.err != "" {
+				assert.Equal(t, d.err, fmt.Sprintf("%s", err))
+			} else {
+				assert.NoError(t, err)
+			}
+		}
+	}
 }

@@ -90,6 +90,50 @@ spec:
     kind: TestCrd`)
 }
 
+func NewBetaCRDWithSchema() *unstructured.Unstructured {
+	return Unstructured(`apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: testcrds.argoproj.io
+spec:
+  group: argoproj.io
+  version: v1
+  scope: Namespaced
+  names:
+    plural: testcrds
+    kind: TestCrd
+  validation:
+    openAPIV3Schema:
+      type: object
+      properties:
+        spec:
+          type: object
+`)
+}
+
+func NewV1CRDWithSchema() *unstructured.Unstructured {
+	return Unstructured(`apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: testcrds.argoproj.io
+spec:
+  group: argoproj.io
+  version: v1
+  scope: Namespaced
+  names:
+    plural: testcrds
+    kind: TestCrd
+  versions:
+    - name: v1
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+`)
+}
+
 func NewNamespace() *unstructured.Unstructured {
 	return Unstructured(`apiVersion: v1
 kind: Namespace

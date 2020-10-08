@@ -16,13 +16,14 @@ import (
 // indicates the live object needs to be pruned. A liveObj of nil indicates the object has yet to
 // be deployed
 type syncTask struct {
-	phase          common.SyncPhase
-	liveObj        *unstructured.Unstructured
-	targetObj      *unstructured.Unstructured
-	skipDryRun     bool
-	syncStatus     common.ResultCode
-	operationState common.OperationPhase
-	message        string
+	phase   common.SyncPhase
+	liveObj *unstructured.Unstructured
+
+	targetObj                *unstructured.Unstructured
+	skipDryRun               bool
+	syncStatus               common.ResultCode
+	operationState           common.OperationPhase
+	message                  string
 }
 
 // isDependsOn returns true if given task depends on current task and should be executed after

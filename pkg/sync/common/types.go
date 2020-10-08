@@ -23,6 +23,8 @@ const (
 	SyncOptionDisablePrune = "Prune=false"
 	// Sync option that disables resource validation
 	SyncOptionsDisableValidation = "Validate=false"
+	// Sync option that enables offline Custom Resource validation using the local CRD
+	SyncOptionValidateWithLocalCRD = "ValidateWithLocalCRD=true"
 )
 
 type PermissionValidator func(un *unstructured.Unstructured, res *metav1.APIResource) error

@@ -10,8 +10,12 @@ import (
 
 	"github.com/go-logr/logr"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+	crdv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+	crdv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	"k8s.io/apiextensions-apiserver/pkg/apiserver/validation"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
 	apierr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -600,6 +604,20 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 				successful = false
 			}
 		} else {
+			if task.targetObj != nil && resourceutil.HasAnnotationOption(task.targetObj, common.AnnotationSyncOptions, common.SyncOptionValidateWithLocalCRD) {
+				if ok, crd := sc.getCRDOfGroupKind(task.group(), task.kind()); ok {
+					err := validateCR(crd, task.targetObj)
+					if err != nil {
+						sc.log.WithValues("task", task).Error(err,"validation failed against local CRD")
+						sc.setResourceResult(task, common.ResultCodeSyncFailed, "", err.Error())
+						successful = false
+					} else {
+						sc.log.WithValues("task", task).V(1).Info("skip dry-run for locally validated custom resource")
+						task.skipDryRun = true
+					}
+				}
+			}
+
 			if err := sc.permissionValidator(task.obj(), serverRes); err != nil {
 				sc.setResourceResult(task, common.ResultCodeSyncFailed, "", err.Error())
 				successful = false
@@ -708,8 +726,8 @@ func (sc *syncContext) ensureCRDReady(name string) {
 			return false, err
 		}
 		for _, condition := range crd.Status.Conditions {
-			if condition.Type == v1beta1.Established {
-				return condition.Status == v1beta1.ConditionTrue, nil
+			if condition.Type == crdv1beta1.Established {
+				return condition.Status == crdv1beta1.ConditionTrue, nil
 			}
 		}
 		return false, nil
@@ -782,12 +800,95 @@ func isCRDOfGroupKind(group string, kind string, obj *unstructured.Unstructured)
 }
 
 func (sc *syncContext) hasCRDOfGroupKind(group string, kind string) bool {
+	result, _ := sc.getCRDOfGroupKind(group, kind)
+	return result
+}
+
+func (sc *syncContext) getCRDOfGroupKind(group string, kind string) (bool, *unstructured.Unstructured) {
 	for _, obj := range sc.targetObjs() {
 		if isCRDOfGroupKind(group, kind, obj) {
-			return true
+			return true, obj
 		}
 	}
-	return false
+	return false, nil
+}
+
+func validateCR(rawCrd *unstructured.Unstructured, cr *unstructured.Unstructured) error {
+	switch rawCrd.GetAPIVersion() {
+	case "apiextensions.k8s.io/v1beta1":
+		crd := &crdv1beta1.CustomResourceDefinition{}
+		err := runtime.DefaultUnstructuredConverter.FromUnstructured(rawCrd.Object, crd)
+		if err != nil {
+			return err
+		}
+
+		var schema *crdv1beta1.CustomResourceValidation
+		for _, v := range crd.Spec.Versions {
+			if v.Name == cr.GroupVersionKind().Version && v.Schema != nil {
+				schema = v.Schema
+			}
+		}
+		if schema == nil {
+			schema = crd.Spec.Validation
+		}
+		if schema == nil {
+			return fmt.Errorf("no schema found in local CRD for validation")
+		}
+
+		internalSchema := &apiextensions.CustomResourceValidation{}
+		err = crdv1beta1.Convert_v1beta1_CustomResourceValidation_To_apiextensions_CustomResourceValidation(
+			schema, internalSchema, nil)
+		if err != nil {
+			return err
+		}
+
+		validator, _, err := validation.NewSchemaValidator(internalSchema)
+		if err != nil {
+			return err
+		}
+
+		errorList := validation.ValidateCustomResource(nil, cr, validator)
+		if len(errorList) > 0 {
+			return errorList.ToAggregate()
+		}
+		return nil
+	case "apiextensions.k8s.io/v1":
+		crd := &crdv1.CustomResourceDefinition{}
+		err := runtime.DefaultUnstructuredConverter.FromUnstructured(rawCrd.Object, crd)
+		if err != nil {
+			return err
+		}
+
+		var schema *crdv1.CustomResourceValidation
+		for _, v := range crd.Spec.Versions {
+			if v.Name == cr.GroupVersionKind().Version && v.Schema != nil {
+				schema = v.Schema
+			}
+		}
+		if schema == nil {
+			return fmt.Errorf("no schema found in local CRD for validation")
+		}
+
+		internalSchema := &apiextensions.CustomResourceValidation{}
+		err = crdv1.Convert_v1_CustomResourceValidation_To_apiextensions_CustomResourceValidation(
+			schema, internalSchema, nil)
+		if err != nil {
+			return err
+		}
+
+		validator, _, err := validation.NewSchemaValidator(internalSchema)
+		if err != nil {
+			return err
+		}
+
+		errorList := validation.ValidateCustomResource(nil, cr, validator)
+		if len(errorList) > 0 {
+			return errorList.ToAggregate()
+		}
+		return nil
+	default:
+		return fmt.Errorf("Unknown apiVersion for CRD %s", rawCrd.GetAPIVersion())
+	}
 }
 
 // terminate looks for any running jobs/workflow hooks and deletes the resource
@@ -961,7 +1062,9 @@ func (sc *syncContext) processCreateTasks(state runState, tasks syncTasks, dryRu
 		ss.Go(func(state runState) runState {
 			logCtx := sc.log.WithValues("dryRun", dryRun, "task", t)
 			logCtx.V(1).Info("Applying")
-			validate := sc.validate && !resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionsDisableValidation)
+			validate := sc.validate &&
+				!resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionsDisableValidation) &&
+				!resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionValidateWithLocalCRD)
 			result, message := sc.applyObject(t.targetObj, dryRun, sc.force, validate)
 			if result == common.ResultCodeSyncFailed {
 				logCtx.WithValues("message", message).Info("Apply failed")
