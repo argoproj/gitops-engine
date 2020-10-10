@@ -28,6 +28,8 @@ import (
 	kubescheme "github.com/argoproj/gitops-engine/pkg/utils/kube/scheme"
 )
 
+const couldNotMarshalErrMsg = "Could not unmarshal to object of type %s: %v"
+
 // Holds diffing settings
 type DiffOptions struct {
 	// If set to true then differences caused by aggregated roles in RBAC resources are ignored.
@@ -440,13 +442,11 @@ func normalizeEndpoint(un *unstructured.Unstructured) {
 	if gvk.Group != "" || gvk.Kind != "Endpoints" {
 		return
 	}
-
 	var ep corev1.Endpoints
 	err := runtime.DefaultUnstructuredConverter.FromUnstructured(un.Object, &ep)
 	if err != nil {
 		return
 	}
-
 	var coreEp core.Endpoints
 	err = v1.Convert_v1_Endpoints_To_core_Endpoints(&ep, &coreEp, nil)
 	if err != nil {
@@ -461,10 +461,9 @@ func normalizeEndpoint(un *unstructured.Unstructured) {
 		log.Warnf("Could not convert from core to vi endpoint type %s: %v", gvk, err)
 		return
 	}
-
 	un.Object, err = runtime.DefaultUnstructuredConverter.ToUnstructured(&ep)
 	if err != nil {
-		log.Warnf("Could not unmarshal to object of type %s: %v", gvk, err)
+		log.Warnf(couldNotMarshalErrMsg, gvk, err)
 		return
 	}
 }
@@ -628,12 +627,12 @@ func remarshal(obj *unstructured.Unstructured) *unstructured.Unstructured {
 	err = json.Unmarshal(data, &unmarshalledObj)
 	if err != nil {
 		// User may have specified an invalid spec in git. Return original object
-		log.Debugf("Could not unmarshal to object of type %s: %v", gvk, err)
+		log.Debugf(couldNotMarshalErrMsg, gvk, err)
 		return obj
 	}
 	unstrBody, err := runtime.DefaultUnstructuredConverter.ToUnstructured(unmarshalledObj)
 	if err != nil {
-		log.Warnf("Could not unmarshal to object of type %s: %v", gvk, err)
+		log.Warnf(couldNotMarshalErrMsg, gvk, err)
 		return obj
 	}
 	// remove all default values specified by custom formatter (e.g. creationTimestamp)
