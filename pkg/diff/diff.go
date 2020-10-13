@@ -18,9 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/jsonmergepatch"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/kubernetes/scheme"
-
 	"k8s.io/kubernetes/pkg/api/endpoints"
-
 	"k8s.io/kubernetes/pkg/apis/core"
 	v1 "k8s.io/kubernetes/pkg/apis/core/v1"
 
