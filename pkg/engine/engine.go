@@ -15,7 +15,7 @@ import (
 	"io"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/rest"
 
@@ -42,14 +42,17 @@ type gitOpsEngine struct {
 	config  *rest.Config
 	cache   cache.ClusterCache
 	kubectl kube.Kubectl
+	log     logr.Logger
 }
 
 // NewEngine creates new instances of the GitOps engine
-func NewEngine(config *rest.Config, clusterCache cache.ClusterCache) GitOpsEngine {
+func NewEngine(config *rest.Config, clusterCache cache.ClusterCache, opts ...Option) GitOpsEngine {
+	o := applyOptions(opts)
 	return &gitOpsEngine{
 		config:  config,
-		kubectl: &kube.KubectlCmd{},
 		cache:   clusterCache,
+		kubectl: o.kubectl,
+		log:     o.log,
 	}
 }
 
@@ -77,12 +80,12 @@ func (e *gitOpsEngine) Sync(ctx context.Context,
 		return nil, err
 	}
 	result := sync.Reconcile(resources, managedResources, namespace, e.cache)
-	diffRes, err := diff.DiffArray(result.Target, result.Live, diff.GetNoopNormalizer(), diff.GetDefaultDiffOptions())
+	diffRes, err := diff.DiffArray(result.Target, result.Live, diff.WithLogr(e.log))
 	if err != nil {
 		return nil, err
 	}
 	opts = append(opts, sync.WithSkipHooks(!diffRes.Modified))
-	syncCtx, err := sync.NewSyncContext(revision, result, e.config, e.config, e.kubectl, namespace, log.NewEntry(log.New()), opts...)
+	syncCtx, err := sync.NewSyncContext(revision, result, e.config, e.config, e.kubectl, namespace, opts...)
 	if err != nil {
 		return nil, err
 	}

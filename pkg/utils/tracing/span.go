@@ -4,7 +4,7 @@ import (
 	"os"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	"k8s.io/klog/v2/klogr"
 )
 
 /*
@@ -14,7 +14,7 @@ import (
 */
 
 var enabled = false
-var logger = log.New()
+var logger = klogr.New()
 
 func init() {
 	enabled = os.Getenv("ARGOCD_TRACING_ENABLED") == "1"
@@ -28,10 +28,9 @@ type Span struct {
 
 func (s Span) Finish() {
 	if enabled {
-		logger.WithFields(s.baggage).
-			WithField("operation_name", s.operationName).
-			WithField("time_ms", time.Since(s.start).Seconds()*1e3).
-			Info()
+		logger.WithValues(baggageToVals(s.baggage)).
+			WithValues("operation_name", s.operationName, "time_ms", time.Since(s.start).Seconds()*1e3).
+			Info("Trace")
 	}
 }
 
@@ -41,4 +40,12 @@ func (s Span) SetBaggageItem(key string, value interface{}) {
 
 func StartSpan(operationName string) Span {
 	return Span{operationName, make(map[string]interface{}), time.Now()}
+}
+
+func baggageToVals(baggage map[string]interface{}) []interface{} {
+	result := make([]interface{}, 0, len(baggage)*2)
+	for k, v := range baggage {
+		result = append(result, k, v)
+	}
+	return result
 }

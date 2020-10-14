@@ -3,7 +3,7 @@ package io
 import (
 	"os"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/go-logr/logr"
 )
 
 var (
@@ -46,8 +46,8 @@ func NewCloser(close func() error) Closer {
 
 // Close is a convenience function to close a object that has a Close() method, ignoring any errors
 // Used to satisfy errcheck lint
-func Close(c Closer) {
+func Close(c Closer, log logr.Logger) {
 	if err := c.Close(); err != nil {
-		log.Warnf("failed to close %v: %v", c, err)
+		log.Error(err, "Failed to close %v", c)
 	}
 }

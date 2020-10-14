@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"strings"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/go-logr/logr"
 	"golang.org/x/sync/errgroup"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -48,6 +48,7 @@ type Kubectl interface {
 }
 
 type KubectlCmd struct {
+	Log          logr.Logger
 	OnKubectlRun func(command string) (io.Closer, error)
 }
 
@@ -59,7 +60,7 @@ type APIResourceInfo struct {
 
 type filterFunc func(apiResource *metav1.APIResource) bool
 
-func filterAPIResources(config *rest.Config, resourceFilter ResourceFilter, filter filterFunc) ([]APIResourceInfo, error) {
+func (k *KubectlCmd) filterAPIResources(config *rest.Config, resourceFilter ResourceFilter, filter filterFunc) ([]APIResourceInfo, error) {
 	disco, err := discovery.NewDiscoveryClientForConfig(config)
 	if err != nil {
 		return nil, err
@@ -70,7 +71,7 @@ func filterAPIResources(config *rest.Config, resourceFilter ResourceFilter, filt
 		if len(serverResources) == 0 {
 			return nil, err
 		}
-		log.Warnf("Partial success when performing preferred resource discovery: %v", err)
+		k.Log.Error(err, "Partial success when performing preferred resource discovery")
 	}
 	apiResIfs := make([]APIResourceInfo, 0)
 	for _, apiResourcesList := range serverResources {
@@ -127,7 +128,7 @@ func (k *KubectlCmd) GetAPIGroups(config *rest.Config) ([]metav1.APIGroup, error
 func (k *KubectlCmd) GetAPIResources(config *rest.Config, resourceFilter ResourceFilter) ([]APIResourceInfo, error) {
 	span := tracing.StartSpan("GetAPIResources")
 	defer span.Finish()
-	apiResIfs, err := filterAPIResources(config, resourceFilter, func(apiResource *metav1.APIResource) bool {
+	apiResIfs, err := k.filterAPIResources(config, resourceFilter, func(apiResource *metav1.APIResource) bool {
 		return isSupportedVerb(apiResource, listVerb) && isSupportedVerb(apiResource, watchVerb)
 	})
 	if err != nil {
@@ -219,7 +220,7 @@ func (k *KubectlCmd) ApplyResource(ctx context.Context, config *rest.Config, obj
 	span.SetBaggageItem("kind", obj.GetKind())
 	span.SetBaggageItem("name", obj.GetName())
 	defer span.Finish()
-	log.Infof("Applying resource %s/%s in cluster: %s, namespace: %s", obj.GetKind(), obj.GetName(), config.Host, namespace)
+	k.Log.Info(fmt.Sprintf("Applying resource %s/%s in cluster: %s, namespace: %s", obj.GetKind(), obj.GetName(), config.Host, namespace))
 	f, err := ioutil.TempFile(io.TempDir, "")
 	if err != nil {
 		return "", fmt.Errorf("Failed to generate temp file for kubeconfig: %v", err)
@@ -247,7 +248,7 @@ func (k *KubectlCmd) ApplyResource(ctx context.Context, config *rest.Config, obj
 	defer io.DeleteFile(manifestFile.Name())
 
 	// log manifest
-	if log.IsLevelEnabled(log.DebugLevel) {
+	if k.Log.V(1).Enabled() {
 		var obj unstructured.Unstructured
 		err := json.Unmarshal(manifestBytes, &obj)
 		if err != nil {
@@ -261,7 +262,7 @@ func (k *KubectlCmd) ApplyResource(ctx context.Context, config *rest.Config, obj
 		if err != nil {
 			return "", err
 		}
-		log.Debug(string(redactedBytes))
+		k.Log.V(1).Info(string(redactedBytes))
 	}
 
 	var out []string
@@ -275,7 +276,7 @@ func (k *KubectlCmd) ApplyResource(ctx context.Context, config *rest.Config, obj
 			return "", err
 		}
 		outReconcile, err := k.authReconcile(ctx, config, f.Name(), manifestFile.Name(), namespace, dryRunStrategy)
-		io.Close(closer)
+		io.Close(closer, k.Log)
 		if err != nil {
 			return "", err
 		}
@@ -288,7 +289,7 @@ func (k *KubectlCmd) ApplyResource(ctx context.Context, config *rest.Config, obj
 	if err != nil {
 		return "", err
 	}
-	defer io.Close(closer)
+	defer io.Close(closer, k.Log)
 
 	// Run kubectl apply
 	fact, ioStreams := kubeCmdFactory(f.Name(), namespace)

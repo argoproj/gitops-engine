@@ -1,9 +1,10 @@
 package errors
 
 import (
+	"fmt"
 	"os"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/go-logr/logr"
 )
 
 const (
@@ -20,40 +21,28 @@ const (
 )
 
 // CheckError logs a fatal message and exits with ErrorGeneric if err is not nil
-func CheckError(err error) {
+func CheckError(err error, log logr.Logger) {
 	if err != nil {
-		Fatal(ErrorGeneric, err)
+		Fatal(log, ErrorGeneric, err)
 	}
 }
 
 // CheckErrorWithCode is a convenience function to exit if an error is non-nil and exit if it was
-func CheckErrorWithCode(err error, exitcode int) {
+func CheckErrorWithCode(err error, exitcode int, log logr.Logger) {
 	if err != nil {
-		Fatal(exitcode, err)
+		Fatal(log, exitcode, err)
 	}
 }
 
-// FailOnErr panics if there is an error. It returns the first value so you can use it if you cast it:
+// FailOnErr terminates the program if there is an error. It returns the first value so you can use it if you cast it:
 // text := FailOrErr(Foo)).(string)
-func FailOnErr(v interface{}, err error) interface{} {
-	CheckError(err)
+func FailOnErr(log logr.Logger, v interface{}, err error) interface{} {
+	CheckError(err, log)
 	return v
 }
 
-// Fatal is a wrapper for logrus.Fatal() to exit with custom code
-func Fatal(exitcode int, args ...interface{}) {
-	exitfunc := func() {
-		os.Exit(exitcode)
-	}
-	log.RegisterExitHandler(exitfunc)
-	log.Fatal(args...)
-}
-
-// Fatalf is a wrapper for logrus.Fatalf() to exit with custom code
-func Fatalf(exitcode int, format string, args ...interface{}) {
-	exitfunc := func() {
-		os.Exit(exitcode)
-	}
-	log.RegisterExitHandler(exitfunc)
-	log.Fatalf(format, args...)
+// Fatal is a helper to exit with custom code.
+func Fatal(log logr.Logger, exitcode int, keysAndValues ...interface{}) {
+	log.Error(fmt.Errorf("exit code %d", exitcode), "Fatal error", keysAndValues...)
+	os.Exit(exitcode)
 }
