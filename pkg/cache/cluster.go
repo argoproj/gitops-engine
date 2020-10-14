@@ -29,7 +29,6 @@ import (
 
 const (
 	clusterResyncTimeout       = 24 * time.Hour
-	watchResyncTimeout         = 10 * time.Minute
 	watchResourcesRetryTimeout = 1 * time.Second
 	ClusterRetryTimeout        = 10 * time.Second
 
@@ -42,6 +41,9 @@ const (
 	// Limit is required to avoid memory spikes during cache initialization.
 	// The default limit of 50 is chosen based on experiments.
 	defaultListSemaphoreWeight = 50
+
+	// The default watch timeout of k8s api server
+	defaultWatchTimeout = 10 * time.Minute
 )
 
 type apiMeta struct {
@@ -112,6 +114,7 @@ type WeightedSemaphore interface {
 func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCache {
 	cache := &clusterCache{
 		resyncTimeout:           clusterResyncTimeout,
+		watchTimeout:            defaultWatchTimeout,
 		settings:                Settings{ResourceHealthOverride: &noopSettings{}, ResourcesFilter: &noopSettings{}},
 		apisMeta:                make(map[schema.GroupKind]*apiMeta),
 		listPageSize:            defaultListPageSize,
@@ -134,6 +137,7 @@ func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCa
 
 type clusterCache struct {
 	resyncTimeout time.Duration
+	watchTimeout  time.Duration
 	syncTime      *time.Time
 	syncError     error
 	apisMeta      map[schema.GroupKind]*apiMeta
@@ -435,6 +439,10 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 
 		w, err := watchutil.NewRetryWatcher(resourceVersion, &cache.ListWatch{
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				// set timeout for the watch call
+				watchTimeoutSeconds := int64(c.watchTimeout / time.Second)
+				options.TimeoutSeconds = &watchTimeoutSeconds
+
 				res, err := resClient.Watch(ctx, options)
 				if errors.IsNotFound(err) {
 					c.stopWatching(api.GroupKind, ns)
@@ -451,7 +459,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 			resourceVersion = ""
 		}()
 
-		shouldResync := time.NewTimer(watchResyncTimeout)
+		shouldResync := time.NewTimer(c.watchTimeout)
 		defer shouldResync.Stop()
 
 		for {
