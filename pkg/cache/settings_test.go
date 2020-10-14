@@ -46,3 +46,13 @@ func TestSetResyncTimeout(t *testing.T) {
 
 	assert.Equal(t, timeout, cache.resyncTimeout)
 }
+
+func TestSetWatchTimeout(t *testing.T) {
+	cache := NewClusterCache(&rest.Config{})
+	assert.Equal(t, defaultWatchTimeout, cache.watchTimeout)
+
+	timeout := 30 * time.Minute
+	cache.Invalidate(SetWatchTimeout(timeout))
+
+	assert.Equal(t, timeout, cache.watchTimeout)
+}
