@@ -26,6 +26,7 @@ import (
 	"k8s.io/klog/v2/klogr"
 
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
+	"github.com/argoproj/gitops-engine/pkg/utils/tracing"
 )
 
 const (
@@ -123,7 +124,8 @@ func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCa
 		nsIndex:            make(map[string]map[kube.ResourceKey]*Resource),
 		config:             config,
 		kubectl: &kube.KubectlCmd{
-			Log: log,
+			Log:    log,
+			Tracer: tracing.NopTracer{},
 		},
 		syncTime:                nil,
 		resourceUpdatedHandlers: map[uint64]OnResourceUpdatedHandler{},

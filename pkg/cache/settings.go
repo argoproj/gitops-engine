@@ -9,6 +9,7 @@ import (
 
 	"github.com/argoproj/gitops-engine/pkg/health"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
+	"github.com/argoproj/gitops-engine/pkg/utils/tracing"
 )
 
 type noopSettings struct {
@@ -102,6 +103,15 @@ func SetLogr(log logr.Logger) UpdateSettingsFunc {
 		cache.log = log
 		if kcmd, ok := cache.kubectl.(*kube.KubectlCmd); ok {
 			kcmd.Log = log
+		}
+	}
+}
+
+// SetTracer sets the tracer to use.
+func SetTracer(tracer tracing.Tracer) UpdateSettingsFunc {
+	return func(cache *clusterCache) {
+		if kcmd, ok := cache.kubectl.(*kube.KubectlCmd); ok {
+			kcmd.Tracer = tracer
 		}
 	}
 }
