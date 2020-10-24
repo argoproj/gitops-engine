@@ -148,10 +148,7 @@ func newCluster(objs ...*unstructured.Unstructured) *clusterCache {
 
 func getChildren(cluster *clusterCache, un *unstructured.Unstructured) []*Resource {
 	hierarchy := make([]*Resource, 0)
-	cluster.IterateHierarchy(kube.GetResourceKey(un), func(err error, child *Resource, _ map[kube.ResourceKey]*Resource) {
-		if err != nil {
-			panic(err)
-		}
+	cluster.IterateHierarchy(kube.GetResourceKey(un), func(child *Resource, _ map[kube.ResourceKey]*Resource) {
 		hierarchy = append(hierarchy, child)
 	})
 	return hierarchy[1:]
@@ -643,10 +640,7 @@ func ExampleNewClusterCache_inspectNamespaceResources() {
 	}
 	// Iterate default namespace resources tree
 	for _, root := range clusterCache.GetNamespaceTopLevelResources("default") {
-		clusterCache.IterateHierarchy(root.ResourceKey(), func(err error, resource *Resource, _ map[kube.ResourceKey]*Resource) {
-			if err != nil {
-				panic(err)
-			}
+		clusterCache.IterateHierarchy(root.ResourceKey(), func(resource *Resource, _ map[kube.ResourceKey]*Resource) {
 			fmt.Printf("resource: %s, info: %v\n", resource.Ref.String(), resource.Info)
 		})
 	}

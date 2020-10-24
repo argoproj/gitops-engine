@@ -14,6 +14,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/clientcmd"
@@ -22,7 +23,6 @@ import (
 	"github.com/argoproj/gitops-engine/pkg/cache"
 	"github.com/argoproj/gitops-engine/pkg/engine"
 	"github.com/argoproj/gitops-engine/pkg/sync"
-	"github.com/argoproj/gitops-engine/pkg/utils/errors"
 	"github.com/argoproj/gitops-engine/pkg/utils/io"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 )
@@ -32,10 +32,9 @@ const (
 )
 
 func main() {
-	if err := newCmd().Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	log := klogr.New() // Delegates to klog
+	err := newCmd(log).Execute()
+	checkError(err, log)
 }
 
 type resourceInfo struct {
@@ -98,7 +97,7 @@ func (s *settings) parseManifests() ([]*unstructured.Unstructured, string, error
 	return res, string(revision), nil
 }
 
-func newCmd() *cobra.Command {
+func newCmd(log logr.Logger) *cobra.Command {
 	var (
 		clientConfig  clientcmd.ClientConfig
 		paths         []string
@@ -108,7 +107,6 @@ func newCmd() *cobra.Command {
 		namespace     string
 		namespaced    bool
 	)
-	log := klogr.New() // Delegates to klog
 	cmd := cobra.Command{
 		Use: "gitops REPO_PATH",
 		Run: func(cmd *cobra.Command, args []string) {
@@ -118,10 +116,10 @@ func newCmd() *cobra.Command {
 			}
 			s := settings{args[0], paths}
 			config, err := clientConfig.ClientConfig()
-			errors.CheckErrorWithCode(err, errors.ErrorCommandSpecific, log)
+			checkError(err, log)
 			if namespace == "" {
 				namespace, _, err = clientConfig.Namespace()
-				errors.CheckErrorWithCode(err, errors.ErrorCommandSpecific, log)
+				checkError(err, log)
 			}
 
 			var namespaces []string
@@ -141,10 +139,10 @@ func newCmd() *cobra.Command {
 				}),
 			)
 			gitOpsEngine := engine.NewEngine(config, clusterCache, engine.WithLogr(log))
-			errors.CheckErrorWithCode(err, errors.ErrorCommandSpecific, log)
+			checkError(err, log)
 
 			closer, err := gitOpsEngine.Run()
-			errors.CheckErrorWithCode(err, errors.ErrorCommandSpecific, log)
+			checkError(err, log)
 
 			defer io.Close(closer, log)
 
@@ -162,7 +160,7 @@ func newCmd() *cobra.Command {
 				resync <- true
 			})
 			go func() {
-				errors.CheckErrorWithCode(http.ListenAndServe(fmt.Sprintf("0.0.0.0:%d", port), nil), errors.ErrorCommandSpecific, log)
+				checkError(http.ListenAndServe(fmt.Sprintf("0.0.0.0:%d", port), nil), log)
 			}()
 
 			for ; true; <-resync {
@@ -210,4 +208,12 @@ func addKubectlFlagsToCmd(cmd *cobra.Command) clientcmd.ClientConfig {
 	cmd.PersistentFlags().StringVar(&loadingRules.ExplicitPath, "kubeconfig", "", "Path to a kube config. Only required if out-of-cluster")
 	clientcmd.BindOverrideFlags(&overrides, cmd.PersistentFlags(), kflags)
 	return clientcmd.NewInteractiveDeferredLoadingClientConfig(loadingRules, &overrides, os.Stdin)
+}
+
+// checkError is a convenience function to check if an error is non-nil and exit if it was
+func checkError(err error, log logr.Logger) {
+	if err != nil {
+		log.Error(err, "Fatal error")
+		os.Exit(1)
+	}
 }

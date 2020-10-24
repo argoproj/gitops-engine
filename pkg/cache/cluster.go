@@ -89,7 +89,7 @@ type ClusterCache interface {
 	// GetNamespaceTopLevelResources returns top level resources in the specified namespace
 	GetNamespaceTopLevelResources(namespace string) map[kube.ResourceKey]*Resource
 	// IterateHierarchy iterates resource tree starting from the specified top level resource and executes callback for each resource in the tree
-	IterateHierarchy(key kube.ResourceKey, action func(err error, resource *Resource, namespaceResources map[kube.ResourceKey]*Resource))
+	IterateHierarchy(key kube.ResourceKey, action func(resource *Resource, namespaceResources map[kube.ResourceKey]*Resource))
 	// IsNamespaced answers if specified group/kind is a namespaced resource API or not
 	IsNamespaced(gk schema.GroupKind) (bool, error)
 	// GetManagedLiveObjs helps finding matching live K8S resources for a given resources list.
@@ -634,12 +634,12 @@ func (c *clusterCache) GetNamespaceTopLevelResources(namespace string) map[kube.
 }
 
 // IterateHierarchy iterates resource tree starting from the specified top level resource and executes callback for each resource in the tree
-func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(err error, resource *Resource, namespaceResources map[kube.ResourceKey]*Resource)) {
+func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(resource *Resource, namespaceResources map[kube.ResourceKey]*Resource)) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 	if res, ok := c.resources[key]; ok {
 		nsNodes := c.nsIndex[key.Namespace]
-		action(nil, res, nsNodes)
+		action(res, nsNodes)
 		childrenByUID := make(map[types.UID][]*Resource)
 		for _, child := range nsNodes {
 			if res.isParentOf(child) {
@@ -657,8 +657,14 @@ func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(err er
 					return strings.Compare(key1.String(), key2.String()) < 0
 				})
 				child := children[0]
-				action(nil, child, nsNodes)
-				child.iterateChildren(nsNodes, map[kube.ResourceKey]bool{res.ResourceKey(): true}, action)
+				action(child, nsNodes)
+				child.iterateChildren(nsNodes, map[kube.ResourceKey]bool{res.ResourceKey(): true}, func(err error, child *Resource, namespaceResources map[kube.ResourceKey]*Resource) {
+					if err != nil {
+						c.log.V(2).Info(err.Error())
+						return
+					}
+					action(child, namespaceResources)
+				})
 			}
 		}
 	}
