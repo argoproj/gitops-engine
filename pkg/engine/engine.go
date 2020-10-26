@@ -12,7 +12,6 @@ package engine
 import (
 	"context"
 	"fmt"
-	"io"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -23,7 +22,6 @@ import (
 	"github.com/argoproj/gitops-engine/pkg/diff"
 	"github.com/argoproj/gitops-engine/pkg/sync"
 	"github.com/argoproj/gitops-engine/pkg/sync/common"
-	ioutil "github.com/argoproj/gitops-engine/pkg/utils/io"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 )
 
@@ -31,9 +29,11 @@ const (
 	operationRefreshTimeout = time.Second * 1
 )
 
+type StopFunc func()
+
 type GitOpsEngine interface {
 	// Run initializes engine
-	Run() (io.Closer, error)
+	Run() (StopFunc, error)
 	// Synchronizes resources in the cluster
 	Sync(ctx context.Context, resources []*unstructured.Unstructured, isManaged func(r *cache.Resource) bool, revision string, namespace string, opts ...sync.SyncOpt) ([]common.ResourceSyncResult, error)
 }
@@ -56,16 +56,15 @@ func NewEngine(config *rest.Config, clusterCache cache.ClusterCache, opts ...Opt
 	}
 }
 
-func (e *gitOpsEngine) Run() (io.Closer, error) {
+func (e *gitOpsEngine) Run() (StopFunc, error) {
 	err := e.cache.EnsureSynced()
 	if err != nil {
 		return nil, err
 	}
 
-	return ioutil.NewCloser(func() error {
+	return func() {
 		e.cache.Invalidate()
-		return nil
-	}), nil
+	}, nil
 }
 
 func (e *gitOpsEngine) Sync(ctx context.Context,

@@ -32,6 +32,10 @@ import (
 	"github.com/argoproj/gitops-engine/pkg/utils/tracing"
 )
 
+type CleanupFunc func()
+
+type OnKubectlRunFunc func(command string) (CleanupFunc, error)
+
 type Kubectl interface {
 	ApplyResource(ctx context.Context, config *rest.Config, obj *unstructured.Unstructured, namespace string, dryRunStrategy cmdutil.DryRunStrategy, force, validate bool) (string, error)
 	ConvertToVersion(obj *unstructured.Unstructured, group, version string) (*unstructured.Unstructured, error)
@@ -42,13 +46,13 @@ type Kubectl interface {
 	GetAPIGroups(config *rest.Config) ([]metav1.APIGroup, error)
 	GetServerVersion(config *rest.Config) (string, error)
 	NewDynamicClient(config *rest.Config) (dynamic.Interface, error)
-	SetOnKubectlRun(onKubectlRun func(command string) (io.Closer, error))
+	SetOnKubectlRun(onKubectlRun OnKubectlRunFunc)
 }
 
 type KubectlCmd struct {
 	Log          logr.Logger
 	Tracer       tracing.Tracer
-	OnKubectlRun func(command string) (io.Closer, error)
+	OnKubectlRun OnKubectlRunFunc
 }
 
 type APIResourceInfo struct {
@@ -270,12 +274,14 @@ func (k *KubectlCmd) ApplyResource(ctx context.Context, config *rest.Config, obj
 		// `kubectl apply`, which cannot tolerate changes in roleRef, which is an immutable field.
 		// See: https://github.com/kubernetes/kubernetes/issues/66353
 		// `auth reconcile` will delete and recreate the resource if necessary
-		closer, err := k.processKubectlRun("auth")
-		if err != nil {
-			return "", err
-		}
-		outReconcile, err := k.authReconcile(ctx, config, f.Name(), manifestFile.Name(), namespace, dryRunStrategy)
-		io.Close(closer, k.Log)
+		outReconcile, err := func() (string, error) {
+			cleanup, err := k.processKubectlRun("auth")
+			if err != nil {
+				return "", err
+			}
+			defer cleanup()
+			return k.authReconcile(ctx, config, f.Name(), manifestFile.Name(), namespace, dryRunStrategy)
+		}()
 		if err != nil {
 			return "", err
 		}
@@ -284,11 +290,11 @@ func (k *KubectlCmd) ApplyResource(ctx context.Context, config *rest.Config, obj
 		// last-applied-configuration annotation in the object.
 	}
 
-	closer, err := k.processKubectlRun("apply")
+	cleanup, err := k.processKubectlRun("apply")
 	if err != nil {
 		return "", err
 	}
-	defer io.Close(closer, k.Log)
+	defer cleanup()
 
 	// Run kubectl apply
 	fact, ioStreams := kubeCmdFactory(f.Name(), namespace)
@@ -472,17 +478,14 @@ func (k *KubectlCmd) NewDynamicClient(config *rest.Config) (dynamic.Interface, e
 	return dynamic.NewForConfig(config)
 }
 
-func (k *KubectlCmd) processKubectlRun(cmd string) (io.Closer, error) {
+func (k *KubectlCmd) processKubectlRun(cmd string) (CleanupFunc, error) {
 	if k.OnKubectlRun != nil {
 		return k.OnKubectlRun(cmd)
 	}
-	return io.NewCloser(func() error {
-		return nil
-		// do nothing
-	}), nil
+	return func() {}, nil
 }
 
-func (k *KubectlCmd) SetOnKubectlRun(onKubectlRun func(command string) (io.Closer, error)) {
+func (k *KubectlCmd) SetOnKubectlRun(onKubectlRun OnKubectlRunFunc) {
 	k.OnKubectlRun = onKubectlRun
 }
 

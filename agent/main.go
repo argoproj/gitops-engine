@@ -23,7 +23,6 @@ import (
 	"github.com/argoproj/gitops-engine/pkg/cache"
 	"github.com/argoproj/gitops-engine/pkg/engine"
 	"github.com/argoproj/gitops-engine/pkg/sync"
-	"github.com/argoproj/gitops-engine/pkg/utils/io"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 )
 
@@ -141,10 +140,9 @@ func newCmd(log logr.Logger) *cobra.Command {
 			gitOpsEngine := engine.NewEngine(config, clusterCache, engine.WithLogr(log))
 			checkError(err, log)
 
-			closer, err := gitOpsEngine.Run()
+			cleanup, err := gitOpsEngine.Run()
 			checkError(err, log)
-
-			defer io.Close(closer, log)
+			defer cleanup()
 
 			resync := make(chan bool)
 			go func() {
