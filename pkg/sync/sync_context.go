@@ -414,8 +414,10 @@ func (sc *syncContext) Sync() {
 	if sc.syncWaveHook != nil && runState != failed {
 		err := sc.syncWaveHook(phase, wave, finalWave)
 		if err != nil {
+			sc.deleteHooks(hooksPendingDeletionFailed)
 			sc.setOperationPhase(common.OperationFailed, fmt.Sprintf("SyncWaveHook failed: %v", err))
-			runState = failed
+			sc.log.Error(err, "SyncWaveHook failed")
+			return
 		}
 	}
 
