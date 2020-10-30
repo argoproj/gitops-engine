@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"testing"
@@ -965,4 +966,27 @@ func TestSyncWaveHook(t *testing.T) {
 	}
 	syncCtx.Sync()
 	assert.True(t, called)
+}
+
+func TestSyncWaveHookFail(t *testing.T) {
+	syncCtx := newTestSyncCtx(WithOperationSettings(false, false, false, false))
+	pod1 := NewPod()
+	pod1.SetName("pod-1")
+
+	syncCtx.resources = groupResources(ReconciliationResult{
+		Live:   []*unstructured.Unstructured{nil},
+		Target: []*unstructured.Unstructured{pod1},
+	})
+
+	called := false
+	syncCtx.syncWaveHook = func(phase synccommon.SyncPhase, wave int, final bool) error {
+		called = true
+		return errors.New("intentional error")
+	}
+	syncCtx.Sync()
+	assert.True(t, called)
+	phase, msg, results := syncCtx.GetState()
+	assert.Equal(t, synccommon.OperationFailed, phase)
+	assert.Equal(t, "SyncWaveHook failed: intentional error", msg)
+	assert.Equal(t, synccommon.OperationRunning, results[0].HookPhase)
 }
