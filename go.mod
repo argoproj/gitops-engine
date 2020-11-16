@@ -12,7 +12,7 @@ require (
 	k8s.io/api v0.19.2
 	k8s.io/apiextensions-apiserver v0.19.2
 	k8s.io/apimachinery v0.19.2
-	k8s.io/cli-runtime v0.19.2
+	k8s.io/cli-runtime v0.19.4
 	k8s.io/client-go v0.19.2
 	k8s.io/klog/v2 v2.2.0
 	k8s.io/kube-aggregator v0.19.2
