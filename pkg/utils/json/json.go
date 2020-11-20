@@ -4,9 +4,19 @@ package json
 func removeFields(config, live interface{}) interface{} {
 	switch c := config.(type) {
 	case map[string]interface{}:
-		return RemoveMapFields(c, live.(map[string]interface{}))
+		l, ok := live.(map[string]interface{})
+		if ok {
+			return RemoveMapFields(c, l)
+		} else {
+			return live
+		}
 	case []interface{}:
-		return RemoveListFields(c, live.([]interface{}))
+		l, ok := live.([]interface{})
+		if ok {
+			return RemoveListFields(c, l)
+		} else {
+			return live
+		}
 	default:
 		return live
 	}
