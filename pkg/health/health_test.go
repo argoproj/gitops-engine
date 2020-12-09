@@ -77,6 +77,13 @@ func TestJob(t *testing.T) {
 	assertAppHealth(t, "./testdata/job-succeeded.yaml", HealthStatusHealthy)
 }
 
+func TestHPA(t *testing.T) {
+	assertAppHealth(t, "./testdata/hpa-progressing.yaml", HealthStatusProgressing)
+	assertAppHealth(t, "./testdata/hpa-degraded.yaml", HealthStatusDegraded)
+	assertAppHealth(t, "./testdata/hpa-healthy.yaml", HealthStatusHealthy)
+	assertAppHealth(t, "./testdata/hpa-healthy-with-no-annotations.yaml", HealthStatusHealthy)
+}
+
 func TestPod(t *testing.T) {
 	assertAppHealth(t, "./testdata/pod-pending.yaml", HealthStatusProgressing)
 	assertAppHealth(t, "./testdata/pod-running-not-ready.yaml", HealthStatusProgressing)
