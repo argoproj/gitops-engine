@@ -140,7 +140,7 @@ func GetResourceHealth(obj *unstructured.Unstructured, healthOverride HealthOver
 	case "autoscaling":
 		switch gvk.Kind {
 		case kube.HorizontalPodAutoscalerKind:
-			health, err = getAutoscalingv1HPAHealth(obj)
+			health, err = getHPAHealth(obj)
 		}
 	}
 	if err != nil {
