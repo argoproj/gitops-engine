@@ -1,19 +1,7 @@
 apiVersion: autoscaling/v2beta2
 kind: HorizontalPodAutoscaler
 metadata:
-  annotations:
-    kubectl.kubernetes.io/last-applied-configuration: >
-      {"apiVersion":"autoscaling/v2beta2","kind":"HorizontalPodAutoscaler","metadata":{"annotations":{},"labels":{"app":"credential","app.kubernetes.io/instance":"identity-authn-credential-use2-ppd-e2eb","appType":"spring-boot","assetId":"5768002815233673159","buildType":"maven","env":"e2eb-use2","l1":"identity","l2":"authn"},"name":"credential-hpa","namespace":"identity-authn-credential-use2-ppd-e2eb"},"spec":{"maxReplicas":1,"metrics":[{"resource":{"name":"cpu","target":{"averageUtilization":65,"type":"Utilization"}},"type":"Resource"}],"minReplicas":1,"scaleTargetRef":{"apiVersion":"argoproj.io/v1alpha1","kind":"Rollout","name":"credential-rollout"}}}
   creationTimestamp: '2020-08-07T00:13:31Z'
-  labels:
-    app: credential
-    app.kubernetes.io/instance: identity-authn-credential-use2-ppd-e2eb
-    appType: spring-boot
-    assetId: '5768002815233673159'
-    buildType: maven
-    env: e2eb-use2
-    l1: identity
-    l2: authn
   name: credential-hpa
   uid: 04d9992e-a849-4cce-9e1e-121a62d5c001
 spec:
