@@ -604,16 +604,14 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 				successful = false
 			}
 		} else {
-			if task.targetObj != nil && resourceutil.HasAnnotationOption(task.targetObj, common.AnnotationSyncOptions, common.SyncOptionValidateWithLocalCRD) {
+			if task.targetObj != nil {
 				if ok, crd := sc.getCRDOfGroupKind(task.group(), task.kind()); ok {
 					err := validateCR(crd, task.targetObj)
 					if err != nil {
 						sc.log.WithValues("task", task).Error(err,"validation failed against local CRD")
-						sc.setResourceResult(task, common.ResultCodeSyncFailed, "", err.Error())
-						successful = false
 					} else {
-						sc.log.WithValues("task", task).V(1).Info("skip dry-run for locally validated custom resource")
-						task.skipDryRun = true
+						sc.log.WithValues("task", task).V(1).Info("validation passed against local crd")
+						task.localValidationPassed = true
 					}
 				}
 			}
@@ -1063,12 +1061,26 @@ func (sc *syncContext) processCreateTasks(state runState, tasks syncTasks, dryRu
 			logCtx := sc.log.WithValues("dryRun", dryRun, "task", t)
 			logCtx.V(1).Info("Applying")
 			validate := sc.validate &&
-				!resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionsDisableValidation) &&
-				!resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionValidateWithLocalCRD)
+				!resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionsDisableValidation)
 			result, message := sc.applyObject(t.targetObj, dryRun, sc.force, validate)
 			if result == common.ResultCodeSyncFailed {
 				logCtx.WithValues("message", message).Info("Apply failed")
-				state = failed
+				// in case validation is required and local validation previously passed for the object,
+				// let's give it another chance without validation
+				if validate && t.localValidationPassed {
+					logCtx.WithValues("message", message).Info("Retry without validation since previous local validation passed")
+					innerResult, innerMessage := sc.applyObject(t.targetObj, dryRun, sc.force, false)
+					if innerResult == common.ResultCodeSyncFailed {
+						logCtx.WithValues("message", innerMessage).Info("Apply failed without validation")
+						state = failed
+					} else {
+						// clear previous sync error
+						result = innerResult
+						logCtx.WithValues("message", message).Info("Apply passed after local validation")
+					}
+				} else {
+					state = failed
+				}
 			}
 			if !dryRun || sc.dryRun || result == common.ResultCodeSyncFailed {
 				sc.setResourceResult(t, result, operationPhases[result], message)

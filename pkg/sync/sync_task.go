@@ -21,6 +21,7 @@ type syncTask struct {
 
 	targetObj                *unstructured.Unstructured
 	skipDryRun               bool
+	localValidationPassed    bool
 	syncStatus               common.ResultCode
 	operationState           common.OperationPhase
 	message                  string
