@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -403,33 +404,10 @@ func (sc *syncContext) Sync() {
 		return
 	}
 
-	finalPruneTasks := tasks.Filter(func(t *syncTask) bool {
-		return t.isPrune() &&
-			(sc.pruneLast || resourceutil.HasAnnotationOption(t.liveObj, common.AnnotationSyncOptions, common.SyncOptionPruneLast))
-	})
-
-	//finalPruneTasks needs to be excluded from Tasks, and will be pruned at the end of sync phase
-	tasks = tasks.Filter(func(t *syncTask) bool {
-		exist := false
-		for _, a := range finalPruneTasks {
-			if t == a {
-				exist = true
-				break
-			}
-		}
-		return !exist
-	})
-
 	// remove any tasks not in this wave
 	phase := tasks.phase()
 	wave := tasks.wave()
 	finalWave := phase == tasks.lastPhase() && wave == tasks.lastWave()
-
-	// only when it is syncPhaseFinalWave, finalPruneTasks will be pruned
-	syncPhaseFinalWave := false
-	if phase == common.SyncPhaseSync && wave == tasks.lastWave() {
-		syncPhaseFinalWave = true
-	}
 
 	// if it is the last phase/wave and the only remaining tasks are non-hooks, the we are successful
 	// EVEN if those objects subsequently degraded
@@ -459,18 +437,6 @@ func (sc *syncContext) Sync() {
 		sc.deleteHooks(hooksPendingDeletionFailed)
 		sc.setOperationFailed(syncFailTasks, "one or more objects failed to apply")
 	case successful:
-		if syncPhaseFinalWave && len(finalPruneTasks) > 0 {
-			if isAllHealthy(tasks, sc) {
-				state := sc.timeToPrune(runState, finalPruneTasks, false)
-				if state != successful {
-					sc.setOperationFailed(finalPruneTasks, "one or more objects failed to prune")
-					return
-				}
-			} else {
-				sc.setOperationFailed(finalPruneTasks, "one or more objects failed to prune due to not all resources are healthy")
-				return
-			}
-		}
 		if remainingTasks.Len() == 0 {
 			// delete all completed hooks which have appropriate delete policy
 			sc.deleteHooks(hooksPendingDeletionSuccessful)
@@ -483,22 +449,6 @@ func (sc *syncContext) Sync() {
 			return task.deleteOnPhaseCompletion()
 		}), true)
 	}
-}
-
-func isAllHealthy(tasks syncTasks, sc *syncContext) bool {
-	for _, task := range tasks {
-		if task.liveObj == nil {
-			continue
-		}
-		resHealth, err := health.GetResourceHealth(task.liveObj, sc.healthOverride)
-		if err != nil {
-			return false
-		}
-		if resHealth != nil && resHealth.Status != health.HealthStatusHealthy {
-			return false
-		}
-	}
-	return true
 }
 
 func (sc *syncContext) deleteHooks(hooksPendingDeletion syncTasks) {
@@ -663,6 +613,29 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 				sc.setResourceResult(task, common.ResultCodeSyncFailed, "", err.Error())
 				successful = false
 			}
+		}
+	}
+
+	// for pruneLast tasks, modify the wave to sync phase last wave of non prune task +1
+	syncPhaseLastWave := 0
+	for _, task := range tasks {
+		if task.phase == common.SyncPhaseSync {
+			if task.wave() > syncPhaseLastWave && !task.isPrune() {
+				syncPhaseLastWave = task.wave()
+			}
+		}
+	}
+	syncPhaseLastWave = syncPhaseLastWave + 1
+
+	for _, task := range tasks {
+		if task.isPrune() &&
+			(sc.pruneLast || resourceutil.HasAnnotationOption(task.liveObj, common.AnnotationSyncOptions, common.SyncOptionPruneLast)) {
+			annotations := task.liveObj.GetAnnotations()
+			if annotations == nil {
+				annotations = make(map[string]string)
+			}
+			annotations[common.AnnotationSyncWave] = strconv.Itoa(syncPhaseLastWave)
+			task.liveObj.SetAnnotations(annotations)
 		}
 	}
 
@@ -935,7 +908,26 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 		}
 	}
 	// prune first
-	state = sc.timeToPrune(state, pruneTasks, dryRun)
+	{
+		ss := newStateSync(state)
+		for _, task := range pruneTasks {
+			t := task
+			ss.Go(func(state runState) runState {
+				logCtx := sc.log.WithValues("dryRun", dryRun, "task", t)
+				logCtx.V(1).Info("Pruning")
+				result, message := sc.pruneObject(t.liveObj, sc.prune, dryRun)
+				if result == common.ResultCodeSyncFailed {
+					state = failed
+					logCtx.WithValues("message", message).Info("Pruning failed")
+				}
+				if !dryRun || sc.dryRun || result == common.ResultCodeSyncFailed {
+					sc.setResourceResult(t, result, operationPhases[result], message)
+				}
+				return state
+			})
+		}
+		state = ss.Wait()
+	}
 
 	if state != successful {
 		return state
@@ -987,30 +979,6 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 	}
 	if len(tasksGroup) > 0 {
 		state = sc.processCreateTasks(state, tasksGroup, dryRun)
-	}
-	return state
-}
-
-func (sc *syncContext) timeToPrune(state runState, pruneTasks syncTasks, dryRun bool) runState {
-	{
-		ss := newStateSync(state)
-		for _, task := range pruneTasks {
-			t := task
-			ss.Go(func(state runState) runState {
-				logCtx := sc.log.WithValues("dryRun", dryRun, "task", t)
-				logCtx.V(1).Info("Pruning")
-				result, message := sc.pruneObject(t.liveObj, sc.prune, dryRun)
-				if result == common.ResultCodeSyncFailed {
-					state = failed
-					logCtx.WithValues("message", message).Info("Pruning failed")
-				}
-				if !dryRun || sc.dryRun || result == common.ResultCodeSyncFailed {
-					sc.setResourceResult(t, result, operationPhases[result], message)
-				}
-				return state
-			})
-		}
-		state = ss.Wait()
 	}
 	return state
 }
