@@ -21,7 +21,6 @@ import (
 
 	"github.com/argoproj/gitops-engine/internal/kubernetes_vendor/pkg/api/v1/endpoints"
 	jsonutil "github.com/argoproj/gitops-engine/pkg/utils/json"
-	kubescheme "github.com/argoproj/gitops-engine/pkg/utils/kube/scheme"
 )
 
 const couldNotMarshalErrMsg = "Could not unmarshal to object of type %s: %v"
@@ -114,7 +113,7 @@ func generateSchemeDefaultPatch(kubeObj runtime.Object) ([]byte, error) {
 
 	// 1) Call scheme defaulter functions on a clone of our k8s resource object
 	patched := kubeObj.DeepCopyObject()
-	kubescheme.Scheme.Default(patched)
+	//kubescheme.Scheme.Default(patched)
 
 	// 2) Compare the original object (pre-defaulter funcs) with patched object (post-default funcs),
 	// and generate a patch that can be applied against the original
