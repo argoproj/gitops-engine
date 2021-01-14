@@ -10,7 +10,7 @@ require (
 	github.com/stretchr/testify v1.6.1
 	golang.org/x/sync v0.0.0-20201207232520-09787c993a3a
 	k8s.io/api v0.20.1
-	k8s.io/apiextensions-apiserver v0.20.1
+	k8s.io/apiextensions-apiserver v0.20.2
 	k8s.io/apimachinery v0.20.1
 	k8s.io/cli-runtime v0.20.1
 	k8s.io/client-go v0.20.1
