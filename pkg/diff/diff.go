@@ -543,7 +543,7 @@ func normalizeRole(un *unstructured.Unstructured, o options) {
 		if ok {
 			_, ok = aggrIf.(map[string]interface{})
 			if !ok {
-				o.log.Info(fmt.Sprintf("Malformed aggregrationRule in resource '%s', won't modify.", un.GetName()))
+				o.log.Info(fmt.Sprintf("Malformed aggregationRule in resource '%s', won't modify.", un.GetName()))
 			} else {
 				un.Object["rules"] = nil
 			}
