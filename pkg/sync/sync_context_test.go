@@ -336,10 +336,10 @@ func TestSyncPruneFailure(t *testing.T) {
 func TestDoNotSyncOrPruneHooks(t *testing.T) {
 	syncCtx := newTestSyncCtx(WithOperationSettings(false, false, false, true))
 	targetPod := NewPod()
-	targetPod.SetName("dont-create-me")
+	targetPod.SetName("do-not-create-me")
 	targetPod.SetAnnotations(map[string]string{synccommon.AnnotationKeyHook: "PreSync"})
 	liveSvc := NewService()
-	liveSvc.SetName("dont-prune-me")
+	liveSvc.SetName("do-not-prune-me")
 	liveSvc.SetNamespace(FakeArgoCDNamespace)
 	liveSvc.SetAnnotations(map[string]string{synccommon.AnnotationKeyHook: "PreSync"})
 
