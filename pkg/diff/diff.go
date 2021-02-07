@@ -391,8 +391,8 @@ func GetLastAppliedConfigAnnotation(live *unstructured.Unstructured) (*unstructu
 	if live == nil {
 		return nil, nil
 	}
-	annots := live.GetAnnotations()
-	lastAppliedStr, ok := annots[corev1.LastAppliedConfigAnnotation]
+	annotations := live.GetAnnotations()
+	lastAppliedStr, ok := annotations[corev1.LastAppliedConfigAnnotation]
 	if !ok {
 		return nil, nil
 	}
