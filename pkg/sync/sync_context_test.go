@@ -333,7 +333,7 @@ func TestSyncPruneFailure(t *testing.T) {
 	assert.Equal(t, "foo", result.Message)
 }
 
-func TestDontSyncOrPruneHooks(t *testing.T) {
+func TestDoNotSyncOrPruneHooks(t *testing.T) {
 	syncCtx := newTestSyncCtx(WithOperationSettings(false, false, false, true))
 	targetPod := NewPod()
 	targetPod.SetName("dont-create-me")
@@ -351,7 +351,7 @@ func TestDontSyncOrPruneHooks(t *testing.T) {
 }
 
 // make sure that we do not prune resources with Prune=false
-func TestDontPrunePruneFalse(t *testing.T) {
+func TestDoNotPrunePruneFalse(t *testing.T) {
 	syncCtx := newTestSyncCtx(WithOperationSettings(false, true, false, false))
 	pod := NewPod()
 	pod.SetAnnotations(map[string]string{synccommon.AnnotationSyncOptions: "Prune=false"})
