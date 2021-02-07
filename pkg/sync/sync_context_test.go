@@ -1040,7 +1040,7 @@ func TestPruneLast(t *testing.T) {
 		assert.Equal(t, 3, tasks.lastWave())
 	})
 
-	t.Run("pruneLastIndidualResources", func(t *testing.T) {
+	t.Run("pruneLastIndividualResources", func(t *testing.T) {
 		syncCtx.pruneLast = false
 
 		pod1.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "2"})
