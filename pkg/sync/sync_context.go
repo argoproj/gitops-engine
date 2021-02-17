@@ -820,7 +820,7 @@ func (sc *syncContext) pruneObject(liveObj *unstructured.Unstructured, prune, dr
 			// Skip deletion if object is already marked for deletion, so we don't cause a resource update hotloop
 			deletionTimestamp := liveObj.GetDeletionTimestamp()
 			if deletionTimestamp == nil || deletionTimestamp.IsZero() {
-				err := sc.kubectl.DeleteResource(context.TODO(), sc.config, liveObj.GroupVersionKind(), liveObj.GetName(), liveObj.GetNamespace(), false)
+				err := sc.kubectl.DeleteResource(context.TODO(), sc.config, liveObj.GroupVersionKind(), liveObj.GetName(), liveObj.GetNamespace(), false, false)
 				if err != nil {
 					return common.ResultCodeSyncFailed, err.Error()
 				}
