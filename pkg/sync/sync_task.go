@@ -35,7 +35,7 @@ func (t *syncTask) isDependsOn(other *syncTask) bool {
 		return true
 	}
 
-	if otherGVK.Group == "" && otherGVK.Kind == kube.NamespaceKind && otherObj.GetName() == t.obj().GetNamespace() {
+	if otherGVK.Group == "" && otherGVK.Kind == kube.NamespaceKind {
 		return true
 	}
 	return false

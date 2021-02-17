@@ -397,6 +397,31 @@ func TestSyncTasksSort_NamespaceAndObjectInNamespace(t *testing.T) {
 	assert.Equal(t, syncTasks{namespace, deployment}, unsorted)
 }
 
+func TestSyncTasksSort_NamespaceAndObjectNotInNamespace(t *testing.T) {
+	deployment := &syncTask{
+		phase: common.SyncPhasePreSync,
+		targetObj: &unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"kind": "ClusterRoleBinding",
+			},
+		}}
+	namespace := &syncTask{
+		targetObj: &unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"kind": "Namespace",
+				"metadata": map[string]interface{}{
+					"name": "myNamespace",
+				},
+			},
+		},
+	}
+
+	unsorted := syncTasks{deployment, namespace}
+	sort.Sort(unsorted)
+
+	assert.Equal(t, syncTasks{namespace, deployment}, unsorted)
+}
+
 func TestSyncTasksSort_CRDAndCR(t *testing.T) {
 	crd := &syncTask{
 		phase: common.SyncPhasePreSync,
