@@ -186,7 +186,7 @@ func (k *KubectlCmd) PatchResource(ctx context.Context, config *rest.Config, gvk
 	return resourceIf.Patch(ctx, name, patchType, patchBytes, metav1.PatchOptions{}, subresources...)
 }
 
-// DeleteResource deletes resource
+// DeleteResource deletes resource by 3 ways foreground, background and orphan
 func (k *KubectlCmd) DeleteResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string, forceDelete bool, cascadeDelete bool) error {
 	span := k.Tracer.StartSpan("DeleteResource")
 	span.SetBaggageItem("kind", gvk.Kind)
