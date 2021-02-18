@@ -461,7 +461,7 @@ func (sc *syncContext) Sync() {
 	// EVEN if those objects subsequently degraded
 	// This handles the common case where neither hooks or waves are used and a sync equates to simply an (asynchronous) kubectl apply of manifests, which succeeds immediately.
 	remainingTasks := tasks[len(tasksTop):]
-	for _, task := range tasks {
+	for _, task := range tasksTop {
 		if task.isHook() {
 			remainingTasks = append(remainingTasks, task)
 		}
