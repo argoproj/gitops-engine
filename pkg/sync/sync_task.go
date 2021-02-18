@@ -23,6 +23,7 @@ type syncTask struct {
 	syncStatus     common.ResultCode
 	operationState common.OperationPhase
 	message        string
+	waveOverride   *int
 }
 
 func ternary(val bool, a, b string) string {
@@ -57,6 +58,9 @@ func (t *syncTask) obj() *unstructured.Unstructured {
 }
 
 func (t *syncTask) wave() int {
+	if t.waveOverride != nil {
+		return *t.waveOverride
+	}
 	return syncwaves.Wave(t.obj())
 }
 

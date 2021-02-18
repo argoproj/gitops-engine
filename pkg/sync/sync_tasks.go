@@ -144,6 +144,11 @@ func (s syncTasks) adjustDeps(isDep func(obj *unstructured.Unstructured) (string
 		if depKey, ok := isDep(t.targetObj); ok {
 			// if tasks is a dependency then insert if before first task that reference it
 			if index, ok := firstIndexByDepKey[depKey]; ok {
+				// wave and sync phase of dependency resource must be same as wave and phase of resource that depend on it
+				wave := s[index].wave()
+				t.waveOverride = &wave
+				t.phase = s[index].phase
+
 				for j := i; j > index; j-- {
 					s[j] = s[j-1]
 				}
