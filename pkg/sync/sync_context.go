@@ -444,6 +444,7 @@ func (sc *syncContext) Sync() {
 	// remove any tasks not in this wave
 	phase := tasks.phase()
 	wave := tasks.wave()
+	finalWave := phase == tasks.lastPhase() && wave == tasks.lastWave()
 
 	sc.log.WithValues("phase", phase, "wave", wave, "tasks", tasks, "syncFailTasks", syncFailTasks).V(1).Info("Filtering tasks in correct phase and wave")
 	//Only get the top few tasks which match phase and wave
@@ -465,8 +466,6 @@ func (sc *syncContext) Sync() {
 			remainingTasks = append(remainingTasks, task)
 		}
 	}
-
-	finalWave := isFinalWave(remainingTasks)
 
 	tasks = tasksTop
 
@@ -502,19 +501,6 @@ func (sc *syncContext) Sync() {
 			return task.deleteOnPhaseCompletion()
 		}), true)
 	}
-}
-
-func isFinalWave(remainingTasks []*syncTask) bool {
-	if len(remainingTasks) == 0 {
-		return true
-	}
-
-	for _, task := range remainingTasks {
-		if !task.isHook() {
-			return false
-		}
-	}
-	return true
 }
 
 func (sc *syncContext) deleteHooks(hooksPendingDeletion syncTasks) {
