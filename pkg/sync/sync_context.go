@@ -683,7 +683,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 		}
 	}
 
-	sort.Sort(tasks)
+	tasks.Sort()
 
 	return tasks, successful
 }
