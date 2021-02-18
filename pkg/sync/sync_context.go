@@ -460,7 +460,13 @@ func (sc *syncContext) Sync() {
 	// EVEN if those objects subsequently degraded
 	// This handles the common case where neither hooks or waves are used and a sync equates to simply an (asynchronous) kubectl apply of manifests, which succeeds immediately.
 	remainingTasks := tasks[len(tasksTop):]
-	finalWave := len(remainingTasks) == 0
+	for _, task := range tasks {
+		if task.isHook() {
+			remainingTasks = append(remainingTasks, task)
+		}
+	}
+
+	finalWave := isFinalWave(remainingTasks)
 
 	tasks = tasksTop
 
@@ -496,6 +502,19 @@ func (sc *syncContext) Sync() {
 			return task.deleteOnPhaseCompletion()
 		}), true)
 	}
+}
+
+func isFinalWave(remainingTasks []*syncTask) bool {
+	if len(remainingTasks) == 0 {
+		return true
+	}
+
+	for _, task := range remainingTasks {
+		if !task.isHook() {
+			return false
+		}
+	}
+	return true
 }
 
 func (sc *syncContext) deleteHooks(hooksPendingDeletion syncTasks) {
