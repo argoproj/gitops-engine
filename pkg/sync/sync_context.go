@@ -572,16 +572,6 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 		task.liveObj = sc.liveObj(task.targetObj)
 	}
 
-	// enrich tasks with the result
-	for _, task := range tasks {
-		result, ok := sc.syncRes[task.resultKey()]
-		if ok {
-			task.syncStatus = result.Status
-			task.operationState = result.HookPhase
-			task.message = result.Message
-		}
-	}
-
 	// check permissions
 	for _, task := range tasks {
 		serverRes, err := kube.ServerResourceForGroupVersionKind(sc.disco, task.groupVersionKind())
@@ -607,7 +597,17 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 		}
 	}
 
-	sort.Sort(tasks)
+	tasks.Sort()
+
+	// finally enrich tasks with the result
+	for _, task := range tasks {
+		result, ok := sc.syncRes[task.resultKey()]
+		if ok {
+			task.syncStatus = result.Status
+			task.operationState = result.HookPhase
+			task.message = result.Message
+		}
+	}
 
 	return tasks, successful
 }
