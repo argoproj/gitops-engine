@@ -398,11 +398,24 @@ func TestSyncTasksSort_NamespaceAndObjectInNamespace(t *testing.T) {
 }
 
 func TestSyncTasksSort_NamespaceAndObjectNotInNamespace(t *testing.T) {
-	deployment := &syncTask{
+	preSyncCRB := &syncTask{
 		phase: common.SyncPhasePreSync,
 		targetObj: &unstructured.Unstructured{
 			Object: map[string]interface{}{
 				"kind": "ClusterRoleBinding",
+				"metadata": map[string]interface{}{
+					"helm.sh/hook": "pre-install,pre-upgrade",
+				},
+			},
+		}}
+	preSyncSA := &syncTask{
+		phase: common.SyncPhasePreSync,
+		targetObj: &unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"kind": "ServiceAccount",
+				"metadata": map[string]interface{}{
+					"helm.sh/hook": "pre-install,pre-upgrade",
+				},
 			},
 		}}
 	namespace := &syncTask{
@@ -416,10 +429,10 @@ func TestSyncTasksSort_NamespaceAndObjectNotInNamespace(t *testing.T) {
 		},
 	}
 
-	unsorted := syncTasks{deployment, namespace}
+	unsorted := syncTasks{preSyncCRB, preSyncSA, namespace}
 	sort.Sort(unsorted)
 
-	assert.Equal(t, syncTasks{namespace, deployment}, unsorted)
+	assert.Equal(t, syncTasks{namespace, preSyncSA, preSyncCRB}, unsorted)
 }
 
 func TestSyncTasksSort_CRDAndCR(t *testing.T) {

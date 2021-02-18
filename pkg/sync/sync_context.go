@@ -444,15 +444,25 @@ func (sc *syncContext) Sync() {
 	// remove any tasks not in this wave
 	phase := tasks.phase()
 	wave := tasks.wave()
-	finalWave := phase == tasks.lastPhase() && wave == tasks.lastWave()
+
+	sc.log.WithValues("phase", phase, "wave", wave, "tasks", tasks, "syncFailTasks", syncFailTasks).V(1).Info("Filtering tasks in correct phase and wave")
+	//Only get the top few tasks which match phase and wave
+	var tasksTop syncTasks
+	for _, task := range tasks {
+		if task.phase == phase && task.wave() == wave {
+			tasksTop = append(tasksTop, task)
+		} else {
+			break
+		}
+	}
 
 	// if it is the last phase/wave and the only remaining tasks are non-hooks, the we are successful
 	// EVEN if those objects subsequently degraded
 	// This handles the common case where neither hooks or waves are used and a sync equates to simply an (asynchronous) kubectl apply of manifests, which succeeds immediately.
-	remainingTasks := tasks.Filter(func(t *syncTask) bool { return t.phase != phase || wave != t.wave() || t.isHook() })
+	remainingTasks := tasks[len(tasksTop):]
+	finalWave := len(remainingTasks) == 0
 
-	sc.log.WithValues("phase", phase, "wave", wave, "tasks", tasks, "syncFailTasks", syncFailTasks).V(1).Info("Filtering tasks in correct phase and wave")
-	tasks = tasks.Filter(func(t *syncTask) bool { return t.phase == phase && t.wave() == wave })
+	tasks = tasksTop
 
 	sc.setOperationPhase(common.OperationRunning, "one or more tasks are running")
 
