@@ -45,13 +45,13 @@ func getAppsv1StatefulSetHealth(sts *appsv1.StatefulSet) (*HealthStatus, error) 
 	if sts.Status.ObservedGeneration == 0 || sts.Generation > sts.Status.ObservedGeneration {
 		return &HealthStatus{
 			Status:  HealthStatusProgressing,
-			Message: "Waiting for statefulset spec update to be observed...",
+			Message: "Waiting for statefulset spec update to be observed",
 		}, nil
 	}
 	if sts.Spec.Replicas != nil && sts.Status.ReadyReplicas < *sts.Spec.Replicas {
 		return &HealthStatus{
 			Status:  HealthStatusProgressing,
-			Message: fmt.Sprintf("Waiting for %d pods to be ready...", *sts.Spec.Replicas-sts.Status.ReadyReplicas),
+			Message: fmt.Sprintf("Waiting for %d pods to be ready", *sts.Spec.Replicas-sts.Status.ReadyReplicas),
 		}, nil
 	}
 	if sts.Spec.UpdateStrategy.Type == appsv1.RollingUpdateStatefulSetStrategyType && sts.Spec.UpdateStrategy.RollingUpdate != nil {
@@ -59,31 +59,31 @@ func getAppsv1StatefulSetHealth(sts *appsv1.StatefulSet) (*HealthStatus, error) 
 			if sts.Status.UpdatedReplicas < (*sts.Spec.Replicas - *sts.Spec.UpdateStrategy.RollingUpdate.Partition) {
 				return &HealthStatus{
 					Status: HealthStatusProgressing,
-					Message: fmt.Sprintf("Waiting for partitioned roll out to finish: %d out of %d new pods have been updated...",
+					Message: fmt.Sprintf("Waiting for partitioned roll out to finish: %d out of %d new pods have been updated",
 						sts.Status.UpdatedReplicas, (*sts.Spec.Replicas - *sts.Spec.UpdateStrategy.RollingUpdate.Partition)),
 				}, nil
 			}
 		}
 		return &HealthStatus{
 			Status:  HealthStatusHealthy,
-			Message: fmt.Sprintf("partitioned roll out complete: %d new pods have been updated...", sts.Status.UpdatedReplicas),
+			Message: fmt.Sprintf("Partitioned roll out complete: %d new pods have been updated", sts.Status.UpdatedReplicas),
 		}, nil
 	}
 	if sts.Spec.UpdateStrategy.Type == appsv1.OnDeleteStatefulSetStrategyType {
 		return &HealthStatus{
 			Status:  HealthStatusHealthy,
-			Message: fmt.Sprintf("statefulset has %d ready pods", sts.Status.ReadyReplicas),
+			Message: fmt.Sprintf("Statefulset has %d ready pods", sts.Status.ReadyReplicas),
 		}, nil
 	}
 	if sts.Status.UpdateRevision != sts.Status.CurrentRevision {
 		return &HealthStatus{
 			Status:  HealthStatusProgressing,
-			Message: fmt.Sprintf("waiting for statefulset rolling update to complete %d pods at revision %s...", sts.Status.UpdatedReplicas, sts.Status.UpdateRevision),
+			Message: fmt.Sprintf("Waiting for statefulset rolling update to complete %d pods at revision %s", sts.Status.UpdatedReplicas, sts.Status.UpdateRevision),
 		}, nil
 	}
 	return &HealthStatus{
 		Status:  HealthStatusHealthy,
-		Message: fmt.Sprintf("statefulset rolling update complete %d pods at revision %s...", sts.Status.CurrentReplicas, sts.Status.CurrentRevision),
+		Message: fmt.Sprintf("Statefulset rolling update complete %d pods at revision %s", sts.Status.CurrentReplicas, sts.Status.CurrentRevision),
 	}, nil
 }
 
@@ -97,13 +97,13 @@ func getAppsv1beta1StatefulSetHealth(sts *appsv1beta1.StatefulSet) (*HealthStatu
 	if *observedGeneration == 0 || sts.Generation > *observedGeneration {
 		return &HealthStatus{
 			Status:  HealthStatusProgressing,
-			Message: "Waiting for statefulset spec update to be observed...",
+			Message: "Waiting for statefulset spec update to be observed",
 		}, nil
 	}
 	if sts.Spec.Replicas != nil && sts.Status.ReadyReplicas < *sts.Spec.Replicas {
 		return &HealthStatus{
 			Status:  HealthStatusProgressing,
-			Message: fmt.Sprintf("Waiting for %d pods to be ready...", *sts.Spec.Replicas-sts.Status.ReadyReplicas),
+			Message: fmt.Sprintf("Waiting for %d pods to be ready", *sts.Spec.Replicas-sts.Status.ReadyReplicas),
 		}, nil
 	}
 	if sts.Spec.UpdateStrategy.Type == appsv1beta1.RollingUpdateStatefulSetStrategyType && sts.Spec.UpdateStrategy.RollingUpdate != nil {
@@ -111,31 +111,31 @@ func getAppsv1beta1StatefulSetHealth(sts *appsv1beta1.StatefulSet) (*HealthStatu
 			if sts.Status.UpdatedReplicas < (*sts.Spec.Replicas - *sts.Spec.UpdateStrategy.RollingUpdate.Partition) {
 				return &HealthStatus{
 					Status: HealthStatusProgressing,
-					Message: fmt.Sprintf("Waiting for partitioned roll out to finish: %d out of %d new pods have been updated...",
+					Message: fmt.Sprintf("Waiting for partitioned roll out to finish: %d out of %d new pods have been updated",
 						sts.Status.UpdatedReplicas, (*sts.Spec.Replicas - *sts.Spec.UpdateStrategy.RollingUpdate.Partition)),
 				}, nil
 			}
 		}
 		return &HealthStatus{
 			Status:  HealthStatusHealthy,
-			Message: fmt.Sprintf("partitioned roll out complete: %d new pods have been updated...", sts.Status.UpdatedReplicas),
+			Message: fmt.Sprintf("Partitioned roll out complete: %d new pods have been updated", sts.Status.UpdatedReplicas),
 		}, nil
 	}
 	if sts.Spec.UpdateStrategy.Type == appsv1beta1.OnDeleteStatefulSetStrategyType {
 		return &HealthStatus{
 			Status:  HealthStatusHealthy,
-			Message: fmt.Sprintf("statefulset has %d ready pods", sts.Status.ReadyReplicas),
+			Message: fmt.Sprintf("Statefulset has %d ready pods", sts.Status.ReadyReplicas),
 		}, nil
 	}
 	if sts.Status.UpdateRevision != sts.Status.CurrentRevision {
 		return &HealthStatus{
 			Status:  HealthStatusProgressing,
-			Message: fmt.Sprintf("waiting for statefulset rolling update to complete %d pods at revision %s...", sts.Status.UpdatedReplicas, sts.Status.UpdateRevision),
+			Message: fmt.Sprintf("Waiting for statefulset rolling update to complete %d pods at revision %s", sts.Status.UpdatedReplicas, sts.Status.UpdateRevision),
 		}, nil
 	}
 	return &HealthStatus{
 		Status:  HealthStatusHealthy,
-		Message: fmt.Sprintf("statefulset rolling update complete %d pods at revision %s...", sts.Status.CurrentReplicas, sts.Status.CurrentRevision),
+		Message: fmt.Sprintf("Statefulset rolling update complete %d pods at revision %s", sts.Status.CurrentReplicas, sts.Status.CurrentRevision),
 	}, nil
 }
 
@@ -144,13 +144,13 @@ func getAppsv1beta2StatefulSetHealth(sts *appsv1beta2.StatefulSet) (*HealthStatu
 	if sts.Status.ObservedGeneration == 0 || sts.Generation > sts.Status.ObservedGeneration {
 		return &HealthStatus{
 			Status:  HealthStatusProgressing,
-			Message: "Waiting for statefulset spec update to be observed...",
+			Message: "Waiting for statefulset spec update to be observed",
 		}, nil
 	}
 	if sts.Spec.Replicas != nil && sts.Status.ReadyReplicas < *sts.Spec.Replicas {
 		return &HealthStatus{
 			Status:  HealthStatusProgressing,
-			Message: fmt.Sprintf("Waiting for %d pods to be ready...", *sts.Spec.Replicas-sts.Status.ReadyReplicas),
+			Message: fmt.Sprintf("Waiting for %d pods to be ready", *sts.Spec.Replicas-sts.Status.ReadyReplicas),
 		}, nil
 	}
 	if sts.Spec.UpdateStrategy.Type == appsv1beta2.RollingUpdateStatefulSetStrategyType && sts.Spec.UpdateStrategy.RollingUpdate != nil {
@@ -158,30 +158,30 @@ func getAppsv1beta2StatefulSetHealth(sts *appsv1beta2.StatefulSet) (*HealthStatu
 			if sts.Status.UpdatedReplicas < (*sts.Spec.Replicas - *sts.Spec.UpdateStrategy.RollingUpdate.Partition) {
 				return &HealthStatus{
 					Status: HealthStatusProgressing,
-					Message: fmt.Sprintf("Waiting for partitioned roll out to finish: %d out of %d new pods have been updated...",
+					Message: fmt.Sprintf("Waiting for partitioned roll out to finish: %d out of %d new pods have been updated",
 						sts.Status.UpdatedReplicas, (*sts.Spec.Replicas - *sts.Spec.UpdateStrategy.RollingUpdate.Partition)),
 				}, nil
 			}
 		}
 		return &HealthStatus{
 			Status:  HealthStatusHealthy,
-			Message: fmt.Sprintf("partitioned roll out complete: %d new pods have been updated...", sts.Status.UpdatedReplicas),
+			Message: fmt.Sprintf("Partitioned roll out complete: %d new pods have been updated", sts.Status.UpdatedReplicas),
 		}, nil
 	}
 	if sts.Spec.UpdateStrategy.Type == appsv1beta2.OnDeleteStatefulSetStrategyType {
 		return &HealthStatus{
 			Status:  HealthStatusHealthy,
-			Message: fmt.Sprintf("statefulset has %d ready pods", sts.Status.ReadyReplicas),
+			Message: fmt.Sprintf("Statefulset has %d ready pods", sts.Status.ReadyReplicas),
 		}, nil
 	}
 	if sts.Status.UpdateRevision != sts.Status.CurrentRevision {
 		return &HealthStatus{
 			Status:  HealthStatusProgressing,
-			Message: fmt.Sprintf("waiting for statefulset rolling update to complete %d pods at revision %s...", sts.Status.UpdatedReplicas, sts.Status.UpdateRevision),
+			Message: fmt.Sprintf("Waiting for statefulset rolling update to complete %d pods at revision %s", sts.Status.UpdatedReplicas, sts.Status.UpdateRevision),
 		}, nil
 	}
 	return &HealthStatus{
 		Status:  HealthStatusHealthy,
-		Message: fmt.Sprintf("statefulset rolling update complete %d pods at revision %s...", sts.Status.CurrentReplicas, sts.Status.CurrentRevision),
+		Message: fmt.Sprintf("Statefulset rolling update complete %d pods at revision %s", sts.Status.CurrentReplicas, sts.Status.CurrentRevision),
 	}, nil
 }
