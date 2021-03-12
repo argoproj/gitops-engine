@@ -1048,6 +1048,14 @@ func (sc *syncContext) processCreateTasks(state runState, tasks syncTasks, dryRu
 			if !dryRun || sc.dryRun || result == common.ResultCodeSyncFailed {
 				sc.setResourceResult(t, result, operationPhases[result], message)
 			}
+
+			if sc.dryRun {
+				operationPhase := common.OperationSucceeded
+				if result == common.ResultCodeSyncFailed {
+					operationPhase = common.OperationFailed
+				}
+				sc.setResourceResult(t, result, operationPhase, message)
+			}
 			return state
 		})
 	}
