@@ -20,39 +20,45 @@ var syncPhaseOrder = map[common.SyncPhase]int{
 }
 
 // kindOrder represents the correct order of Kubernetes resources within a manifest
-// https://github.com/helm/helm/blob/master/pkg/tiller/kind_sorter.go
+// https://github.com/helm/helm/blob/1da0d011f9883ef3ac492c1b4cd5dc6d8c19d1aa/pkg/releaseutil/kind_sorter.go
 var kindOrder = map[string]int{}
 
 func init() {
 	kinds := []string{
 		"Namespace",
+		"NetworkPolicy",
 		"ResourceQuota",
 		"LimitRange",
 		"PodSecurityPolicy",
 		"PodDisruptionBudget",
+		"ServiceAccount",
 		"Secret",
+		"SecretList",
 		"ConfigMap",
 		"StorageClass",
 		"PersistentVolume",
 		"PersistentVolumeClaim",
-		"ServiceAccount",
 		"CustomResourceDefinition",
 		"ClusterRole",
+		"ClusterRoleList",
 		"ClusterRoleBinding",
+		"ClusterRoleBindingList",
 		"Role",
+		"RoleList",
 		"RoleBinding",
+		"RoleBindingList",
 		"Service",
 		"DaemonSet",
 		"Pod",
 		"ReplicationController",
 		"ReplicaSet",
 		"Deployment",
+		"HorizontalPodAutoscaler",
 		"StatefulSet",
 		"Job",
 		"CronJob",
 		"Ingress",
-		"APIService",
-	}
+		"APIService"
 	for i, kind := range kinds {
 		// make sure none of the above entries are zero, we need that for custom resources
 		kindOrder[kind] = i - len(kinds)
