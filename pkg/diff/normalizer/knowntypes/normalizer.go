@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -24,16 +23,9 @@ type KnownTypesNormalizer struct {
 }
 
 func init() {
-	knownTypes["core/v1/PodSpec"] = func() interface{} {
-		return &v1.PodSpec{}
-	}
-	knownTypes["core/v1/Container"] = func() interface{} {
-		return &v1.Container{}
-	}
 	knownTypes["core/Quantity"] = func() interface{} {
 		return &resource.Quantity{}
 	}
-
 }
 
 func (n *KnownTypesNormalizer) addKnownField(gk schema.GroupKind, fieldPath string, typePath string) error {

@@ -18,7 +18,7 @@ type options struct {
 func applyOptions(opts []Option) options {
 	o := options{
 		ignoreAggregatedRoles: false,
-		normalizer:            GetNoopNormalizer(),
+		normalizer:            getNewKnownTypesNormalizer(),
 		log:                   klogr.New(),
 	}
 	for _, opt := range opts {
