@@ -35,7 +35,6 @@ spec:
           requests:
             cpu: 2000m
             memory: 32Mi`
-	crdGroupKind = "some.io/TestCRD"
 )
 
 func mustUnmarshalYAML(yamlStr string) *unstructured.Unstructured {
