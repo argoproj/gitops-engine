@@ -7,7 +7,12 @@ IMAGE_PREFIX=${IMAGE_NAMESPACE}/
 endif
 
 .PHONY: generate
-generate: agent-manifests
+generate: gogen agent-manifests
+
+
+.PHONY: gogen
+gogen:
+	go generate ./pkg/diff/normalizer/knowntypes/...
 
 .PHONY: test
 test:

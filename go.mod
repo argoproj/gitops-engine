@@ -3,9 +3,16 @@ module github.com/argoproj/gitops-engine
 go 1.15
 
 require (
+	github.com/chai2010/gettext-go v0.0.0-20170215093142-bf70f2a70fb1 // indirect
+	github.com/docker/spdystream v0.0.0-20181023171402-6480d4af844c // indirect
 	github.com/evanphx/json-patch v4.9.0+incompatible
-	github.com/go-logr/logr v0.3.0
+	github.com/ghodss/yaml v1.0.0
+	github.com/go-logr/logr v0.4.0
 	github.com/golang/mock v1.4.4
+	github.com/gregjones/httpcache v0.0.0-20190611155906-901d90724c79 // indirect
+	github.com/moby/term v0.0.0-20201110203204-bea5bbe245bf // indirect
+	github.com/onsi/ginkgo v1.14.2 // indirect
+	github.com/onsi/gomega v1.10.3 // indirect
 	github.com/spf13/cobra v1.1.1
 	github.com/stretchr/testify v1.6.1
 	golang.org/x/sync v0.0.0-20201207232520-09787c993a3a

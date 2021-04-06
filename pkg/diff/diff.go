@@ -42,23 +42,6 @@ type DiffResultList struct {
 	Modified bool
 }
 
-type noopNormalizer struct {
-}
-
-func (n *noopNormalizer) Normalize(un *unstructured.Unstructured) error {
-	return nil
-}
-
-// Normalizer updates resource before comparing it
-type Normalizer interface {
-	Normalize(un *unstructured.Unstructured) error
-}
-
-// GetNoopNormalizer returns normalizer that does not apply any resource modifications
-func GetNoopNormalizer() Normalizer {
-	return &noopNormalizer{}
-}
-
 // Diff performs a diff on two unstructured objects. If the live object happens to have a
 // "kubectl.kubernetes.io/last-applied-configuration", then perform a three way diff.
 func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult, error) {
