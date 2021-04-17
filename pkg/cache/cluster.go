@@ -842,10 +842,10 @@ func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructure
 		}
 
 		if managedObj != nil {
-			converted, err := c.kubectl.ConvertToVersion(managedObj, targetObj.GroupVersionKind().Group, targetObj.GroupVersionKind().Version)
-			if err != nil {
-				// fallback to loading resource from kubernetes if conversion fails
-				c.log.V(1).Info(fmt.Sprintf("Failed to convert resource: %v", err))
+			// Group and Kind are the same since objects correspond to the same key, so compare only the version.
+			// GetAPIVersion() is cheaper than GroupVersionKind().Version so we use it instead (it also contains Group).
+			if managedObj.GetAPIVersion() != targetObj.GetAPIVersion() {
+				var err error
 				managedObj, err = c.kubectl.GetResource(context.TODO(), c.config, targetObj.GroupVersionKind(), managedObj.GetName(), managedObj.GetNamespace())
 				if err != nil {
 					if errors.IsNotFound(err) {
@@ -853,8 +853,6 @@ func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructure
 					}
 					return err
 				}
-			} else {
-				managedObj = converted
 			}
 			lock.Lock()
 			managedObjs[key] = managedObj

@@ -126,11 +126,6 @@ func (k *MockKubectlCmd) ReplaceResource(ctx context.Context, config *rest.Confi
 	return command.Output, command.Err
 }
 
-// ConvertToVersion converts an unstructured object into the specified group/version
-func (k *MockKubectlCmd) ConvertToVersion(obj *unstructured.Unstructured, group, version string) (*unstructured.Unstructured, error) {
-	return obj, nil
-}
-
 func (k *MockKubectlCmd) GetServerVersion(config *rest.Config) (string, error) {
 	return k.Version, nil
 }

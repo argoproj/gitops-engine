@@ -43,7 +43,6 @@ type Kubectl interface {
 	ReplaceResource(ctx context.Context, config *rest.Config, obj *unstructured.Unstructured, namespace string, dryRunStrategy cmdutil.DryRunStrategy, force bool) (string, error)
 	CreateResource(ctx context.Context, config *rest.Config, obj *unstructured.Unstructured, namespace string, dryRunStrategy cmdutil.DryRunStrategy) (*unstructured.Unstructured, error)
 	UpdateResource(ctx context.Context, config *rest.Config, obj *unstructured.Unstructured, namespace string, dryRunStrategy cmdutil.DryRunStrategy) (*unstructured.Unstructured, error)
-	ConvertToVersion(obj *unstructured.Unstructured, group, version string) (*unstructured.Unstructured, error)
 	DeleteResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string, deleteOptions metav1.DeleteOptions) error
 	GetResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string) (*unstructured.Unstructured, error)
 	PatchResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string, patchType types.PatchType, patchBytes []byte, subresources ...string) (*unstructured.Unstructured, error)
@@ -595,19 +594,6 @@ func (k *KubectlCmd) authReconcile(ctx context.Context, config *rest.Config, kub
 		out = append(out, buf)
 	}
 	return strings.Join(out, ". "), nil
-}
-
-// ConvertToVersion converts an unstructured object into the specified group/version
-func (k *KubectlCmd) ConvertToVersion(obj *unstructured.Unstructured, group string, version string) (*unstructured.Unstructured, error) {
-	span := k.Tracer.StartSpan("ConvertToVersion")
-	from := obj.GroupVersionKind().GroupVersion()
-	span.SetBaggageItem("from", from.String())
-	span.SetBaggageItem("to", schema.GroupVersion{Group: group, Version: version}.String())
-	defer span.Finish()
-	if from.Group == group && from.Version == version {
-		return obj.DeepCopy(), nil
-	}
-	return convertToVersionWithScheme(obj, group, version)
 }
 
 func (k *KubectlCmd) GetServerVersion(config *rest.Config) (string, error) {
