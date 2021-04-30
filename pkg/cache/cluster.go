@@ -36,7 +36,7 @@ const (
 	ClusterRetryTimeout        = 10 * time.Second
 
 	// Same page size as in k8s.io/client-go/tools/pager/pager.go
-	defaultListPageSize = 500
+	defaultListPageSize = 100
 	// Prefetch only a single page
 	defaultListPageBufferSize = 1
 	// listSemaphore is used to limit the number of concurrent memory consuming operations on the
@@ -391,9 +391,14 @@ func (c *clusterCache) listResources(ctx context.Context, resClient dynamic.Reso
 	defer c.listSemaphore.Release(1)
 	resourceVersion := ""
 	listPager := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
+		start := time.Now()
 		res, err := resClient.List(ctx, opts)
+		elapsed := time.Since(start)
 		if err == nil {
 			resourceVersion = res.GetResourceVersion()
+			c.log.Info("cluster cache list resources", "elapsed(s)", elapsed.Seconds(), "resource", res.GetResourceVersion())
+		} else {
+			c.log.Error(err, "cluster cache list resources error", "timeout", opts.TimeoutSeconds)
 		}
 		return res, err
 	})
@@ -568,9 +573,10 @@ func (c *clusterCache) sync() error {
 		c.namespacedResources[api.GroupKind] = api.Meta.Namespaced
 		lock.Unlock()
 
+		var listTimeout int64 = 300
 		return c.processApi(client, api, func(resClient dynamic.ResourceInterface, ns string) error {
 			resourceVersion, err := c.listResources(ctx, resClient, func(listPager *pager.ListPager) error {
-				return listPager.EachListItem(context.Background(), metav1.ListOptions{}, func(obj runtime.Object) error {
+				return listPager.EachListItem(context.Background(), metav1.ListOptions{TimeoutSeconds: &listTimeout}, func(obj runtime.Object) error {
 					if un, ok := obj.(*unstructured.Unstructured); !ok {
 						return fmt.Errorf("object %s/%s has an unexpected type", un.GroupVersionKind().String(), un.GetName())
 					} else {
