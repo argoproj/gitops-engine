@@ -18,7 +18,7 @@ require (
 	k8s.io/klog/v2 v2.8.0
 	k8s.io/kube-aggregator v0.21.0
 	k8s.io/kubectl v0.21.0
-	k8s.io/kubernetes v1.21.0
+	k8s.io/kubernetes v1.21.1
 	sigs.k8s.io/yaml v1.2.0
 )
 

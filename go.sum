@@ -972,8 +972,8 @@ k8s.io/kube-scheduler v0.21.0/go.mod h1:wf1oi1NHSsFYfG7lKwxJVmnQNBnhL9vOMXztcKQu
 k8s.io/kubectl v0.21.0 h1:WZXlnG/yjcE4LWO2g6ULjFxtzK6H1TKzsfaBFuVIhNg=
 k8s.io/kubectl v0.21.0/go.mod h1:EU37NukZRXn1TpAkMUoy8Z/B2u6wjHDS4aInsDzVvks=
 k8s.io/kubelet v0.21.0/go.mod h1:G5ZxMTVev9t4bhmsSxDAWhH6wXDYEVHVVFyYsw4laR4=
-k8s.io/kubernetes v1.21.0 h1:LUUQgdFsKB+wVgKPUapmXjkvvJHSLN53CuQwre4c+mM=
-k8s.io/kubernetes v1.21.0/go.mod h1:Yx6XZ8zalyqEk7but+j4+5SvLzdyH1eeqZ4cwO+5dD4=
+k8s.io/kubernetes v1.21.1 h1:U7cVOSdG+sMNOfL9XlenBV7avSBDHyWPE66gWnnYIIc=
+k8s.io/kubernetes v1.21.1/go.mod h1:ef++isEL1PW0taH6z7DXrSztPglrZ7jQhyvcMEtm0gQ=
 k8s.io/legacy-cloud-providers v0.21.0/go.mod h1:bNxo7gDg+PGkBmT/MFZswLTWdSWK9kAlS1s8DJca5q4=
 k8s.io/metrics v0.21.0/go.mod h1:L3Ji9EGPP1YBbfm9sPfEXSpnj8i24bfQbAFAsW0NueQ=
 k8s.io/mount-utils v0.21.0/go.mod h1:dwXbIPxKtTjrBEaX1aK/CMEf1KZ8GzMHpe3NEBfdFXI=
