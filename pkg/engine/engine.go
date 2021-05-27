@@ -84,10 +84,11 @@ func (e *gitOpsEngine) Sync(ctx context.Context,
 		return nil, err
 	}
 	opts = append(opts, sync.WithSkipHooks(!diffRes.Modified))
-	syncCtx, err := sync.NewSyncContext(revision, result, e.config, e.config, e.kubectl, namespace, opts...)
+	syncCtx, cleanup, err := sync.NewSyncContext(revision, result, e.config, e.config, e.kubectl, namespace, opts...)
 	if err != nil {
 		return nil, err
 	}
+	defer cleanup()
 
 	resUpdated := make(chan bool)
 	unsubscribe := e.cache.OnResourceUpdated(func(newRes *cache.Resource, oldRes *cache.Resource, namespaceResources map[kube.ResourceKey]*cache.Resource) {
