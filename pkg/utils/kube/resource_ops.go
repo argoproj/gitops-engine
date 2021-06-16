@@ -125,11 +125,9 @@ func (k *kubectlResourceOperations) runResourceCommand(ctx context.Context, obj 
 	return strings.Join(out, ". "), nil
 }
 
-func kubeCmdFactory(kubeconfig, ns string) cmdutil.Factory {
+func kubeCmdFactory(kubeconfig string, cacheDir string) cmdutil.Factory {
 	kubeConfigFlags := genericclioptions.NewConfigFlags(true)
-	if ns != "" {
-		kubeConfigFlags.Namespace = &ns
-	}
+	kubeConfigFlags.CacheDir = &cacheDir
 	kubeConfigFlags.KubeConfig = &kubeconfig
 	matchVersionKubeConfigFlags := cmdutil.NewMatchVersionFlags(kubeConfigFlags)
 	return cmdutil.NewFactory(matchVersionKubeConfigFlags)

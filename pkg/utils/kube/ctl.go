@@ -202,18 +202,23 @@ func (k *KubectlCmd) DeleteResource(ctx context.Context, config *rest.Config, gv
 }
 
 func (k *KubectlCmd) ManageResources(config *rest.Config) (ResourceOperations, func(), error) {
-	f, err := ioutil.TempFile(utils.TempDir, "")
+	cacheDir, err := ioutil.TempDir(utils.TempDir, "")
+	if err != nil {
+		return nil, nil, fmt.Errorf("Failed to create temp kubectl cache dir: %v", err)
+	}
+	kubeConfigFile, err := ioutil.TempFile(utils.TempDir, "")
 	if err != nil {
 		return nil, nil, fmt.Errorf("Failed to generate temp file for kubeconfig: %v", err)
 	}
-	_ = f.Close()
-	err = WriteKubeConfig(config, "", f.Name())
+	_ = kubeConfigFile.Close()
+	err = WriteKubeConfig(config, "", kubeConfigFile.Name())
 	if err != nil {
 		return nil, nil, fmt.Errorf("Failed to write kubeconfig: %v", err)
 	}
-	fact := kubeCmdFactory(f.Name(), "")
+	fact := kubeCmdFactory(kubeConfigFile.Name(), cacheDir)
 	cleanup := func() {
-		utils.DeleteFile(f.Name())
+		utils.DeleteFile(kubeConfigFile.Name())
+		utils.DeleteFile(cacheDir)
 	}
 	return &kubectlResourceOperations{
 		config:       config,
