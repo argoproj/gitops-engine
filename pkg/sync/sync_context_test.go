@@ -1269,16 +1269,11 @@ func TestSyncContext_GetDeleteOptions_WithPrunePropagationPolicy(t *testing.T) {
 }
 
 func TestAntiTheftImmutableLabel(t *testing.T) {
-
-	const label = "my-label"
-	f := AntiTheftImmutableLabel(label)
-
-	assert.NoError(t, f(nil, nil))
-	assert.NoError(t, f(&unstructured.Unstructured{}, nil))
-	assert.NoError(t, f(&unstructured.Unstructured{}, &unstructured.Unstructured{}))
-
-	liveObj := &unstructured.Unstructured{}
-	liveObj.SetLabels(map[string]string{label: "my-live"})
-	assert.EqualError(t, f(liveObj, &unstructured.Unstructured{}), "preventing resource theft: you may not change the label \"my-label\" from \"my-live\" to \"\"")
-
+	f := AntiTheftLabel("my-label", "my-value")
+	t.Run("CreatingResource", func(t *testing.T) {
+		assert.NoError(t, f(nil, nil))
+	})
+	t.Run("DeletingResource", func(t *testing.T) {
+		assert.EqualError(t, f(&unstructured.Unstructured{}, nil), "anti-theft: you may not change the label \"my-label\" from \"\" to \"my-value\"")
+	})
 }

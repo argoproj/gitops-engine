@@ -87,16 +87,15 @@ type AntiTheftFunc func(liveObj, targetObj *unstructured.Unstructured) error
 // AntiTheftDisabled does not check for resource theft
 var AntiTheftDisabled AntiTheftFunc = func(_, _ *unstructured.Unstructured) error { return nil }
 
-// AntiTheftImmutableLabel prevents changing the label on a resource (e.g. app.kubernetes.io/name)
-var AntiTheftImmutableLabel = func(label string) AntiTheftFunc {
-	return func(liveObj, targetObj *unstructured.Unstructured) error {
-		if liveObj == nil || targetObj == nil {
+// AntiTheftLabel prevents changing the label on a resource (e.g. app.kubernetes.io/name)
+var AntiTheftLabel = func(label, value string) AntiTheftFunc {
+	return func(liveObj, _ *unstructured.Unstructured) error {
+		if liveObj == nil {
 			return nil
 		}
-		liveValue, exists := liveObj.GetLabels()[label]
-		targetValue := targetObj.GetAnnotations()[label]
-		if exists && targetValue != liveValue {
-			return fmt.Errorf("preventing resource theft: you may not change the label %q from %q to %q", label, liveValue, targetValue)
+		liveValue := liveObj.GetLabels()[label]
+		if value != liveValue {
+			return fmt.Errorf("anti-theft: you may not change the label %q from %q to %q", label, liveValue, value)
 		}
 		return nil
 	}
