@@ -81,8 +81,26 @@ func WithHealthOverride(override health.HealthOverride) SyncOpt {
 	}
 }
 
+// AntiTheftFunc is a func that makes sure that we're not stealing a resource from another app
+type AntiTheftFunc func(liveObj, targetObj *unstructured.Unstructured) error
+
 // AntiTheftDisabled does not check for resource theft
-var AntiTheftDisabled = func(_, _ *unstructured.Unstructured) error { return nil }
+var AntiTheftDisabled AntiTheftFunc = func(_, _ *unstructured.Unstructured) error { return nil }
+
+// AntiTheftImmutableLabel prevents changing the label on a resource (e.g. app.kubernetes.io/name)
+var AntiTheftImmutableLabel = func(label string) AntiTheftFunc {
+	return func(liveObj, targetObj *unstructured.Unstructured) error {
+		if liveObj == nil || targetObj == nil {
+			return nil
+		}
+		liveValue, exists := liveObj.GetLabels()[label]
+		targetValue := targetObj.GetAnnotations()[label]
+		if exists && targetValue != liveValue {
+			return fmt.Errorf("preventing resource theft: you may not change the label %q from %q to %q", label, liveValue, targetValue)
+		}
+		return nil
+	}
+}
 
 // WithInitialState sets sync operation initial state
 func WithInitialState(phase common.OperationPhase, message string, results []common.ResourceSyncResult, startedAt metav1.Time) SyncOpt {
@@ -344,7 +362,7 @@ type syncContext struct {
 
 	createNamespace   bool
 	namespaceModifier func(*unstructured.Unstructured) bool
-	antiTheft         func(liveObj, targetObj *unstructured.Unstructured) error
+	antiTheft         AntiTheftFunc
 
 	syncWaveHook common.SyncWaveHook
 

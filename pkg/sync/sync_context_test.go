@@ -1267,3 +1267,18 @@ func TestSyncContext_GetDeleteOptions_WithPrunePropagationPolicy(t *testing.T) {
 	opts := sc.getDeleteOptions()
 	assert.Equal(t, v1.DeletePropagationBackground, *opts.PropagationPolicy)
 }
+
+func TestAntiTheftImmutableLabel(t *testing.T) {
+
+	const label = "my-label"
+	f := AntiTheftImmutableLabel(label)
+
+	assert.NoError(t, f(nil, nil))
+	assert.NoError(t, f(&unstructured.Unstructured{}, nil))
+	assert.NoError(t, f(&unstructured.Unstructured{}, &unstructured.Unstructured{}))
+
+	liveObj := &unstructured.Unstructured{}
+	liveObj.SetLabels(map[string]string{label: "my-live"})
+	assert.EqualError(t, f(liveObj, &unstructured.Unstructured{}), "preventing resource theft: you may not change the label \"my-label\" from \"my-live\" to \"\"")
+
+}
