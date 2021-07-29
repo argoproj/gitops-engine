@@ -26,7 +26,9 @@ const (
 	// Sync option that enables pruneLast
 	SyncOptionPruneLast = "PruneLast=true"
 	// Sync option that enables use of replace or create command instead of apply
-	SyncOptionReplace = "Replace=true"
+	SyncOptionReplace    = "Replace=true"
+	// Sync option that allows one app to steal resources from another
+	SyncOptionAllowTheft = "Theft=true"
 )
 
 type PermissionValidator func(un *unstructured.Unstructured, res *metav1.APIResource) error

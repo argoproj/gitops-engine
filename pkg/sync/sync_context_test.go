@@ -55,6 +55,7 @@ func newTestSyncCtx(opts ...SyncOpt) *syncContext {
 		resources: map[kube.ResourceKey]reconciledResource{},
 		syncRes:   map[string]synccommon.ResourceSyncResult{},
 		validate:  true,
+		antiTheft: AntiTheftDisabled,
 	}
 	sc.permissionValidator = func(un *unstructured.Unstructured, res *v1.APIResource) error {
 		return nil

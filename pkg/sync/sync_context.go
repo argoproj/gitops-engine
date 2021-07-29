@@ -81,6 +81,9 @@ func WithHealthOverride(override health.HealthOverride) SyncOpt {
 	}
 }
 
+// AntiTheftDisabled does not check for resource theft
+var AntiTheftDisabled = func(_, _ *unstructured.Unstructured) error { return nil }
+
 // WithInitialState sets sync operation initial state
 func WithInitialState(phase common.OperationPhase, message string, results []common.ResourceSyncResult, startedAt metav1.Time) SyncOpt {
 	return func(ctx *syncContext) {
@@ -88,6 +91,7 @@ func WithInitialState(phase common.OperationPhase, message string, results []com
 		ctx.message = message
 		ctx.syncRes = map[string]common.ResourceSyncResult{}
 		ctx.startedAt = startedAt.Time
+		ctx.antiTheft = AntiTheftDisabled
 		for i := range results {
 			ctx.syncRes[resourceResultKey(results[i].ResourceKey, results[i].SyncPhase)] = results[i]
 		}
@@ -176,6 +180,11 @@ func WithSyncWaveHook(syncWaveHook common.SyncWaveHook) SyncOpt {
 func WithReplace(replace bool) SyncOpt {
 	return func(ctx *syncContext) {
 		ctx.replace = replace
+	}
+}
+func WithAntiTheft(antiTheft func(liveObj, targetObj *unstructured.Unstructured) error) SyncOpt {
+	return func(ctx *syncContext) {
+		ctx.antiTheft = antiTheft
 	}
 }
 
@@ -335,6 +344,7 @@ type syncContext struct {
 
 	createNamespace   bool
 	namespaceModifier func(*unstructured.Unstructured) bool
+	antiTheft         func(liveObj, targetObj *unstructured.Unstructured) error
 
 	syncWaveHook common.SyncWaveHook
 
@@ -832,12 +842,16 @@ func (sc *syncContext) ensureCRDReady(name string) {
 	})
 }
 
-func (sc *syncContext) applyObject(t *syncTask, dryRun bool, force bool, validate bool) (common.ResultCode, string) {
+func (sc *syncContext) applyObject(t *syncTask, dryRun bool, force bool, validate bool, allowTheft bool) (common.ResultCode, string) {
 	dryRunStrategy := cmdutil.DryRunNone
 	if dryRun {
 		dryRunStrategy = cmdutil.DryRunClient
 	}
-
+	if !allowTheft {
+		if err := sc.antiTheft(t.liveObj, t.targetObj); err != nil {
+			return common.ResultCodeSyncFailed, err.Error()
+		}
+	}
 	var err error
 	var message string
 	shouldReplace := sc.replace || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplace)
@@ -1110,7 +1124,8 @@ func (sc *syncContext) processCreateTasks(state runState, tasks syncTasks, dryRu
 			logCtx := sc.log.WithValues("dryRun", dryRun, "task", t)
 			logCtx.V(1).Info("Applying")
 			validate := sc.validate && !resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionsDisableValidation)
-			result, message := sc.applyObject(t, dryRun, sc.force, validate)
+			allowTheft := resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionAllowTheft)
+			result, message := sc.applyObject(t, dryRun, sc.force, validate, allowTheft)
 			if result == common.ResultCodeSyncFailed {
 				logCtx.WithValues("message", message).Info("Apply failed")
 				state = failed
