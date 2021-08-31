@@ -27,6 +27,8 @@ const (
 	SyncOptionPruneLast = "PruneLast=true"
 	// Sync option that enables use of replace or create command instead of apply
 	SyncOptionReplace = "Replace=true"
+	// Sync option that disables resource deletion
+        SyncOptionDisableDeletion = "Delete=false"
 )
 
 type PermissionValidator func(un *unstructured.Unstructured, res *metav1.APIResource) error
