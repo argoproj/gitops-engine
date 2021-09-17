@@ -7,8 +7,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/namix-io/gitops-engine/pkg/sync/common"
-	"github.com/namix-io/gitops-engine/pkg/utils/kube"
+	"github.com/namix-io/sync-engine/pkg/sync/common"
+	"github.com/namix-io/sync-engine/pkg/utils/kube"
 )
 
 // kindOrder represents the correct order of Kubernetes resources within a manifest

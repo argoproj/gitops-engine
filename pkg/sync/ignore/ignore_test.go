@@ -5,11 +5,11 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/namix-io/gitops-engine/pkg/sync/common"
+	"github.com/namix-io/sync-engine/pkg/sync/common"
 
 	"github.com/stretchr/testify/assert"
 
-	. "github.com/namix-io/gitops-engine/pkg/utils/testing"
+	. "github.com/namix-io/sync-engine/pkg/utils/testing"
 )
 
 func newHook(obj *unstructured.Unstructured, hookType common.HookType) *unstructured.Unstructured {

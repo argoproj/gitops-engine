@@ -7,9 +7,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/rest"
 
-	"github.com/namix-io/gitops-engine/pkg/health"
-	"github.com/namix-io/gitops-engine/pkg/utils/kube"
-	"github.com/namix-io/gitops-engine/pkg/utils/tracing"
+	"github.com/namix-io/sync-engine/pkg/health"
+	"github.com/namix-io/sync-engine/pkg/utils/kube"
+	"github.com/namix-io/sync-engine/pkg/utils/tracing"
 )
 
 type noopSettings struct {

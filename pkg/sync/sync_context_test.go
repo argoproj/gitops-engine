@@ -19,13 +19,13 @@ import (
 	testcore "k8s.io/client-go/testing"
 	"k8s.io/klog/v2/klogr"
 
-	"github.com/namix-io/gitops-engine/pkg/diff"
-	"github.com/namix-io/gitops-engine/pkg/health"
-	synccommon "github.com/namix-io/gitops-engine/pkg/sync/common"
-	"github.com/namix-io/gitops-engine/pkg/utils/kube"
-	"github.com/namix-io/gitops-engine/pkg/utils/kube/kubetest"
-	. "github.com/namix-io/gitops-engine/pkg/utils/testing"
-	testingutils "github.com/namix-io/gitops-engine/pkg/utils/testing"
+	"github.com/namix-io/sync-engine/pkg/diff"
+	"github.com/namix-io/sync-engine/pkg/health"
+	synccommon "github.com/namix-io/sync-engine/pkg/sync/common"
+	"github.com/namix-io/sync-engine/pkg/utils/kube"
+	"github.com/namix-io/sync-engine/pkg/utils/kube/kubetest"
+	. "github.com/namix-io/sync-engine/pkg/utils/testing"
+	testingutils "github.com/namix-io/sync-engine/pkg/utils/testing"
 )
 
 func newTestSyncCtx(opts ...SyncOpt) *syncContext {

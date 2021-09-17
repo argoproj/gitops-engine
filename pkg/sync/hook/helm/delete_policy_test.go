@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/namix-io/gitops-engine/pkg/sync/common"
-	. "github.com/namix-io/gitops-engine/pkg/utils/testing"
+	"github.com/namix-io/sync-engine/pkg/sync/common"
+	. "github.com/namix-io/sync-engine/pkg/utils/testing"
 )
 
 func TestDeletePolicies(t *testing.T) {

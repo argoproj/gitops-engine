@@ -75,8 +75,8 @@ Engine.
 The PoC deliverables are:
 
 - All PoC changes are in separate branches.
-- Argo CD controller will be moved to https://github.com/namix-io/gitops-engine.
-- Flux will import GitOps engine component from the https://github.com/namix-io/gitops-engine repository and use it to perform cluster state syncing.
+- Argo CD controller will be moved to https://github.com/namix-io/sync-engine.
+- Flux will import GitOps engine component from the https://github.com/namix-io/sync-engine repository and use it to perform cluster state syncing.
 - The flux installation and fluxctl behavior will remain the same other than using GitOps engine internally. That means there will be no creation of Application CRD or Argo CD
 specific ConfigMaps/Secrets.
 - For the sake of saving time POC does not include implementing features mentioned before. So no commit verification, only plain .yaml files support, and full cluster mode.

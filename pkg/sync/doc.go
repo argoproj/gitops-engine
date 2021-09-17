@@ -99,7 +99,7 @@ in-sync and healthy.
 
 Example
 
-Find real-life example in https://github.com/namix-io/gitops-engine/blob/master/pkg/engine/engine.go
+Find real-life example in https://github.com/namix-io/sync-engine/blob/master/pkg/engine/engine.go
 
 */
 package sync

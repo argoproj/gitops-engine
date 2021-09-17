@@ -3,7 +3,7 @@ package helm
 import (
 	"testing"
 
-	. "github.com/namix-io/gitops-engine/pkg/utils/testing"
+	. "github.com/namix-io/sync-engine/pkg/utils/testing"
 
 	"github.com/stretchr/testify/assert"
 )

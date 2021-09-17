@@ -4,7 +4,7 @@ and "implements" GitOps.
 
 Example
 
-The https://github.com/namix-io/gitops-engine/tree/master/agent demonstrates how to use the engine.
+The https://github.com/namix-io/sync-engine/tree/master/agent demonstrates how to use the engine.
 */
 
 package engine
@@ -18,11 +18,11 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/rest"
 
-	"github.com/namix-io/gitops-engine/pkg/cache"
-	"github.com/namix-io/gitops-engine/pkg/diff"
-	"github.com/namix-io/gitops-engine/pkg/sync"
-	"github.com/namix-io/gitops-engine/pkg/sync/common"
-	"github.com/namix-io/gitops-engine/pkg/utils/kube"
+	"github.com/namix-io/sync-engine/pkg/cache"
+	"github.com/namix-io/sync-engine/pkg/diff"
+	"github.com/namix-io/sync-engine/pkg/sync"
+	"github.com/namix-io/sync-engine/pkg/sync/common"
+	"github.com/namix-io/sync-engine/pkg/utils/kube"
 )
 
 const (

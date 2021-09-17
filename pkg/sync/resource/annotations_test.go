@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	. "github.com/namix-io/gitops-engine/pkg/utils/testing"
+	. "github.com/namix-io/sync-engine/pkg/utils/testing"
 )
 
 func TestHasAnnotationOption(t *testing.T) {

@@ -3,8 +3,8 @@
 package mocks
 
 import (
-	cache "github.com/namix-io/gitops-engine/pkg/cache"
-	kube "github.com/namix-io/gitops-engine/pkg/utils/kube"
+	cache "github.com/namix-io/sync-engine/pkg/cache"
+	kube "github.com/namix-io/sync-engine/pkg/utils/kube"
 
 	mock "github.com/stretchr/testify/mock"
 

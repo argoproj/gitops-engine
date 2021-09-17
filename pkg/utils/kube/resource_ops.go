@@ -29,9 +29,9 @@ import (
 	"k8s.io/kubectl/pkg/scheme"
 	"k8s.io/kubectl/pkg/util/openapi"
 
-	"github.com/namix-io/gitops-engine/pkg/diff"
-	"github.com/namix-io/gitops-engine/pkg/utils/io"
-	"github.com/namix-io/gitops-engine/pkg/utils/tracing"
+	"github.com/namix-io/sync-engine/pkg/diff"
+	"github.com/namix-io/sync-engine/pkg/utils/io"
+	"github.com/namix-io/sync-engine/pkg/utils/tracing"
 )
 
 // ResourceOperations provides methods to manage k8s resources

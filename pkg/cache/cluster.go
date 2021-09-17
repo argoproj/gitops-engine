@@ -26,8 +26,8 @@ import (
 	"k8s.io/klog/v2/klogr"
 	"k8s.io/kubectl/pkg/util/openapi"
 
-	"github.com/namix-io/gitops-engine/pkg/utils/kube"
-	"github.com/namix-io/gitops-engine/pkg/utils/tracing"
+	"github.com/namix-io/sync-engine/pkg/utils/kube"
+	"github.com/namix-io/sync-engine/pkg/utils/tracing"
 )
 
 const (

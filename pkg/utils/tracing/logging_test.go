@@ -5,7 +5,7 @@ import (
 
 	"github.com/golang/mock/gomock"
 
-	"github.com/namix-io/gitops-engine/pkg/utils/tracing/tracer_testing"
+	"github.com/namix-io/sync-engine/pkg/utils/tracing/tracer_testing"
 )
 
 func TestLoggingTracer(t *testing.T) {

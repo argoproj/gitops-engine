@@ -19,9 +19,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/kubernetes/scheme"
 
-	"github.com/namix-io/gitops-engine/internal/kubernetes_vendor/pkg/api/v1/endpoints"
-	jsonutil "github.com/namix-io/gitops-engine/pkg/utils/json"
-	kubescheme "github.com/namix-io/gitops-engine/pkg/utils/kube/scheme"
+	"github.com/namix-io/sync-engine/internal/kubernetes_vendor/pkg/api/v1/endpoints"
+	jsonutil "github.com/namix-io/sync-engine/pkg/utils/json"
+	kubescheme "github.com/namix-io/sync-engine/pkg/utils/kube/scheme"
 )
 
 const couldNotMarshalErrMsg = "Could not unmarshal to object of type %s: %v"

@@ -1,4 +1,4 @@
-module github.com/namix-io/gitops-engine
+module github.com/namix-io/sync-engine
 
 go 1.15
 

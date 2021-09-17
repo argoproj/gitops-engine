@@ -8,8 +8,8 @@ import (
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/namix-io/gitops-engine/pkg/sync/common"
-	. "github.com/namix-io/gitops-engine/pkg/utils/testing"
+	"github.com/namix-io/sync-engine/pkg/sync/common"
+	. "github.com/namix-io/sync-engine/pkg/utils/testing"
 )
 
 func Test_syncTasks_kindOrder(t *testing.T) {

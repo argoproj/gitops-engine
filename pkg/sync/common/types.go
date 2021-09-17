@@ -4,7 +4,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/namix-io/gitops-engine/pkg/utils/kube"
+	"github.com/namix-io/sync-engine/pkg/utils/kube"
 )
 
 const (
