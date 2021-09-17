@@ -137,7 +137,7 @@ func GetAppInstanceLabel(un *unstructured.Unstructured, key string) string {
 	return ""
 }
 
-// GetAppInstanceAnnotation return the application instance name from annotations
+// GetAppInstanceAnnotation returns the application instance name from annotations
 func GetAppInstanceAnnotation(un *unstructured.Unstructured, key string) string {
 	if annotations := un.GetAnnotations(); annotations != nil {
 		return annotations[key]
