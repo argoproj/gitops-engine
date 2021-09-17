@@ -3,7 +3,7 @@ package health
 import (
 	"fmt"
 
-	"github.com/argoproj/gitops-engine/pkg/utils/kube"
+	"github.com/namix-io/gitops-engine/pkg/utils/kube"
 	batchv1 "k8s.io/api/batch/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"

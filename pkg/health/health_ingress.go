@@ -3,7 +3,7 @@ package health
 import (
 	"fmt"
 
-	"github.com/argoproj/gitops-engine/pkg/utils/kube"
+	"github.com/namix-io/gitops-engine/pkg/utils/kube"
 	extv1beta1 "k8s.io/api/extensions/v1beta1"
 	networkingv1 "k8s.io/api/networking/v1"
 	networkingv1beta1 "k8s.io/api/networking/v1beta1"

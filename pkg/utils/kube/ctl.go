@@ -16,8 +16,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/kubectl/pkg/util/openapi"
 
-	utils "github.com/argoproj/gitops-engine/pkg/utils/io"
-	"github.com/argoproj/gitops-engine/pkg/utils/tracing"
+	utils "github.com/namix-io/gitops-engine/pkg/utils/io"
+	"github.com/namix-io/gitops-engine/pkg/utils/tracing"
 )
 
 type CleanupFunc func()

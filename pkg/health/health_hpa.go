@@ -10,7 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/argoproj/gitops-engine/pkg/utils/kube"
+	"github.com/namix-io/gitops-engine/pkg/utils/kube"
 )
 
 var (

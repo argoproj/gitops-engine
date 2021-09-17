@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	. "github.com/argoproj/gitops-engine/pkg/utils/testing"
+	. "github.com/namix-io/gitops-engine/pkg/utils/testing"
 )
 
 func TestWave(t *testing.T) {

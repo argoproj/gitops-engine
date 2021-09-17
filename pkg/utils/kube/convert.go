@@ -1,7 +1,7 @@
 package kube
 
 import (
-	"github.com/argoproj/gitops-engine/pkg/utils/kube/scheme"
+	"github.com/namix-io/gitops-engine/pkg/utils/kube/scheme"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"

@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"k8s.io/klog/v2/klogr"
 
-	testingutils "github.com/argoproj/gitops-engine/pkg/utils/testing"
-	"github.com/argoproj/gitops-engine/pkg/utils/tracing"
+	testingutils "github.com/namix-io/gitops-engine/pkg/utils/testing"
+	"github.com/namix-io/gitops-engine/pkg/utils/tracing"
 )
 
 var (

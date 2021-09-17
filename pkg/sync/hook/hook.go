@@ -3,9 +3,9 @@ package hook
 import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/argoproj/gitops-engine/pkg/sync/common"
-	helmhook "github.com/argoproj/gitops-engine/pkg/sync/hook/helm"
-	resourceutil "github.com/argoproj/gitops-engine/pkg/sync/resource"
+	"github.com/namix-io/gitops-engine/pkg/sync/common"
+	helmhook "github.com/namix-io/gitops-engine/pkg/sync/hook/helm"
+	resourceutil "github.com/namix-io/gitops-engine/pkg/sync/resource"
 )
 
 func IsHook(obj *unstructured.Unstructured) bool {

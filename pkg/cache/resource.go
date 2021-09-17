@@ -7,7 +7,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/argoproj/gitops-engine/pkg/utils/kube"
+	"github.com/namix-io/gitops-engine/pkg/utils/kube"
 )
 
 // Resource holds the information about Kubernetes resource, ownership references and optional information
