@@ -93,6 +93,8 @@ type ClusterCache interface {
 	Invalidate(opts ...UpdateSettingsFunc)
 	// FindResources returns resources that matches given list of predicates from specified namespace or everywhere if specified namespace is empty
 	FindResources(namespace string, predicates ...func(r *Resource) bool) map[kube.ResourceKey]*Resource
+	// GetUnstructuredResources returns unstrcutred resources that matches given list of predicates from specified namespace or everywhere if specified namespace is empty
+	GetUnstructuredResources(namespace string, predicates ...func(r *Resource) bool) []*unstructured.Unstructured
 	// IterateHierarchy iterates resource tree starting from the specified top level resource and executes callback for each resource in the tree
 	IterateHierarchy(key kube.ResourceKey, action func(resource *Resource, namespaceResources map[kube.ResourceKey]*Resource))
 	// IsNamespaced answers if specified group/kind is a namespaced resource API or not
@@ -754,6 +756,18 @@ func (c *clusterCache) FindResources(namespace string, predicates ...func(r *Res
 		}
 	}
 	return result
+}
+
+func (c *clusterCache) GetUnstructuredResources(namespace string, predicates ...func(r *Resource) bool) []*unstructured.Unstructured {
+
+	rm := c.FindResources(namespace, predicates...)
+	values := []*unstructured.Unstructured{}
+    for _, value := range rm {
+        values = append(values, value.Resource)
+    }
+	return values
+
+	
 }
 
 // IterateHierarchy iterates resource tree starting from the specified top level resource and executes callback for each resource in the tree
