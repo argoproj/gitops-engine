@@ -181,6 +181,6 @@ func sanitizeService(obj *unstructured.Unstructured)  {
 }
 
 func sanitizeServiceAccount(obj *unstructured.Unstructured)  {
-	unstructured.RemoveNestedField(obj.Object, "secrets", "name")
+	unstructured.RemoveNestedField(obj.Object, "secrets")
 	unstructured.RemoveNestedField(obj.Object, "metadata", "resourceVersion")
 }
