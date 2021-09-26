@@ -172,6 +172,9 @@ func sanitizeObj(obj *unstructured.Unstructured) {
 	obj.SetClusterName("")
 	obj.SetDeletionTimestamp(nil)
 	obj.SetCreationTimestamp(metav1.Time{})
+	obj.SetManagedFields(nil)
+	unstructured.RemoveNestedField(obj.Object, "status")
+	obj.SetAnnotations(nil)
 }
 
 func sanitizeService(obj *unstructured.Unstructured)  {
