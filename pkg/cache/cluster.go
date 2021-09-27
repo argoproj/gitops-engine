@@ -737,6 +737,11 @@ func (c *clusterCache) FindResources(namespace string, predicates ...func(r *Res
 		if ns, ok := c.nsIndex[namespace]; ok {
 			resources = ns
 		}
+		if c.clusterResources {
+			for key, val := range c.nsIndex[""] {
+				resources[key] = val
+			}
+		}
 	} else {
 		resources = c.resources
 	}
