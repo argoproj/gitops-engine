@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -35,7 +36,7 @@ func TestResourceOfGroupKind(t *testing.T) {
 	}
 
 	cluster := newCluster(t, deploy, service)
-	err := cluster.EnsureSynced()
+	err := cluster.EnsureSynced(context.Background())
 	require.NoError(t, err)
 
 	resources := cluster.FindResources("", ResourceOfGroupKind("apps", "Deployment"))
@@ -76,7 +77,7 @@ func TestGetNamespaceResources(t *testing.T) {
 	}
 
 	cluster := newCluster(t, defaultNamespaceTopLevel1, defaultNamespaceTopLevel2, kubesystemNamespaceTopLevel2)
-	err := cluster.EnsureSynced()
+	err := cluster.EnsureSynced(context.Background())
 	require.NoError(t, err)
 
 	resources := cluster.FindResources("default", TopLevelResource)
@@ -109,7 +110,7 @@ func ExampleNewClusterCache_inspectNamespaceResources() {
 		}),
 	)
 	// Ensure cluster is synced before using it
-	if err := clusterCache.EnsureSynced(); err != nil {
+	if err := clusterCache.EnsureSynced(context.Background()); err != nil {
 		panic(err)
 	}
 	// Iterate default namespace resources tree
