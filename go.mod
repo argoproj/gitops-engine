@@ -18,15 +18,15 @@ require (
 	k8s.io/klog/v2 v2.9.0
 	k8s.io/kube-aggregator v0.22.2
 	k8s.io/kubectl v0.22.2
-	k8s.io/kubernetes v1.21.3
+	k8s.io/kubernetes v1.22.2
 	sigs.k8s.io/yaml v1.2.0
 )
 
 replace (
 	// https://github.com/kubernetes/kubernetes/issues/79384#issuecomment-505627280
 	k8s.io/api => k8s.io/api v0.22.2
-	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.22.2 // indirect
-	k8s.io/apimachinery => k8s.io/apimachinery v0.22.2 // indirect
+	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.22.2
+	k8s.io/apimachinery => k8s.io/apimachinery v0.22.2
 	k8s.io/apiserver => k8s.io/apiserver v0.22.2
 	k8s.io/cli-runtime => k8s.io/cli-runtime v0.22.2
 	k8s.io/client-go => k8s.io/client-go v0.22.2
@@ -47,5 +47,6 @@ replace (
 	k8s.io/legacy-cloud-providers => k8s.io/legacy-cloud-providers v0.22.2
 	k8s.io/metrics => k8s.io/metrics v0.22.2
 	k8s.io/mount-utils => k8s.io/mount-utils v0.22.2
+	k8s.io/pod-security-admission => k8s.io/pod-security-admission v0.22.2
 	k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.22.2
 )

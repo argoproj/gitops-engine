@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -138,7 +139,7 @@ func TestEnsureSynced(t *testing.T) {
 	}
 
 	cluster := newCluster(t, obj1, obj2)
-	err := cluster.EnsureSynced()
+	err := cluster.EnsureSynced(context.Background())
 	require.NoError(t, err)
 
 	cluster.lock.Lock()
@@ -167,7 +168,7 @@ func TestStatefulSetOwnershipInferred(t *testing.T) {
 
 	t.Run("STSTemplateNameNotMatching", func(t *testing.T) {
 		cluster := newCluster(t, sts)
-		err := cluster.EnsureSynced()
+		err := cluster.EnsureSynced(context.Background())
 		require.NoError(t, err)
 
 		pvc := mustToUnstructured(&v1.PersistentVolumeClaim{
@@ -187,7 +188,7 @@ func TestStatefulSetOwnershipInferred(t *testing.T) {
 
 	t.Run("STSTemplateNameNotMatching", func(t *testing.T) {
 		cluster := newCluster(t, sts)
-		err := cluster.EnsureSynced()
+		err := cluster.EnsureSynced(context.Background())
 		require.NoError(t, err)
 
 		pvc := mustToUnstructured(&v1.PersistentVolumeClaim{
@@ -206,7 +207,7 @@ func TestStatefulSetOwnershipInferred(t *testing.T) {
 
 	t.Run("MatchingSTSExists", func(t *testing.T) {
 		cluster := newCluster(t, sts)
-		err := cluster.EnsureSynced()
+		err := cluster.EnsureSynced(context.Background())
 		require.NoError(t, err)
 
 		pvc := mustToUnstructured(&v1.PersistentVolumeClaim{
@@ -248,7 +249,7 @@ func TestEnsureSyncedSingleNamespace(t *testing.T) {
 
 	cluster := newCluster(t, obj1, obj2)
 	cluster.namespaces = []string{"default1"}
-	err := cluster.EnsureSynced()
+	err := cluster.EnsureSynced(context.Background())
 	require.NoError(t, err)
 
 	cluster.lock.Lock()
@@ -264,7 +265,7 @@ func TestEnsureSyncedSingleNamespace(t *testing.T) {
 
 func TestGetChildren(t *testing.T) {
 	cluster := newCluster(t, testPod(), testRS(), testDeploy())
-	err := cluster.EnsureSynced()
+	err := cluster.EnsureSynced(context.Background())
 	require.NoError(t, err)
 
 	rsChildren := getChildren(cluster, mustToUnstructured(testRS()))
@@ -311,7 +312,7 @@ func TestGetManagedLiveObjs(t *testing.T) {
 		return nil, true
 	}))
 
-	err := cluster.EnsureSynced()
+	err := cluster.EnsureSynced(context.Background())
 	require.NoError(t, err)
 
 	targetDeploy := strToUnstructured(`
@@ -338,7 +339,7 @@ func TestGetManagedLiveObjsNamespacedModeClusterLevelResource(t *testing.T) {
 	}))
 	cluster.namespaces = []string{"default", "production"}
 
-	err := cluster.EnsureSynced()
+	err := cluster.EnsureSynced(context.Background())
 	require.NoError(t, err)
 
 	targetDeploy := strToUnstructured(`
@@ -364,7 +365,7 @@ func TestGetManagedLiveObjsNamespacedModeClusterLevelResource_ClusterResourceEna
 	cluster.namespaces = []string{"default", "production"}
 	cluster.clusterResources = true
 
-	err := cluster.EnsureSynced()
+	err := cluster.EnsureSynced(context.Background())
 	require.NoError(t, err)
 
 	clusterLevelRes := strToUnstructured(`
@@ -404,7 +405,7 @@ func TestGetManagedLiveObjsAllNamespaces(t *testing.T) {
 	}))
 	cluster.namespaces = nil
 
-	err := cluster.EnsureSynced()
+	err := cluster.EnsureSynced(context.Background())
 	require.NoError(t, err)
 
 	targetDeploy := strToUnstructured(`
@@ -432,7 +433,7 @@ func TestGetManagedLiveObjsValidNamespace(t *testing.T) {
 	}))
 	cluster.namespaces = []string{"default", "production"}
 
-	err := cluster.EnsureSynced()
+	err := cluster.EnsureSynced(context.Background())
 	require.NoError(t, err)
 
 	targetDeploy := strToUnstructured(`
@@ -460,7 +461,7 @@ func TestGetManagedLiveObjsInvalidNamespace(t *testing.T) {
 	}))
 	cluster.namespaces = []string{"default", "develop"}
 
-	err := cluster.EnsureSynced()
+	err := cluster.EnsureSynced(context.Background())
 	require.NoError(t, err)
 
 	targetDeploy := strToUnstructured(`
@@ -481,7 +482,7 @@ metadata:
 
 func TestChildDeletedEvent(t *testing.T) {
 	cluster := newCluster(t, testPod(), testRS(), testDeploy())
-	err := cluster.EnsureSynced()
+	err := cluster.EnsureSynced(context.Background())
 	require.NoError(t, err)
 
 	cluster.processEvent(watch.Deleted, mustToUnstructured(testPod()))
@@ -492,7 +493,7 @@ func TestChildDeletedEvent(t *testing.T) {
 
 func TestProcessNewChildEvent(t *testing.T) {
 	cluster := newCluster(t, testPod(), testRS(), testDeploy())
-	err := cluster.EnsureSynced()
+	err := cluster.EnsureSynced(context.Background())
 	require.NoError(t, err)
 	newPod := strToUnstructured(`
   apiVersion: v1
@@ -559,7 +560,7 @@ func TestWatchCacheUpdated(t *testing.T) {
 	updated.SetResourceVersion("updated-pod-version")
 
 	cluster := newCluster(t, removed, updated)
-	err := cluster.EnsureSynced()
+	err := cluster.EnsureSynced(context.Background())
 
 	require.NoError(t, err)
 
@@ -586,7 +587,7 @@ func TestNamespaceModeReplace(t *testing.T) {
 	podGroupKind := testPod().GroupVersionKind().GroupKind()
 
 	cluster := newCluster(t, ns1Pod, ns2Pod)
-	err := cluster.EnsureSynced()
+	err := cluster.EnsureSynced(context.Background())
 	require.NoError(t, err)
 
 	cluster.lock.Lock()
@@ -604,7 +605,7 @@ func TestNamespaceModeReplace(t *testing.T) {
 func TestGetDuplicatedChildren(t *testing.T) {
 	extensionsRS := testExtensionsRS()
 	cluster := newCluster(t, testDeploy(), testRS(), extensionsRS)
-	err := cluster.EnsureSynced()
+	err := cluster.EnsureSynced(context.Background())
 
 	require.NoError(t, err)
 
@@ -636,7 +637,7 @@ func ExampleNewClusterCache_resourceUpdatedEvents() {
 
 	clusterCache := NewClusterCache(config)
 	// Ensure cluster is synced before using it
-	if err := clusterCache.EnsureSynced(); err != nil {
+	if err := clusterCache.EnsureSynced(context.Background()); err != nil {
 		panic(err)
 	}
 	unsubscribe := clusterCache.OnResourceUpdated(func(newRes *Resource, oldRes *Resource, _ map[kube.ResourceKey]*Resource) {

@@ -49,7 +49,6 @@ func newTestSyncCtx(opts ...SyncOpt) *syncContext {
 		config:    &rest.Config{},
 		rawConfig: &rest.Config{},
 		namespace: FakeArgoCDNamespace,
-		revision:  "FooBarBaz",
 		disco:     fakeDisco,
 		log:       klogr.New().WithValues("application", "fake-app"),
 		resources: map[kube.ResourceKey]reconciledResource{},
@@ -597,8 +596,8 @@ func TestUnnamedHooksGetUniqueNames(t *testing.T) {
 
 		assert.True(t, successful)
 		assert.Len(t, tasks, 2)
-		assert.Contains(t, tasks[0].name(), "foobarb-presync-")
-		assert.Contains(t, tasks[1].name(), "foobarb-postsync-")
+		assert.Contains(t, tasks[0].name(), "presync-")
+		assert.Contains(t, tasks[1].name(), "postsync-")
 		assert.Equal(t, "", pod.GetName())
 	})
 
@@ -608,13 +607,12 @@ func TestUnnamedHooksGetUniqueNames(t *testing.T) {
 		pod.SetName("")
 		pod.SetAnnotations(map[string]string{synccommon.AnnotationKeyHook: "PreSync,PostSync"})
 		syncCtx.hooks = []*unstructured.Unstructured{pod}
-		syncCtx.revision = "foobar"
 		tasks, successful := syncCtx.getSyncTasks()
 
 		assert.True(t, successful)
 		assert.Len(t, tasks, 2)
-		assert.Contains(t, tasks[0].name(), "foobar-presync-")
-		assert.Contains(t, tasks[1].name(), "foobar-postsync-")
+		assert.Contains(t, tasks[0].name(), "presync-")
+		assert.Contains(t, tasks[1].name(), "postsync-")
 		assert.Equal(t, "", pod.GetName())
 	})
 }

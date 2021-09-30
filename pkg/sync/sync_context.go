@@ -50,9 +50,9 @@ func (r *reconciledResource) key() kube.ResourceKey {
 type SyncContext interface {
 	// Terminate terminates sync operation. The method is asynchronous: it starts deletion is related K8S resources
 	// such as in-flight resource hooks, updates operation status, and exists without waiting for resource completion.
-	Terminate()
+	Terminate(ctx context.Context)
 	// Executes next synchronization step and updates operation status.
-	Sync()
+	Sync(ctx context.Context)
 	// Returns current sync operation state and information about resources synchronized so far.
 	GetState() (common.OperationPhase, string, []common.ResourceSyncResult)
 }
@@ -181,7 +181,6 @@ func WithReplace(replace bool) SyncOpt {
 
 // NewSyncContext creates new instance of a SyncContext
 func NewSyncContext(
-	revision string,
 	reconciliationResult ReconciliationResult,
 	restConfig *rest.Config,
 	rawConfig *rest.Config,
@@ -207,7 +206,6 @@ func NewSyncContext(
 		return nil, nil, err
 	}
 	ctx := &syncContext{
-		revision:            revision,
 		resources:           groupResources(reconciliationResult),
 		hooks:               reconciliationResult.Hooks,
 		config:              restConfig,
@@ -325,7 +323,6 @@ type syncContext struct {
 
 	syncRes   map[string]common.ResourceSyncResult
 	startedAt time.Time
-	revision  string
 	phase     common.OperationPhase
 	message   string
 
@@ -365,9 +362,9 @@ func (sc *syncContext) setRunningPhase(tasks []*syncTask, isPendingDeletion bool
 }
 
 // sync has performs the actual apply or hook based sync
-func (sc *syncContext) Sync() {
+func (sc *syncContext) Sync(ctx context.Context) {
 	sc.log.WithValues("skipHooks", sc.skipHooks, "started", sc.started()).Info("Syncing")
-	tasks, ok := sc.getSyncTasks()
+	tasks, ok := sc.getSyncTasks(ctx)
 	if !ok {
 		sc.setOperationPhase(common.OperationFailed, "one or more synchronization tasks are not valid")
 		return
@@ -389,7 +386,7 @@ func (sc *syncContext) Sync() {
 		}
 
 		sc.log.WithValues("tasks", dryRunTasks).Info("Tasks (dry-run)")
-		if sc.runTasks(dryRunTasks, true) == failed {
+		if sc.runTasks(ctx, dryRunTasks, true) == failed {
 			sc.setOperationPhase(common.OperationFailed, "one or more objects failed to apply (dry run)")
 			return
 		}
@@ -452,8 +449,8 @@ func (sc *syncContext) Sync() {
 
 	// if there are any completed but unsuccessful tasks, sync is a failure.
 	if tasks.Any(func(t *syncTask) bool { return t.completed() && !t.successful() }) {
-		sc.deleteHooks(hooksPendingDeletionFailed)
-		sc.setOperationFailed(syncFailTasks, "one or more synchronization tasks completed unsuccessfully")
+		sc.deleteHooks(ctx, hooksPendingDeletionFailed)
+		sc.setOperationFailed(ctx, syncFailTasks, "one or more synchronization tasks completed unsuccessfully")
 		return
 	}
 
@@ -469,7 +466,7 @@ func (sc *syncContext) Sync() {
 	// the sync operation is successful.
 	if len(tasks) == 0 {
 		// delete all completed hooks which have appropriate delete policy
-		sc.deleteHooks(hooksPendingDeletionSuccessful)
+		sc.deleteHooks(ctx, hooksPendingDeletionSuccessful)
 		sc.setOperationPhase(common.OperationSucceeded, "successfully synced (no more tasks)")
 		return
 	}
@@ -490,12 +487,12 @@ func (sc *syncContext) Sync() {
 	sc.setOperationPhase(common.OperationRunning, "one or more tasks are running")
 
 	sc.log.WithValues("tasks", tasks).V(1).Info("Wet-run")
-	runState := sc.runTasks(tasks, false)
+	runState := sc.runTasks(ctx, tasks, false)
 
 	if sc.syncWaveHook != nil && runState != failed {
 		err := sc.syncWaveHook(phase, wave, finalWave)
 		if err != nil {
-			sc.deleteHooks(hooksPendingDeletionFailed)
+			sc.deleteHooks(ctx, hooksPendingDeletionFailed)
 			sc.setOperationPhase(common.OperationFailed, fmt.Sprintf("SyncWaveHook failed: %v", err))
 			sc.log.Error(err, "SyncWaveHook failed")
 			return
@@ -504,12 +501,12 @@ func (sc *syncContext) Sync() {
 
 	switch runState {
 	case failed:
-		sc.deleteHooks(hooksPendingDeletionFailed)
-		sc.setOperationFailed(syncFailTasks, "one or more objects failed to apply")
+		sc.deleteHooks(ctx, hooksPendingDeletionFailed)
+		sc.setOperationFailed(ctx, syncFailTasks, "one or more objects failed to apply")
 	case successful:
 		if remainingTasks.Len() == 0 {
 			// delete all completed hooks which have appropriate delete policy
-			sc.deleteHooks(hooksPendingDeletionSuccessful)
+			sc.deleteHooks(ctx, hooksPendingDeletionSuccessful)
 			sc.setOperationPhase(common.OperationSucceeded, "successfully synced (all tasks run)")
 		} else {
 			sc.setRunningPhase(remainingTasks, false)
@@ -536,9 +533,9 @@ func (sc *syncContext) filterOutOfSyncTasks(tasks syncTasks) syncTasks {
 	})
 }
 
-func (sc *syncContext) deleteHooks(hooksPendingDeletion syncTasks) {
+func (sc *syncContext) deleteHooks(ctx context.Context, hooksPendingDeletion syncTasks) {
 	for _, task := range hooksPendingDeletion {
-		err := sc.deleteResource(task)
+		err := sc.deleteResource(ctx, task)
 		if err != nil && !apierr.IsNotFound(err) {
 			sc.setResourceResult(task, "", common.OperationError, fmt.Sprintf("failed to delete resource: %v", err))
 		}
@@ -556,7 +553,7 @@ func (sc *syncContext) GetState() (common.OperationPhase, string, []common.Resou
 	return sc.phase, sc.message, resourceRes
 }
 
-func (sc *syncContext) setOperationFailed(syncFailTasks syncTasks, message string) {
+func (sc *syncContext) setOperationFailed(ctx context.Context, syncFailTasks syncTasks, message string) {
 	if len(syncFailTasks) > 0 {
 		// if all the failure hooks are completed, don't run them again, and mark the sync as failed
 		if syncFailTasks.All(func(task *syncTask) bool { return task.completed() }) {
@@ -566,7 +563,7 @@ func (sc *syncContext) setOperationFailed(syncFailTasks syncTasks, message strin
 		// otherwise, we need to start the failure hooks, and then return without setting
 		// the phase, so we make sure we have at least one more sync
 		sc.log.WithValues("syncFailTasks", syncFailTasks).V(1).Info("Running sync fail tasks")
-		if sc.runTasks(syncFailTasks, false) == failed {
+		if sc.runTasks(ctx, syncFailTasks, false) == failed {
 			sc.setOperationPhase(common.OperationFailed, message)
 		}
 	} else {
@@ -583,7 +580,7 @@ func (sc *syncContext) containsResource(resource reconciledResource) bool {
 }
 
 // generates the list of sync tasks we will be performing during this sync.
-func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
+func (sc *syncContext) getSyncTasks(ctx context.Context) (_ syncTasks, successful bool) {
 	resourceTasks := syncTasks{}
 	successful = true
 
@@ -617,13 +614,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 				// metadata.generateName, then we will generate a formulated metadata.name before submission.
 				targetObj := obj.DeepCopy()
 				if targetObj.GetName() == "" {
-					var syncRevision string
-					if len(sc.revision) >= 8 {
-						syncRevision = sc.revision[0:7]
-					} else {
-						syncRevision = sc.revision
-					}
-					postfix := strings.ToLower(fmt.Sprintf("%s-%s-%d", syncRevision, phase, sc.startedAt.UTC().Unix()))
+					postfix := strings.ToLower(fmt.Sprintf("%s-%d", phase, sc.startedAt.UTC().Unix()))
 					generateName := obj.GetGenerateName()
 					targetObj.SetName(fmt.Sprintf("%s%s", generateName, postfix))
 				}
@@ -655,7 +646,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	}
 
 	if sc.createNamespace && sc.namespace != "" {
-		tasks = sc.autoCreateNamespace(tasks)
+		tasks = sc.autoCreateNamespace(ctx, tasks)
 	}
 
 	// enrich task with live obj
@@ -729,7 +720,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	return tasks, successful
 }
 
-func (sc *syncContext) autoCreateNamespace(tasks syncTasks) syncTasks {
+func (sc *syncContext) autoCreateNamespace(ctx context.Context, tasks syncTasks) syncTasks {
 	isNamespaceCreationNeeded := true
 
 	var allObjs []*unstructured.Unstructured
@@ -749,7 +740,7 @@ func (sc *syncContext) autoCreateNamespace(tasks syncTasks) syncTasks {
 		nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: kube.NamespaceKind}, ObjectMeta: metav1.ObjectMeta{Name: sc.namespace}}
 		unstructuredObj, err := kube.ToUnstructured(nsSpec)
 		if err == nil {
-			liveObj, err := sc.kubectl.GetResource(context.TODO(), sc.config, unstructuredObj.GroupVersionKind(), unstructuredObj.GetName(), metav1.NamespaceNone)
+			liveObj, err := sc.kubectl.GetResource(ctx, sc.config, unstructuredObj.GroupVersionKind(), unstructuredObj.GetName(), metav1.NamespaceNone)
 			if err == nil {
 				nsTask := &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj, liveObj: liveObj}
 				_, ok := sc.syncRes[nsTask.resultKey()]
@@ -817,9 +808,9 @@ func (sc *syncContext) setOperationPhase(phase common.OperationPhase, message st
 }
 
 // ensureCRDReady waits until specified CRD is ready (established condition is true). Method is best effort - it does not fail even if CRD is not ready without timeout.
-func (sc *syncContext) ensureCRDReady(name string) {
+func (sc *syncContext) ensureCRDReady(ctx context.Context, name string) {
 	_ = wait.PollImmediate(time.Duration(100)*time.Millisecond, crdReadinessTimeout, func() (bool, error) {
-		crd, err := sc.extensionsclientset.ApiextensionsV1beta1().CustomResourceDefinitions().Get(context.TODO(), name, metav1.GetOptions{})
+		crd, err := sc.extensionsclientset.ApiextensionsV1beta1().CustomResourceDefinitions().Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return false, err
 		}
@@ -832,7 +823,7 @@ func (sc *syncContext) ensureCRDReady(name string) {
 	})
 }
 
-func (sc *syncContext) applyObject(t *syncTask, dryRun bool, force bool, validate bool) (common.ResultCode, string) {
+func (sc *syncContext) applyObject(ctx context.Context, t *syncTask, dryRun bool, force bool, validate bool) (common.ResultCode, string) {
 	dryRunStrategy := cmdutil.DryRunNone
 	if dryRun {
 		dryRunStrategy = cmdutil.DryRunClient
@@ -847,32 +838,32 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun bool, force bool, validat
 			if kube.IsCRD(t.targetObj) {
 				update := t.targetObj.DeepCopy()
 				update.SetResourceVersion(t.liveObj.GetResourceVersion())
-				_, err = sc.resourceOps.UpdateResource(context.TODO(), update, dryRunStrategy)
+				_, err = sc.resourceOps.UpdateResource(ctx, update, dryRunStrategy)
 				if err == nil {
 					message = fmt.Sprintf("%s/%s updated", t.targetObj.GetKind(), t.targetObj.GetName())
 				} else {
 					message = fmt.Sprintf("error when updating: %v", err.Error())
 				}
 			} else {
-				message, err = sc.resourceOps.ReplaceResource(context.TODO(), t.targetObj, dryRunStrategy, force)
+				message, err = sc.resourceOps.ReplaceResource(ctx, t.targetObj, dryRunStrategy, force)
 			}
 		} else {
-			message, err = sc.resourceOps.CreateResource(context.TODO(), t.targetObj, dryRunStrategy, validate)
+			message, err = sc.resourceOps.CreateResource(ctx, t.targetObj, dryRunStrategy, validate)
 		}
 	} else {
-		message, err = sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate)
+		message, err = sc.resourceOps.ApplyResource(ctx, t.targetObj, dryRunStrategy, force, validate)
 	}
 	if err != nil {
 		return common.ResultCodeSyncFailed, err.Error()
 	}
 	if kube.IsCRD(t.targetObj) && !dryRun {
-		sc.ensureCRDReady(t.targetObj.GetName())
+		sc.ensureCRDReady(ctx, t.targetObj.GetName())
 	}
 	return common.ResultCodeSynced, message
 }
 
 // pruneObject deletes the object if both prune is true and dryRun is false. Otherwise appropriate message
-func (sc *syncContext) pruneObject(liveObj *unstructured.Unstructured, prune, dryRun bool) (common.ResultCode, string) {
+func (sc *syncContext) pruneObject(ctx context.Context, liveObj *unstructured.Unstructured, prune, dryRun bool) (common.ResultCode, string) {
 	if !prune {
 		return common.ResultCodePruneSkipped, "ignored (requires pruning)"
 	} else if resourceutil.HasAnnotationOption(liveObj, common.AnnotationSyncOptions, common.SyncOptionDisablePrune) {
@@ -884,7 +875,7 @@ func (sc *syncContext) pruneObject(liveObj *unstructured.Unstructured, prune, dr
 			// Skip deletion if object is already marked for deletion, so we don't cause a resource update hotloop
 			deletionTimestamp := liveObj.GetDeletionTimestamp()
 			if deletionTimestamp == nil || deletionTimestamp.IsZero() {
-				err := sc.kubectl.DeleteResource(context.TODO(), sc.config, liveObj.GroupVersionKind(), liveObj.GetName(), liveObj.GetNamespace(), sc.getDeleteOptions())
+				err := sc.kubectl.DeleteResource(ctx, sc.config, liveObj.GroupVersionKind(), liveObj.GetName(), liveObj.GetNamespace(), sc.getDeleteOptions())
 				if err != nil {
 					return common.ResultCodeSyncFailed, err.Error()
 				}
@@ -940,10 +931,10 @@ func (sc *syncContext) hasCRDOfGroupKind(group string, kind string) bool {
 }
 
 // terminate looks for any running jobs/workflow hooks and deletes the resource
-func (sc *syncContext) Terminate() {
+func (sc *syncContext) Terminate(ctx context.Context) {
 	terminateSuccessful := true
 	sc.log.V(1).Info("terminating")
-	tasks, _ := sc.getSyncTasks()
+	tasks, _ := sc.getSyncTasks(ctx)
 	for _, task := range tasks {
 		if !task.isHook() || task.liveObj == nil {
 			continue
@@ -954,7 +945,7 @@ func (sc *syncContext) Terminate() {
 			return
 		}
 		if phase == common.OperationRunning {
-			err := sc.deleteResource(task)
+			err := sc.deleteResource(ctx, task)
 			if err != nil {
 				sc.setResourceResult(task, "", common.OperationFailed, fmt.Sprintf("Failed to delete: %v", err))
 				terminateSuccessful = false
@@ -972,13 +963,13 @@ func (sc *syncContext) Terminate() {
 	}
 }
 
-func (sc *syncContext) deleteResource(task *syncTask) error {
+func (sc *syncContext) deleteResource(ctx context.Context, task *syncTask) error {
 	sc.log.WithValues("task", task).V(1).Info("Deleting resource")
 	resIf, err := sc.getResourceIf(task)
 	if err != nil {
 		return err
 	}
-	return resIf.Delete(context.TODO(), task.name(), sc.getDeleteOptions())
+	return resIf.Delete(ctx, task.name(), sc.getDeleteOptions())
 }
 
 func (sc *syncContext) getResourceIf(task *syncTask) (dynamic.ResourceInterface, error) {
@@ -1007,7 +998,7 @@ const (
 	failed
 )
 
-func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
+func (sc *syncContext) runTasks(ctx context.Context, tasks syncTasks, dryRun bool) runState {
 	dryRun = dryRun || sc.dryRun
 
 	sc.log.WithValues("numTasks", len(tasks), "dryRun", dryRun).V(1).Info("Running tasks")
@@ -1031,7 +1022,7 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 			ss.Go(func(state runState) runState {
 				logCtx := sc.log.WithValues("dryRun", dryRun, "task", t)
 				logCtx.V(1).Info("Pruning")
-				result, message := sc.pruneObject(t.liveObj, sc.prune, dryRun)
+				result, message := sc.pruneObject(ctx, t.liveObj, sc.prune, dryRun)
 				if result == common.ResultCodeSyncFailed {
 					state = failed
 					logCtx.WithValues("message", message).Info("Pruning failed")
@@ -1058,7 +1049,7 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 			ss.Go(func(state runState) runState {
 				sc.log.WithValues("dryRun", dryRun, "task", t).V(1).Info("Deleting")
 				if !dryRun {
-					err := sc.deleteResource(t)
+					err := sc.deleteResource(ctx, t)
 					if err != nil {
 						// it is possible to get a race condition here, such that the resource does not exist when
 						// delete is requested, we treat this as a nop
@@ -1087,19 +1078,19 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 	for _, task := range createTasks {
 		//Only wait if the type of the next task is different than the previous type
 		if len(tasksGroup) > 0 && tasksGroup[0].targetObj.GetKind() != task.kind() {
-			state = sc.processCreateTasks(state, tasksGroup, dryRun)
+			state = sc.processCreateTasks(ctx, state, tasksGroup, dryRun)
 			tasksGroup = syncTasks{task}
 		} else {
 			tasksGroup = append(tasksGroup, task)
 		}
 	}
 	if len(tasksGroup) > 0 {
-		state = sc.processCreateTasks(state, tasksGroup, dryRun)
+		state = sc.processCreateTasks(ctx, state, tasksGroup, dryRun)
 	}
 	return state
 }
 
-func (sc *syncContext) processCreateTasks(state runState, tasks syncTasks, dryRun bool) runState {
+func (sc *syncContext) processCreateTasks(ctx context.Context, state runState, tasks syncTasks, dryRun bool) runState {
 	ss := newStateSync(state)
 	for _, task := range tasks {
 		if dryRun && task.skipDryRun {
@@ -1110,7 +1101,7 @@ func (sc *syncContext) processCreateTasks(state runState, tasks syncTasks, dryRu
 			logCtx := sc.log.WithValues("dryRun", dryRun, "task", t)
 			logCtx.V(1).Info("Applying")
 			validate := sc.validate && !resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionsDisableValidation)
-			result, message := sc.applyObject(t, dryRun, sc.force, validate)
+			result, message := sc.applyObject(ctx, t, dryRun, sc.force, validate)
 			if result == common.ResultCodeSyncFailed {
 				logCtx.WithValues("message", message).Info("Apply failed")
 				state = failed
