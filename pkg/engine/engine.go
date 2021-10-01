@@ -58,6 +58,14 @@ func (e *gitOpsEngine) Sync(ctx context.Context,
 	namespace string,
 	opts ...sync.SyncOpt,
 ) ([]common.ResourceSyncResult, error) {
+	if err := e.src.EnsureSynced(ctx); err != nil {
+		return nil, fmt.Errorf("failed to sync src cluster: %w", err)
+	}
+
+	if err := e.dest.EnsureSynced(ctx); err != nil {
+		return nil, fmt.Errorf("failed to sync dest cluster: %w", err)
+	}
+
 	resources := e.src.GetUnstructuredResources(namespace, func(r *cache.Resource) bool {
 		return r.Resource != nil && len(r.OwnerRefs) == 0
 	})
