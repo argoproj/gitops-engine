@@ -220,7 +220,6 @@ func applyPatch(liveBytes []byte, patchBytes []byte, newVersionedObject func() (
 		}
 
 	}
-
 	return liveBytes, predictedLiveBytes, nil
 }
 
