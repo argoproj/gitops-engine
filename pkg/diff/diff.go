@@ -45,13 +45,13 @@ type DiffResultList struct {
 type noopNormalizer struct {
 }
 
-func (n *noopNormalizer) Normalize(un *unstructured.Unstructured) error {
+func (n *noopNormalizer) Normalize(un, config, live *unstructured.Unstructured) error {
 	return nil
 }
 
 // Normalizer updates resource before comparing it
 type Normalizer interface {
-	Normalize(un *unstructured.Unstructured) error
+	Normalize(origin, config, live *unstructured.Unstructured) error
 }
 
 // GetNoopNormalizer returns normalizer that does not apply any resource modifications
@@ -65,18 +65,18 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 	o := applyOptions(opts)
 	if config != nil {
 		config = remarshal(config, o)
-		Normalize(config, opts...)
+		Normalize(config, nil, nil, opts...)
 	}
 	if live != nil {
 		live = remarshal(live, o)
-		Normalize(live, opts...)
+		Normalize(live, nil, nil, opts...)
 	}
 	orig, err := GetLastAppliedConfigAnnotation(live)
 	if err != nil {
 		o.log.V(1).Info(fmt.Sprintf("Failed to get last applied configuration: %v", err))
 	} else {
 		if orig != nil && config != nil {
-			Normalize(orig, opts...)
+			Normalize(orig, config, live, opts...)
 			dr, err := ThreeWayDiff(orig, config, live)
 			if err == nil {
 				return dr, nil
@@ -430,7 +430,7 @@ func DiffArray(configArray, liveArray []*unstructured.Unstructured, opts ...Opti
 	return &diffResultList, nil
 }
 
-func Normalize(un *unstructured.Unstructured, opts ...Option) {
+func Normalize(un, config, live *unstructured.Unstructured, opts ...Option) {
 	if un == nil {
 		return
 	}
@@ -449,7 +449,7 @@ func Normalize(un *unstructured.Unstructured, opts ...Option) {
 		normalizeEndpoint(un, o)
 	}
 
-	err := o.normalizer.Normalize(un)
+	err := o.normalizer.Normalize(un, config, live)
 	if err != nil {
 		o.log.Error(err, fmt.Sprintf("Failed to normalize %s/%s/%s", un.GroupVersionKind(), un.GetNamespace(), un.GetName()))
 	}
