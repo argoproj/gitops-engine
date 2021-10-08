@@ -31,9 +31,9 @@ const (
 
 type StopFunc func()
 
-type GitOpsEngine interface {
+type SyncEngine interface {
 	// Synchronizes resources in the cluster
-	Sync(ctx context.Context, isManaged func(r *cache.Resource) bool, namespace string, opts ...sync.SyncOpt) ([]common.ResourceSyncResult, error)
+	Sync(ctx context.Context, isManaged func(r *cache.Resource) bool, opts ...sync.SyncOpt) ([]common.ResourceSyncResult, error)
 }
 
 type gitOpsEngine struct {
@@ -43,7 +43,7 @@ type gitOpsEngine struct {
 }
 
 // NewEngine creates new instances of the GitOps engine
-func NewEngine(src, dest cache.ClusterCache, opts ...Option) GitOpsEngine {
+func NewEngine(src, dest cache.ClusterCache, opts ...Option) SyncEngine {
 	o := applyOptions(opts)
 	return &gitOpsEngine{
 		src:     src,
@@ -55,7 +55,6 @@ func NewEngine(src, dest cache.ClusterCache, opts ...Option) GitOpsEngine {
 
 func (e *gitOpsEngine) Sync(ctx context.Context,
 	isManaged func(r *cache.Resource) bool,
-	namespace string,
 	opts ...sync.SyncOpt,
 ) ([]common.ResourceSyncResult, error) {
 	if err := e.src.EnsureSynced(ctx); err != nil {
@@ -66,7 +65,7 @@ func (e *gitOpsEngine) Sync(ctx context.Context,
 		return nil, fmt.Errorf("failed to sync dest cluster: %w", err)
 	}
 
-	resources := e.src.GetUnstructuredResources(namespace, func(r *cache.Resource) bool {
+	resources := e.src.GetUnstructuredResources(func(r *cache.Resource) bool {
 		return r.Resource != nil && len(r.OwnerRefs) == 0
 	})
 
@@ -79,7 +78,7 @@ func (e *gitOpsEngine) Sync(ctx context.Context,
 		return nil, err
 	}
 
-	result := sync.Reconcile(resources, managedResources, namespace, e.dest)
+	result := sync.Reconcile(resources, managedResources, e.dest)
 	diffRes, err := diff.DiffArray(result.Target, result.Live, diff.WithLogr(e.log))
 	if err != nil {
 		return nil, err
@@ -91,7 +90,6 @@ func (e *gitOpsEngine) Sync(ctx context.Context,
 		e.dest.Config(),
 		e.dest.Config(),
 		e.kubectl,
-		namespace,
 		e.dest.GetOpenAPISchema(),
 		opts...,
 	)

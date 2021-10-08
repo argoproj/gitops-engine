@@ -185,7 +185,6 @@ func NewSyncContext(
 	restConfig *rest.Config,
 	rawConfig *rest.Config,
 	kubectl kubeutil.Kubectl,
-	namespace string,
 	openAPISchema openapi.Resources,
 	opts ...SyncOpt,
 ) (SyncContext, func(), error) {
@@ -215,7 +214,6 @@ func NewSyncContext(
 		extensionsclientset: extensionsclientset,
 		kubectl:             kubectl,
 		resourceOps:         resourceOps,
-		namespace:           namespace,
 		log:                 klogr.New(),
 		validate:            true,
 		startedAt:           time.Now(),
@@ -309,7 +307,6 @@ type syncContext struct {
 	extensionsclientset *clientset.Clientset
 	kubectl             kube.Kubectl
 	resourceOps         kube.ResourceOperations
-	namespace           string
 
 	dryRun                 bool
 	force                  bool
@@ -629,24 +626,35 @@ func (sc *syncContext) getSyncTasks(ctx context.Context) (_ syncTasks, successfu
 	tasks := resourceTasks
 	tasks = append(tasks, hookTasks...)
 
+	namespaces := make(map[string]string)
 	// enrich target objects with the namespace
 	for _, task := range tasks {
 		if task.targetObj == nil {
 			continue
 		}
 
-		if task.targetObj.GetNamespace() == "" {
+		ns := task.targetObj.GetNamespace()
+		if  ns == "" {
 			// If target object's namespace is empty, we set namespace in the object. We do
 			// this even though it might be a cluster-scoped resource. This prevents any
 			// possibility of the resource from unintentionally becoming created in the
 			// namespace during the `kubectl apply`
-			task.targetObj = task.targetObj.DeepCopy()
-			task.targetObj.SetNamespace(sc.namespace)
+
+
+			//Namix - not sure what should be done here..
+
+			// task.targetObj = task.targetObj.DeepCopy()
+			// task.targetObj.SetNamespace(sc.namespace)
+		}else if namespaces[ns] == "" {
+			namespaces[ns] = ns
 		}
 	}
 
-	if sc.createNamespace && sc.namespace != "" {
-		tasks = sc.autoCreateNamespace(ctx, tasks)
+	if sc.createNamespace && len(namespaces) > 0 {
+		for _, ns := range namespaces {
+			tasks = sc.autoCreateNamespace(ctx, tasks, ns)
+		}
+		
 	}
 
 	// enrich task with live obj
@@ -720,7 +728,7 @@ func (sc *syncContext) getSyncTasks(ctx context.Context) (_ syncTasks, successfu
 	return tasks, successful
 }
 
-func (sc *syncContext) autoCreateNamespace(ctx context.Context, tasks syncTasks) syncTasks {
+func (sc *syncContext) autoCreateNamespace(ctx context.Context, tasks syncTasks, namespace string) syncTasks {
 	isNamespaceCreationNeeded := true
 
 	var allObjs []*unstructured.Unstructured
@@ -730,14 +738,14 @@ func (sc *syncContext) autoCreateNamespace(ctx context.Context, tasks syncTasks)
 	}
 
 	for _, res := range allObjs {
-		if isNamespaceWithName(res, sc.namespace) {
+		if isNamespaceWithName(res, namespace) {
 			isNamespaceCreationNeeded = false
 			break
 		}
 	}
 
 	if isNamespaceCreationNeeded {
-		nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: kube.NamespaceKind}, ObjectMeta: metav1.ObjectMeta{Name: sc.namespace}}
+		nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: kube.NamespaceKind}, ObjectMeta: metav1.ObjectMeta{Name: namespace}}
 		unstructuredObj, err := kube.ToUnstructured(nsSpec)
 		if err == nil {
 			liveObj, err := sc.kubectl.GetResource(ctx, sc.config, unstructuredObj.GroupVersionKind(), unstructuredObj.GetName(), metav1.NamespaceNone)
@@ -747,7 +755,7 @@ func (sc *syncContext) autoCreateNamespace(ctx context.Context, tasks syncTasks)
 				if ok {
 					tasks = append(tasks, nsTask)
 				} else {
-					sc.log.WithValues("namespace", sc.namespace).Info("Namespace already exists")
+					sc.log.WithValues("namespace", namespace).Info("Namespace already exists")
 					liveObjCopy := liveObj.DeepCopy()
 					if sc.namespaceModifier(liveObjCopy) {
 						tasks = append(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: liveObjCopy, liveObj: liveObj})
