@@ -4,11 +4,10 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 
-	hookutil "github.com/argoproj/gitops-engine/pkg/sync/hook"
-	"github.com/argoproj/gitops-engine/pkg/sync/ignore"
-	"github.com/argoproj/gitops-engine/pkg/utils/kube"
-	kubeutil "github.com/argoproj/gitops-engine/pkg/utils/kube"
-	"github.com/argoproj/gitops-engine/pkg/utils/text"
+	hookutil "github.com/namix-io/sync-engine/pkg/sync/hook"
+	"github.com/namix-io/sync-engine/pkg/sync/ignore"
+	"github.com/namix-io/sync-engine/pkg/utils/kube"
+	kubeutil "github.com/namix-io/sync-engine/pkg/utils/kube"
 )
 
 func splitHooks(target []*unstructured.Unstructured) ([]*unstructured.Unstructured, []*unstructured.Unstructured) {
@@ -69,14 +68,14 @@ type ReconciliationResult struct {
 	Hooks  []*unstructured.Unstructured
 }
 
-func Reconcile(targetObjs []*unstructured.Unstructured, liveObjByKey map[kube.ResourceKey]*unstructured.Unstructured, namespace string, resInfo kubeutil.ResourceInfoProvider) ReconciliationResult {
+func Reconcile(targetObjs []*unstructured.Unstructured, liveObjByKey map[kube.ResourceKey]*unstructured.Unstructured, resInfo kubeutil.ResourceInfoProvider) ReconciliationResult {
 	targetObjs, hooks := splitHooks(targetObjs)
 	dedupLiveResources(targetObjs, liveObjByKey)
 
 	managedLiveObj := make([]*unstructured.Unstructured, len(targetObjs))
 	for i, obj := range targetObjs {
 		gvk := obj.GroupVersionKind()
-		ns := text.FirstNonEmpty(obj.GetNamespace(), namespace)
+		ns := obj.GetNamespace()
 		if namespaced := kubeutil.IsNamespacedOrUnknown(resInfo, obj.GroupVersionKind().GroupKind()); !namespaced {
 			ns = ""
 		}

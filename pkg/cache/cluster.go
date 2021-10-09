@@ -26,8 +26,8 @@ import (
 	"k8s.io/klog/v2/klogr"
 	"k8s.io/kubectl/pkg/util/openapi"
 
-	"github.com/argoproj/gitops-engine/pkg/utils/kube"
-	"github.com/argoproj/gitops-engine/pkg/utils/tracing"
+	"github.com/namix-io/sync-engine/pkg/utils/kube"
+	"github.com/namix-io/sync-engine/pkg/utils/tracing"
 )
 
 const (
@@ -82,7 +82,7 @@ type Unsubscribe func()
 
 type ClusterCache interface {
 	// EnsureSynced checks cache state and synchronizes it if necessary
-	EnsureSynced() error
+	EnsureSynced(ctx context.Context) error
 	// GetServerVersion returns observed cluster version
 	GetServerVersion() string
 	// GetAPIGroups returns information about observed API groups
@@ -93,6 +93,8 @@ type ClusterCache interface {
 	Invalidate(opts ...UpdateSettingsFunc)
 	// FindResources returns resources that matches given list of predicates from specified namespace or everywhere if specified namespace is empty
 	FindResources(namespace string, predicates ...func(r *Resource) bool) map[kube.ResourceKey]*Resource
+	// GetUnstructuredResources returns unstrcutred resources that matches given list of predicates from specified namespace or everywhere if specified namespace is empty
+	GetUnstructuredResources(predicates ...func(r *Resource) bool) []*unstructured.Unstructured
 	// IterateHierarchy iterates resource tree starting from the specified top level resource and executes callback for each resource in the tree
 	IterateHierarchy(key kube.ResourceKey, action func(resource *Resource, namespaceResources map[kube.ResourceKey]*Resource))
 	// IsNamespaced answers if specified group/kind is a namespaced resource API or not
@@ -107,6 +109,8 @@ type ClusterCache interface {
 	OnResourceUpdated(handler OnResourceUpdatedHandler) Unsubscribe
 	// OnEvent register event handler that is executed every time when new K8S event received
 	OnEvent(handler OnEventHandler) Unsubscribe
+	// Config returns the rest.Config used by this cluster cache
+	Config() *rest.Config
 }
 
 type WeightedSemaphore interface {
@@ -189,6 +193,11 @@ type clusterCacheSync struct {
 	syncTime      *time.Time
 	syncError     error
 	resyncTimeout time.Duration
+}
+
+// Config returns the rest.Config used by this cluster cache
+func (c *clusterCache) Config() *rest.Config {
+	return c.config
 }
 
 // OnResourceUpdated register event handler that is executed every time when resource get's updated in the cache
@@ -617,7 +626,7 @@ func (c *clusterCache) processApi(client dynamic.Interface, api kube.APIResource
 	return nil
 }
 
-func (c *clusterCache) sync() error {
+func (c *clusterCache) sync(ctx context.Context) error {
 	c.log.Info("Start syncing cluster")
 
 	for i := range c.apisMeta {
@@ -659,7 +668,7 @@ func (c *clusterCache) sync() error {
 		api := apis[i]
 
 		lock.Lock()
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(ctx)
 		info := &apiMeta{namespaced: api.Meta.Namespaced, watchCancel: cancel}
 		c.apisMeta[api.GroupKind] = info
 		c.namespacedResources[api.GroupKind] = api.Meta.Namespaced
@@ -667,7 +676,7 @@ func (c *clusterCache) sync() error {
 
 		return c.processApi(client, api, func(resClient dynamic.ResourceInterface, ns string) error {
 			resourceVersion, err := c.listResources(ctx, resClient, func(listPager *pager.ListPager) error {
-				return listPager.EachListItem(context.Background(), metav1.ListOptions{}, func(obj runtime.Object) error {
+				return listPager.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
 					if un, ok := obj.(*unstructured.Unstructured); !ok {
 						return fmt.Errorf("object %s/%s has an unexpected type", un.GroupVersionKind().String(), un.GetName())
 					} else {
@@ -697,7 +706,7 @@ func (c *clusterCache) sync() error {
 }
 
 // EnsureSynced checks cache state and synchronizes it if necessary
-func (c *clusterCache) EnsureSynced() error {
+func (c *clusterCache) EnsureSynced(ctx context.Context) error {
 	syncStatus := &c.syncStatus
 
 	// first check if cluster is synced *without acquiring the full clusterCache lock*
@@ -719,7 +728,7 @@ func (c *clusterCache) EnsureSynced() error {
 	if syncStatus.synced() {
 		return syncStatus.syncError
 	}
-	err := c.sync()
+	err := c.sync(ctx)
 	syncTime := time.Now()
 	syncStatus.syncTime = &syncTime
 	syncStatus.syncError = err
@@ -734,6 +743,11 @@ func (c *clusterCache) FindResources(namespace string, predicates ...func(r *Res
 	if namespace != "" {
 		if ns, ok := c.nsIndex[namespace]; ok {
 			resources = ns
+		}
+		if c.clusterResources {
+			for key, val := range c.nsIndex[""] {
+				resources[key] = val
+			}
 		}
 	} else {
 		resources = c.resources
@@ -754,6 +768,17 @@ func (c *clusterCache) FindResources(namespace string, predicates ...func(r *Res
 		}
 	}
 	return result
+}
+
+func (c *clusterCache) GetUnstructuredResources(predicates ...func(r *Resource) bool) []*unstructured.Unstructured {
+
+	rm := c.FindResources("", predicates...)
+	values := []*unstructured.Unstructured{}
+	for _, value := range rm {
+		values = append(values, value.Resource)
+	}
+	return values
+
 }
 
 // IterateHierarchy iterates resource tree starting from the specified top level resource and executes callback for each resource in the tree

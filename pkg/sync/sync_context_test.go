@@ -19,13 +19,13 @@ import (
 	testcore "k8s.io/client-go/testing"
 	"k8s.io/klog/v2/klogr"
 
-	"github.com/argoproj/gitops-engine/pkg/diff"
-	"github.com/argoproj/gitops-engine/pkg/health"
-	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
-	"github.com/argoproj/gitops-engine/pkg/utils/kube"
-	"github.com/argoproj/gitops-engine/pkg/utils/kube/kubetest"
-	. "github.com/argoproj/gitops-engine/pkg/utils/testing"
-	testingutils "github.com/argoproj/gitops-engine/pkg/utils/testing"
+	"github.com/namix-io/sync-engine/pkg/diff"
+	"github.com/namix-io/sync-engine/pkg/health"
+	synccommon "github.com/namix-io/sync-engine/pkg/sync/common"
+	"github.com/namix-io/sync-engine/pkg/utils/kube"
+	"github.com/namix-io/sync-engine/pkg/utils/kube/kubetest"
+	. "github.com/namix-io/sync-engine/pkg/utils/testing"
+	testingutils "github.com/namix-io/sync-engine/pkg/utils/testing"
 )
 
 func newTestSyncCtx(opts ...SyncOpt) *syncContext {
@@ -49,7 +49,6 @@ func newTestSyncCtx(opts ...SyncOpt) *syncContext {
 		config:    &rest.Config{},
 		rawConfig: &rest.Config{},
 		namespace: FakeArgoCDNamespace,
-		revision:  "FooBarBaz",
 		disco:     fakeDisco,
 		log:       klogr.New().WithValues("application", "fake-app"),
 		resources: map[kube.ResourceKey]reconciledResource{},
@@ -597,8 +596,8 @@ func TestUnnamedHooksGetUniqueNames(t *testing.T) {
 
 		assert.True(t, successful)
 		assert.Len(t, tasks, 2)
-		assert.Contains(t, tasks[0].name(), "foobarb-presync-")
-		assert.Contains(t, tasks[1].name(), "foobarb-postsync-")
+		assert.Contains(t, tasks[0].name(), "presync-")
+		assert.Contains(t, tasks[1].name(), "postsync-")
 		assert.Equal(t, "", pod.GetName())
 	})
 
@@ -608,13 +607,12 @@ func TestUnnamedHooksGetUniqueNames(t *testing.T) {
 		pod.SetName("")
 		pod.SetAnnotations(map[string]string{synccommon.AnnotationKeyHook: "PreSync,PostSync"})
 		syncCtx.hooks = []*unstructured.Unstructured{pod}
-		syncCtx.revision = "foobar"
 		tasks, successful := syncCtx.getSyncTasks()
 
 		assert.True(t, successful)
 		assert.Len(t, tasks, 2)
-		assert.Contains(t, tasks[0].name(), "foobar-presync-")
-		assert.Contains(t, tasks[1].name(), "foobar-postsync-")
+		assert.Contains(t, tasks[0].name(), "presync-")
+		assert.Contains(t, tasks[1].name(), "postsync-")
 		assert.Equal(t, "", pod.GetName())
 	})
 }
