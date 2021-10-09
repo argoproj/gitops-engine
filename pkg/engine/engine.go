@@ -33,7 +33,7 @@ type StopFunc func()
 
 type SyncEngine interface {
 	// Synchronizes resources in the cluster
-	Sync(ctx context.Context, isManaged func(r *cache.Resource) bool, opts ...sync.SyncOpt) ([]common.ResourceSyncResult, error)
+	Sync(ctx context.Context, opts ...sync.SyncOpt) ([]common.ResourceSyncResult, error)
 }
 
 type gitOpsEngine struct {
@@ -54,7 +54,6 @@ func NewEngine(src, dest cache.ClusterCache, opts ...Option) SyncEngine {
 }
 
 func (e *gitOpsEngine) Sync(ctx context.Context,
-	isManaged func(r *cache.Resource) bool,
 	opts ...sync.SyncOpt,
 ) ([]common.ResourceSyncResult, error) {
 	if err := e.src.EnsureSynced(ctx); err != nil {
@@ -73,7 +72,7 @@ func (e *gitOpsEngine) Sync(ctx context.Context,
 		resources[idx] = sanitizeObjByKind(resources[idx])
 	}
 
-	managedResources, err := e.dest.GetManagedLiveObjs(resources, isManaged)
+	managedResources, err := e.dest.GetManagedLiveObjs(resources, func(r *cache.Resource) bool { return true })
 	if err != nil {
 		return nil, err
 	}
