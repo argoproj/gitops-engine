@@ -562,7 +562,10 @@ func (sc *syncContext) setOperationFailed(syncFailTasks syncTasks, message strin
 		messages := syncFailTasks.MapMessages(func(task *syncTask) string {
 			return task.message
 		})
-		return fmt.Sprintf("%s, reason: %s", message, strings.Join(messages, ","))
+		if len(messages) > 0 {
+			return fmt.Sprintf("%s, reason: %s", message, strings.Join(messages, ","))
+		}
+		return message
 	}
 
 	errorMessage := errorMessageFactory(syncFailTasks, message)
