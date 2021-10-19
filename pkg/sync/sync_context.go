@@ -504,8 +504,9 @@ func (sc *syncContext) Sync() {
 
 	switch runState {
 	case failed:
+		syncFailedTasks, _ := tasks.Split(func(t *syncTask) bool { return t.syncStatus == common.ResultCodeSyncFailed })
 		sc.deleteHooks(hooksPendingDeletionFailed)
-		sc.setOperationFailed(syncFailTasks, "one or more objects failed to apply")
+		sc.setOperationFailed(syncFailedTasks, "one or more objects failed to apply")
 	case successful:
 		if remainingTasks.Len() == 0 {
 			// delete all completed hooks which have appropriate delete policy
@@ -557,20 +558,29 @@ func (sc *syncContext) GetState() (common.OperationPhase, string, []common.Resou
 }
 
 func (sc *syncContext) setOperationFailed(syncFailTasks syncTasks, message string) {
+	errorMessageFactory := func(tasks []*syncTask, message string) string {
+		messages := syncFailTasks.MapMessages(func(task *syncTask) string {
+			return task.message
+		})
+		return fmt.Sprintf("%s, reason: %s", message, strings.Join(messages, ","))
+	}
+
+	errorMessage := errorMessageFactory(syncFailTasks, message)
+
 	if len(syncFailTasks) > 0 {
 		// if all the failure hooks are completed, don't run them again, and mark the sync as failed
 		if syncFailTasks.All(func(task *syncTask) bool { return task.completed() }) {
-			sc.setOperationPhase(common.OperationFailed, message)
+			sc.setOperationPhase(common.OperationFailed, errorMessage)
 			return
 		}
 		// otherwise, we need to start the failure hooks, and then return without setting
 		// the phase, so we make sure we have at least one more sync
 		sc.log.WithValues("syncFailTasks", syncFailTasks).V(1).Info("Running sync fail tasks")
 		if sc.runTasks(syncFailTasks, false) == failed {
-			sc.setOperationPhase(common.OperationFailed, message)
+			sc.setOperationPhase(common.OperationFailed, errorMessage)
 		}
 	} else {
-		sc.setOperationPhase(common.OperationFailed, message)
+		sc.setOperationPhase(common.OperationFailed, errorMessage)
 	}
 }
 
