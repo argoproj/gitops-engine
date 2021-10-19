@@ -450,10 +450,12 @@ func (sc *syncContext) Sync() {
 	// syncFailTasks only run during failure, so separate them from regular tasks
 	syncFailTasks, tasks := tasks.Split(func(t *syncTask) bool { return t.phase == common.SyncPhaseSyncFail })
 
+	syncFailedTasks, _ := tasks.Split(func(t *syncTask) bool { return t.syncStatus == common.ResultCodeSyncFailed })
+
 	// if there are any completed but unsuccessful tasks, sync is a failure.
 	if tasks.Any(func(t *syncTask) bool { return t.completed() && !t.successful() }) {
 		sc.deleteHooks(hooksPendingDeletionFailed)
-		sc.setOperationFailed(syncFailTasks, "one or more synchronization tasks completed unsuccessfully")
+		sc.setOperationFailed(syncFailTasks, syncFailedTasks, "one or more synchronization tasks completed unsuccessfully")
 		return
 	}
 
@@ -506,7 +508,7 @@ func (sc *syncContext) Sync() {
 	case failed:
 		syncFailedTasks, _ := tasks.Split(func(t *syncTask) bool { return t.syncStatus == common.ResultCodeSyncFailed })
 		sc.deleteHooks(hooksPendingDeletionFailed)
-		sc.setOperationFailed(syncFailedTasks, "one or more objects failed to apply")
+		sc.setOperationFailed(syncFailTasks, syncFailedTasks, "one or more objects failed to apply")
 	case successful:
 		if remainingTasks.Len() == 0 {
 			// delete all completed hooks which have appropriate delete policy
@@ -557,9 +559,9 @@ func (sc *syncContext) GetState() (common.OperationPhase, string, []common.Resou
 	return sc.phase, sc.message, resourceRes
 }
 
-func (sc *syncContext) setOperationFailed(syncFailTasks syncTasks, message string) {
+func (sc *syncContext) setOperationFailed(syncFailTasks, syncFailedTasks syncTasks, message string) {
 	errorMessageFactory := func(tasks []*syncTask, message string) string {
-		messages := syncFailTasks.MapMessages(func(task *syncTask) string {
+		messages := syncFailedTasks.MapMessages(func(task *syncTask) string {
 			return task.message
 		})
 		if len(messages) > 0 {
@@ -568,7 +570,7 @@ func (sc *syncContext) setOperationFailed(syncFailTasks syncTasks, message strin
 		return message
 	}
 
-	errorMessage := errorMessageFactory(syncFailTasks, message)
+	errorMessage := errorMessageFactory(syncFailedTasks, message)
 
 	if len(syncFailTasks) > 0 {
 		// if all the failure hooks are completed, don't run them again, and mark the sync as failed
