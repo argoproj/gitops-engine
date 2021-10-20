@@ -197,7 +197,7 @@ func (s syncTasks) Split(predicate func(task *syncTask) bool) (trueTasks, falseT
 }
 
 func (s syncTasks) Map(predicate func(task *syncTask) string) []string {
-	messagesMap := make(map[string]interface{}, 0)
+	messagesMap := make(map[string]interface{})
 	for _, task := range s {
 		messagesMap[predicate(task)] = nil
 	}
