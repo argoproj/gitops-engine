@@ -561,7 +561,7 @@ func (sc *syncContext) GetState() (common.OperationPhase, string, []common.Resou
 
 func (sc *syncContext) setOperationFailed(syncFailTasks, syncFailedTasks syncTasks, message string) {
 	errorMessageFactory := func(tasks []*syncTask, message string) string {
-		messages := syncFailedTasks.MapMessages(func(task *syncTask) string {
+		messages := syncFailedTasks.Map(func(task *syncTask) string {
 			return task.message
 		})
 		if len(messages) > 0 {
