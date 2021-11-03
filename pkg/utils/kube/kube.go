@@ -299,7 +299,7 @@ func SplitYAML(yamlData []byte) ([]*unstructured.Unstructured, error) {
 	return objs, nil
 }
 
-// SplitYAML splits a YAML file into unstructured objects. Returns list of all unstructured objects
+// SplitYAMLToString splits a YAML file into strings. Returns list of yamls
 // found in the yaml. If an error occurs, returns objects that have been parsed so far too.
 func SplitYAMLToString(yamlData []byte) ([]string, error) {
 	// Similar way to what kubectl does
