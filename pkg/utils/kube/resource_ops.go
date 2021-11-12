@@ -130,7 +130,7 @@ func (k *kubectlResourceOperations) runResourceCommand(ctx context.Context, obj 
 }
 
 func kubeCmdFactory(kubeconfig, ns string) cmdutil.Factory {
-	kubeConfigFlags := genericclioptions.NewConfigFlags(true)
+	kubeConfigFlags := genericclioptions.NewConfigFlags(true).WithDiscoveryBurst(350)
 	if ns != "" {
 		kubeConfigFlags.Namespace = &ns
 	}
