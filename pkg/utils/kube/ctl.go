@@ -272,6 +272,7 @@ func (k *KubectlCmd) SetOnKubectlRun(onKubectlRun OnKubectlRunFunc) {
 }
 
 func RunAllAsync(count int, action func(i int) error) error {
+	// TODO RunAllAsync require a cancel function: some resources are too long to wait
 	g, ctx := errgroup.WithContext(context.Background())
 loop:
 	for i := 0; i < count; i++ {
