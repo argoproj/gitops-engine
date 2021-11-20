@@ -34,7 +34,7 @@ func TestSetNamespaces(t *testing.T) {
 	updatedNamespaces := []string{"updated"}
 	cache.Invalidate(SetNamespaces(updatedNamespaces))
 
-	assert.ElementsMatch(t, updatedNamespaces, cache.namespaces)
+	assert.ElementsMatch(t, updatedNamespaces, cache.namespaces.list)
 }
 
 func TestSetResyncTimeout(t *testing.T) {

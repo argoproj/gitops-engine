@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -35,6 +36,7 @@ const (
 	watchResyncTimeout         = 10 * time.Minute
 	watchResourcesRetryTimeout = 1 * time.Second
 	ClusterRetryTimeout        = 10 * time.Second
+	ratioDisplayDelayInSync    = 0.1
 
 	// Same page size as in k8s.io/client-go/tools/pager/pager.go
 	defaultListPageSize = 500
@@ -94,6 +96,7 @@ type ClusterCache interface {
 	// FindResources returns resources that matches given list of predicates from specified namespace or everywhere if specified namespace is empty
 	FindResources(namespace string, predicates ...func(r *Resource) bool) map[kube.ResourceKey]*Resource
 	// IterateHierarchy iterates resource tree starting from the specified top level resource and executes callback for each resource in the tree
+	// TODO pointer leaks here, replace of get snapshot of each Resource
 	IterateHierarchy(key kube.ResourceKey, action func(resource *Resource, namespaceResources map[kube.ResourceKey]*Resource))
 	// IsNamespaced answers if specified group/kind is a namespaced resource API or not
 	IsNamespaced(gk schema.GroupKind) (bool, error)
@@ -103,6 +106,8 @@ type ClusterCache interface {
 	GetManagedLiveObjs(targetObjs []*unstructured.Unstructured, isManaged func(r *Resource) bool) (map[kube.ResourceKey]*unstructured.Unstructured, error)
 	// GetClusterInfo returns cluster cache statistics
 	GetClusterInfo() ClusterInfo
+	// GetClusterInfoSnapshot returns cluster cache statistics instantly, not thread safe
+	GetClusterInfoSnapshot() ClusterInfo
 	// OnResourceUpdated register event handler that is executed every time when resource get's updated in the cache
 	OnResourceUpdated(handler OnResourceUpdatedHandler) Unsubscribe
 	// OnEvent register event handler that is executed every time when new K8S event received
@@ -120,20 +125,21 @@ func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCa
 	log := klogr.New()
 	cache := &clusterCache{
 		settings:           Settings{ResourceHealthOverride: &noopSettings{}, ResourcesFilter: &noopSettings{}},
-		apisMeta:           make(map[schema.GroupKind]*apiMeta),
+		apisMeta:           ApisMetaMap{},
 		listPageSize:       defaultListPageSize,
 		listPageBufferSize: defaultListPageBufferSize,
 		listSemaphore:      semaphore.NewWeighted(defaultListSemaphoreWeight),
-		resources:          make(map[kube.ResourceKey]*Resource),
-		nsIndex:            make(map[string]map[kube.ResourceKey]*Resource),
+		resources:          ResourceMap{},
+		nsIndex:            NamespaceResourcesMap{},
 		config:             config,
 		kubectl: &kube.KubectlCmd{
 			Log:    log,
 			Tracer: tracing.NopTracer{},
 		},
 		syncStatus: clusterCacheSync{
-			resyncTimeout: clusterResyncTimeout,
-			syncTime:      nil,
+			resyncTimeout:      clusterResyncTimeout,
+			watchResyncTimeout: watchResyncTimeout,
+			syncTime:           nil,
 		},
 		resourceUpdatedHandlers: map[uint64]OnResourceUpdatedHandler{},
 		eventHandlers:           map[uint64]OnEventHandler{},
@@ -148,11 +154,11 @@ func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCa
 type clusterCache struct {
 	syncStatus clusterCacheSync
 
-	apisMeta      map[schema.GroupKind]*apiMeta
+	apisMeta      ApisMetaMap
 	serverVersion string
-	apiGroups     []metav1.APIGroup
+	apiGroups     APIGroupList
 	// namespacedResources is a simple map which indicates a groupKind is namespaced
-	namespacedResources map[schema.GroupKind]bool
+	namespacedResources GroupKindBoolMap
 
 	// size of a page for list operations pager.
 	listPageSize int64
@@ -160,15 +166,16 @@ type clusterCache struct {
 	listPageBufferSize int32
 	listSemaphore      WeightedSemaphore
 
-	// lock is a rw lock which protects the fields of clusterInfo
+	// lock only using when fields of clusterCache are being modified(re-assigned)
 	lock      sync.RWMutex
-	resources map[kube.ResourceKey]*Resource
-	nsIndex   map[string]map[kube.ResourceKey]*Resource
+	resources ResourceMap
+	// TODO rename to nsResourcesMap
+	nsIndex NamespaceResourcesMap
 
 	kubectl          kube.Kubectl
 	log              logr.Logger
 	config           *rest.Config
-	namespaces       []string
+	namespaces       StringList
 	clusterResources bool
 	settings         Settings
 
@@ -177,7 +184,9 @@ type clusterCache struct {
 	populateResourceInfoHandler OnPopulateResourceInfoHandler
 	resourceUpdatedHandlers     map[uint64]OnResourceUpdatedHandler
 	eventHandlers               map[uint64]OnEventHandler
-	openAPISchema               openapi.Resources
+
+	openAPISchemaLock sync.Mutex
+	openAPISchema     openapi.Resources
 }
 
 type clusterCacheSync struct {
@@ -185,10 +194,11 @@ type clusterCacheSync struct {
 	// 1) 'lock' mutex should be acquired when reading/writing from fields of this struct.
 	// 2) The parent 'clusterCache.lock' does NOT need to be owned to r/w from fields of this struct (if it is owned, that is fine, but see below)
 	// 3) To prevent deadlocks, do not acquire parent 'clusterCache.lock' after acquiring this lock; if you need both locks, always acquire the parent lock first
-	lock          sync.Mutex
-	syncTime      *time.Time
-	syncError     error
-	resyncTimeout time.Duration
+	lock               sync.Mutex
+	syncTime           *time.Time
+	syncError          error
+	resyncTimeout      time.Duration
+	watchResyncTimeout time.Duration
 }
 
 // OnResourceUpdated register event handler that is executed every time when resource get's updated in the cache
@@ -246,10 +256,7 @@ func (c *clusterCache) GetServerVersion() string {
 
 // GetAPIGroups returns information about observed API groups
 func (c *clusterCache) GetAPIGroups() []metav1.APIGroup {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
-
-	return c.apiGroups
+	return c.apiGroups.All()
 }
 
 // GetOpenAPISchema returns open API schema of supported API resources
@@ -258,26 +265,11 @@ func (c *clusterCache) GetOpenAPISchema() openapi.Resources {
 }
 
 func (c *clusterCache) appendAPIGroups(apiGroup metav1.APIGroup) {
-	exists := false
-	for i := range c.apiGroups {
-		if c.apiGroups[i].Name == apiGroup.Name {
-			exists = true
-			break
-		}
-	}
-	if !exists {
-		c.apiGroups = append(c.apiGroups, apiGroup)
-	}
+	c.apiGroups.AddIfAbsent(apiGroup)
 }
 
 func (c *clusterCache) DeleteAPIGroup(apiGroup metav1.APIGroup) {
-	for i := range c.apiGroups {
-		if c.apiGroups[i].Name == apiGroup.Name {
-			c.apiGroups[i] = c.apiGroups[len(c.apiGroups)-1]
-			c.apiGroups = c.apiGroups[:len(c.apiGroups)-1]
-			break
-		}
-	}
+	c.apiGroups.Remove(apiGroup)
 }
 
 func (c *clusterCache) replaceResourceCache(gk schema.GroupKind, resources []*Resource, ns string) {
@@ -289,21 +281,25 @@ func (c *clusterCache) replaceResourceCache(gk schema.GroupKind, resources []*Re
 	// update existing nodes
 	for i := range resources {
 		res := resources[i]
-		oldRes := c.resources[res.ResourceKey()]
+
+		oldRes, loaded := c.resources.LoadOrStore(res.ResourceKey(), res)
+		if !loaded {
+			continue
+		}
 		if oldRes == nil || oldRes.ResourceVersion != res.ResourceVersion {
 			c.onNodeUpdated(oldRes, res)
 		}
 	}
-
-	for key := range c.resources {
+	c.resources.Range(func(key kube.ResourceKey, value *Resource) bool {
 		if key.Kind != gk.Kind || key.Group != gk.Group || ns != "" && key.Namespace != ns {
-			continue
+			return true
 		}
 
 		if _, ok := objByKey[key]; !ok {
 			c.onNodeRemoved(key)
 		}
-	}
+		return true
+	})
 }
 
 func (c *clusterCache) newResource(un *unstructured.Unstructured) *Resource {
@@ -311,6 +307,7 @@ func (c *clusterCache) newResource(un *unstructured.Unstructured) *Resource {
 
 	cacheManifest := false
 	var info interface{}
+	// TODO handler should decoupling from newResource, using events
 	if c.populateResourceInfoHandler != nil {
 		info, cacheManifest = c.populateResourceInfoHandler(un, len(ownerRefs) == 0)
 	}
@@ -334,27 +331,25 @@ func (c *clusterCache) newResource(un *unstructured.Unstructured) *Resource {
 	return resource
 }
 
-func (c *clusterCache) setNode(n *Resource) {
-	key := n.ResourceKey()
-	c.resources[key] = n
-	ns, ok := c.nsIndex[key.Namespace]
-	if !ok {
-		ns = make(map[kube.ResourceKey]*Resource)
-		c.nsIndex[key.Namespace] = ns
-	}
-	ns[key] = n
+func (c *clusterCache) setNode(res *Resource) {
+	key := res.ResourceKey()
+	c.resources.Store(key, res)
+
+	nsRes, _ := c.nsIndex.LoadOrStore(key.Namespace, &ResourceMap{})
+	nsRes.Store(key, res)
 
 	// update inferred parent references
-	if n.isInferredParentOf != nil || mightHaveInferredOwner(n) {
-		for k, v := range ns {
+	if res.isInferredParentOf != nil || mightHaveInferredOwner(res) {
+		nsRes.Range(func(k kube.ResourceKey, v *Resource) bool {
 			// update child resource owner references
-			if n.isInferredParentOf != nil && mightHaveInferredOwner(v) {
-				v.setOwnerRef(n.toOwnerRef(), n.isInferredParentOf(k))
+			if res.isInferredParentOf != nil && mightHaveInferredOwner(v) {
+				v.setOwnerRef(res.toOwnerRef(), res.isInferredParentOf(k))
 			}
-			if mightHaveInferredOwner(n) && v.isInferredParentOf != nil {
-				n.setOwnerRef(v.toOwnerRef(), v.isInferredParentOf(n.ResourceKey()))
+			if mightHaveInferredOwner(res) && v.isInferredParentOf != nil {
+				res.setOwnerRef(v.toOwnerRef(), v.isInferredParentOf(res.ResourceKey()))
 			}
-		}
+			return true
+		})
 	}
 }
 
@@ -363,18 +358,20 @@ func (c *clusterCache) Invalidate(opts ...UpdateSettingsFunc) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
+	// TODO update syncStatus refactor to function
 	c.syncStatus.lock.Lock()
 	c.syncStatus.syncTime = nil
 	c.syncStatus.lock.Unlock()
 
-	for i := range c.apisMeta {
-		c.apisMeta[i].watchCancel()
-	}
+	c.apisMeta.Range(func(key schema.GroupKind, value *apiMeta) bool {
+		value.watchCancel()
+		return true
+	})
 	for i := range opts {
 		opts[i](c)
 	}
-	c.apisMeta = nil
-	c.namespacedResources = nil
+	c.apisMeta = ApisMetaMap{}
+	c.namespacedResources = GroupKindBoolMap{}
 	c.log.Info("Invalidated cluster")
 }
 
@@ -392,14 +389,13 @@ func (syncStatus *clusterCacheSync) synced() bool {
 }
 
 func (c *clusterCache) stopWatching(gk schema.GroupKind, ns string) {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	if info, ok := c.apisMeta[gk]; ok {
-		info.watchCancel()
-		delete(c.apisMeta, gk)
+	c.apisMeta.Range(func(key schema.GroupKind, value *apiMeta) bool {
+		value.watchCancel()
+		c.apisMeta.Delete(key)
 		c.replaceResourceCache(gk, nil, ns)
 		c.log.Info(fmt.Sprintf("Stop watching: %s not found", gk))
-	}
+		return true
+	})
 }
 
 // startMissingWatches lists supported cluster resources and start watching for changes unless watch is already running
@@ -412,14 +408,13 @@ func (c *clusterCache) startMissingWatches() error {
 	if err != nil {
 		return err
 	}
-	namespacedResources := make(map[schema.GroupKind]bool)
+	namespacedResources := map[schema.GroupKind]bool{}
 	for i := range apis {
 		api := apis[i]
 		namespacedResources[api.GroupKind] = api.Meta.Namespaced
-		if _, ok := c.apisMeta[api.GroupKind]; !ok {
-			ctx, cancel := context.WithCancel(context.Background())
-			c.apisMeta[api.GroupKind] = &apiMeta{namespaced: api.Meta.Namespaced, watchCancel: cancel}
-
+		ctx, cancel := context.WithCancel(context.Background())
+		_, loaded := c.apisMeta.LoadOrStore(api.GroupKind, &apiMeta{namespaced: api.Meta.Namespaced, watchCancel: cancel})
+		if !loaded {
 			err = c.processApi(client, api, func(resClient dynamic.ResourceInterface, ns string) error {
 				go c.watchEvents(ctx, api, resClient, ns, "")
 				return nil
@@ -429,25 +424,19 @@ func (c *clusterCache) startMissingWatches() error {
 			}
 		}
 	}
-	c.namespacedResources = namespacedResources
+	c.namespacedResources.Reload(namespacedResources)
 	return nil
-}
-
-func runSynced(lock sync.Locker, action func() error) error {
-	lock.Lock()
-	defer lock.Unlock()
-	return action()
 }
 
 // listResources creates list pager and enforces number of concurrent list requests
 func (c *clusterCache) listResources(ctx context.Context, resClient dynamic.ResourceInterface, callback func(*pager.ListPager) error) (string, error) {
-	if err := c.listSemaphore.Acquire(ctx, 1); err != nil {
-		return "", err
-	}
-	defer c.listSemaphore.Release(1)
 	resourceVersion := ""
 	listPager := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
+		if err := c.listSemaphore.Acquire(ctx, 1); err != nil {
+			return nil, err
+		}
 		res, err := resClient.List(ctx, opts)
+		c.listSemaphore.Release(1)
 		if err == nil {
 			resourceVersion = res.GetResourceVersion()
 		}
@@ -460,7 +449,7 @@ func (c *clusterCache) listResources(ctx context.Context, resClient dynamic.Reso
 }
 
 func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo, resClient dynamic.ResourceInterface, ns string, resourceVersion string) {
-	kube.RetryUntilSucceed(ctx, watchResourcesRetryTimeout, fmt.Sprintf("watch %s on %s", api.GroupKind, c.config.Host), c.log, func() (err error) {
+	kube.RetryUntilSucceed(ctx, watchResourcesRetryTimeout, fmt.Sprintf("watch %s in ns %s on %s", api.GroupKind, ns, c.config.Host), c.log, func() (err error) {
 		defer func() {
 			if r := recover(); r != nil {
 				err = fmt.Errorf("Recovered from panic: %+v\n%s", r, debug.Stack())
@@ -471,7 +460,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 		if resourceVersion == "" {
 			resourceVersion, err = c.listResources(ctx, resClient, func(listPager *pager.ListPager) error {
 				var items []*Resource
-				err := listPager.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
+				err = listPager.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
 					if un, ok := obj.(*unstructured.Unstructured); !ok {
 						return fmt.Errorf("object %s/%s has an unexpected type", un.GroupVersionKind().String(), un.GetName())
 					} else {
@@ -484,10 +473,8 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 					return fmt.Errorf("failed to load initial state of resource %s: %v", api.GroupKind.String(), err)
 				}
 
-				return runSynced(&c.lock, func() error {
-					c.replaceResourceCache(api.GroupKind, items, ns)
-					return nil
-				})
+				c.replaceResourceCache(api.GroupKind, items, ns)
+				return nil
 			})
 
 			if err != nil {
@@ -513,7 +500,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 			resourceVersion = ""
 		}()
 
-		shouldResync := time.NewTimer(watchResyncTimeout)
+		shouldResync := time.NewTimer(c.syncStatus.watchResyncTimeout)
 		defer shouldResync.Stop()
 
 		for {
@@ -574,21 +561,18 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 						if event.Type == watch.Added && nameOK && nameErr == nil {
 							c.appendAPIGroups(apiGroup)
 						}
-						err = runSynced(&c.lock, func() error {
-							return c.startMissingWatches()
-						})
+						err = c.startMissingWatches()
 						if err != nil {
 							c.log.Error(err, "Failed to start missing watch")
 						}
 					}
-					err = runSynced(&c.lock, func() error {
-						openAPISchema, err := c.kubectl.LoadOpenAPISchema(c.config)
-						if err != nil {
-							return err
-						}
-						c.openAPISchema = openAPISchema
-						return nil
-					})
+					c.openAPISchemaLock.Lock()
+					openAPISchema, err := c.kubectl.LoadOpenAPISchema(c.config)
+					if err != nil {
+						return err
+					}
+					c.openAPISchema = openAPISchema
+					c.openAPISchemaLock.Unlock()
 					if err != nil {
 						c.log.Error(err, "Failed to reload open api schema")
 					}
@@ -602,16 +586,16 @@ func (c *clusterCache) processApi(client dynamic.Interface, api kube.APIResource
 	resClient := client.Resource(api.GroupVersionResource)
 	switch {
 	// if manage whole cluster or resource is cluster level and cluster resources enabled
-	case len(c.namespaces) == 0 || !api.Meta.Namespaced && c.clusterResources:
+	case c.namespaces.Len() == 0 || !api.Meta.Namespaced && c.clusterResources:
 		return callback(resClient, "")
 	// if manage some namespaces and resource is namespaced
-	case len(c.namespaces) != 0 && api.Meta.Namespaced:
-		for _, ns := range c.namespaces {
-			err := callback(resClient.Namespace(ns), ns)
-			if err != nil {
-				return err
-			}
-		}
+	case c.namespaces.Len() != 0 && api.Meta.Namespaced:
+		var err error
+		c.namespaces.Range(func(ns string) bool {
+			err = callback(resClient.Namespace(ns), ns)
+			return err == nil // break loop of Range
+		})
+		return err
 	}
 
 	return nil
@@ -620,15 +604,19 @@ func (c *clusterCache) processApi(client dynamic.Interface, api kube.APIResource
 func (c *clusterCache) sync() error {
 	c.log.Info("Start syncing cluster")
 
-	for i := range c.apisMeta {
-		c.apisMeta[i].watchCancel()
-	}
-	c.apisMeta = make(map[schema.GroupKind]*apiMeta)
-	c.resources = make(map[kube.ResourceKey]*Resource)
-	c.namespacedResources = make(map[schema.GroupKind]bool)
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	// stop all running watches
+	c.apisMeta.Range(func(key schema.GroupKind, value *apiMeta) bool {
+		value.watchCancel()
+		return true
+	})
+
+	c.apisMeta = ApisMetaMap{}
+	c.resources = ResourceMap{}
+	c.namespacedResources = GroupKindBoolMap{}
 	config := c.config
 	version, err := c.kubectl.GetServerVersion(config)
-
 	if err != nil {
 		return err
 	}
@@ -637,16 +625,15 @@ func (c *clusterCache) sync() error {
 	if err != nil {
 		return err
 	}
-	c.apiGroups = groups
-
+	c.apiGroups = APIGroupList{list: groups}
 	openAPISchema, err := c.kubectl.LoadOpenAPISchema(config)
 	if err != nil {
 		return err
 	}
+	c.openAPISchemaLock.Lock()
 	c.openAPISchema = openAPISchema
-
+	c.openAPISchemaLock.Unlock()
 	apis, err := c.kubectl.GetAPIResources(c.config, c.settings.ResourcesFilter)
-
 	if err != nil {
 		return err
 	}
@@ -654,26 +641,30 @@ func (c *clusterCache) sync() error {
 	if err != nil {
 		return err
 	}
-	lock := sync.Mutex{}
+
+	// analytics of RunAllAsync
+	resDoneCount := int32(0)
+	resWaitingList := sync.Map{}
+	for _, api := range apis {
+		resWaitingList.Store(api.GroupKind.String(), "")
+	}
+	// TODO failure toleration, allow some resources failed but continue sync
+	// start sync all resources
 	err = kube.RunAllAsync(len(apis), func(i int) error {
 		api := apis[i]
 
-		lock.Lock()
 		ctx, cancel := context.WithCancel(context.Background())
 		info := &apiMeta{namespaced: api.Meta.Namespaced, watchCancel: cancel}
-		c.apisMeta[api.GroupKind] = info
-		c.namespacedResources[api.GroupKind] = api.Meta.Namespaced
-		lock.Unlock()
+		c.apisMeta.Store(api.GroupKind, info)
+		c.namespacedResources.Store(api.GroupKind, api.Meta.Namespaced)
 
-		return c.processApi(client, api, func(resClient dynamic.ResourceInterface, ns string) error {
+		err := c.processApi(client, api, func(resClient dynamic.ResourceInterface, ns string) error {
 			resourceVersion, err := c.listResources(ctx, resClient, func(listPager *pager.ListPager) error {
 				return listPager.EachListItem(context.Background(), metav1.ListOptions{}, func(obj runtime.Object) error {
 					if un, ok := obj.(*unstructured.Unstructured); !ok {
 						return fmt.Errorf("object %s/%s has an unexpected type", un.GroupVersionKind().String(), un.GetName())
 					} else {
-						lock.Lock()
 						c.setNode(c.newResource(un))
-						lock.Unlock()
 					}
 					return nil
 				})
@@ -683,9 +674,22 @@ func (c *clusterCache) sync() error {
 			}
 
 			go c.watchEvents(ctx, api, resClient, ns, resourceVersion)
-
 			return nil
 		})
+
+		resWaitingList.Delete(api.GroupKind.String())
+		atomic.AddInt32(&resDoneCount, 1)
+
+		c.log.V(1).Info("Finished syncing resource", "resource", api.GroupKind.String(), "done", atomic.LoadInt32(&resDoneCount), "total", len(apis))
+		if len(apis)-int(atomic.LoadInt32(&resDoneCount)) < int(ratioDisplayDelayInSync*float64(len(apis))) {
+			var left []string
+			resWaitingList.Range(func(key, value interface{}) bool {
+				left = append(left, key.(string))
+				return true
+			})
+			c.log.V(1).Info("syncing apis left", "left apis", left)
+		}
+		return err
 	})
 
 	if err != nil {
@@ -709,8 +713,6 @@ func (c *clusterCache) EnsureSynced() error {
 	}
 	syncStatus.lock.Unlock() // release the lock, so that we can acquire the parent lock (see struct comment re: lock acquisition ordering)
 
-	c.lock.Lock()
-	defer c.lock.Unlock()
 	syncStatus.lock.Lock()
 	defer syncStatus.lock.Unlock()
 
@@ -721,96 +723,95 @@ func (c *clusterCache) EnsureSynced() error {
 	}
 	err := c.sync()
 	syncTime := time.Now()
+	// TODO update syncStatus refactor to function
 	syncStatus.syncTime = &syncTime
 	syncStatus.syncError = err
 	return syncStatus.syncError
 }
 
+// FindResources find the resources by name from cluster-wide resources and namespaced resources.
 func (c *clusterCache) FindResources(namespace string, predicates ...func(r *Resource) bool) map[kube.ResourceKey]*Resource {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
 	result := map[kube.ResourceKey]*Resource{}
-	resources := map[kube.ResourceKey]*Resource{}
+	var resources *ResourceMap
 	if namespace != "" {
-		if ns, ok := c.nsIndex[namespace]; ok {
-			resources = ns
+		nsRes, load := c.nsIndex.Load(namespace)
+		if load {
+			resources = nsRes
 		}
 	} else {
-		resources = c.resources
+		resources = &c.resources
 	}
 
-	for k := range resources {
-		r := resources[k]
+	resources.Range(func(k kube.ResourceKey, v *Resource) bool {
 		matches := true
 		for i := range predicates {
-			if !predicates[i](r) {
+			if !predicates[i](v) {
 				matches = false
 				break
 			}
 		}
 
 		if matches {
-			result[k] = r
+			result[k] = v
 		}
-	}
+		return true
+	})
+
 	return result
 }
 
 // IterateHierarchy iterates resource tree starting from the specified top level resource and executes callback for each resource in the tree
 func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(resource *Resource, namespaceResources map[kube.ResourceKey]*Resource)) {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
-	if res, ok := c.resources[key]; ok {
-		nsNodes := c.nsIndex[key.Namespace]
-		action(res, nsNodes)
-		childrenByUID := make(map[types.UID][]*Resource)
-		for _, child := range nsNodes {
-			if res.isParentOf(child) {
-				childrenByUID[child.Ref.UID] = append(childrenByUID[child.Ref.UID], child)
-			}
+	res, ok := c.resources.Load(key)
+	if !ok {
+		return
+	}
+	nsNodes, _ := c.nsIndex.Load(key.Namespace)
+	nsNodesAll := nsNodes.All()
+	action(res, nsNodesAll)
+	childrenByUID := make(map[types.UID][]*Resource)
+	nsNodes.Range(func(_ kube.ResourceKey, child *Resource) bool {
+		if res.isParentOf(child) {
+			childrenByUID[child.Ref.UID] = append(childrenByUID[child.Ref.UID], child)
 		}
-		// make sure children has no duplicates
-		for _, children := range childrenByUID {
-			if len(children) > 0 {
-				// The object might have multiple children with the same UID (e.g. replicaset from apps and extensions group). It is ok to pick any object but we need to make sure
-				// we pick the same child after every refresh.
-				sort.Slice(children, func(i, j int) bool {
-					key1 := children[i].ResourceKey()
-					key2 := children[j].ResourceKey()
-					return strings.Compare(key1.String(), key2.String()) < 0
-				})
-				child := children[0]
-				action(child, nsNodes)
-				child.iterateChildren(nsNodes, map[kube.ResourceKey]bool{res.ResourceKey(): true}, func(err error, child *Resource, namespaceResources map[kube.ResourceKey]*Resource) {
-					if err != nil {
-						c.log.V(2).Info(err.Error())
-						return
-					}
-					action(child, namespaceResources)
-				})
-			}
+		return true
+	})
+	// make sure children has no duplicates
+	for _, children := range childrenByUID {
+		if len(children) > 0 {
+			// The object might have multiple children with the same UID (e.g. replicaset from apps and extensions group). It is ok to pick any object but we need to make sure
+			// we pick the same child after every refresh.
+			sort.Slice(children, func(i, j int) bool {
+				key1 := children[i].ResourceKey()
+				key2 := children[j].ResourceKey()
+				return strings.Compare(key1.String(), key2.String()) < 0
+			})
+			child := children[0]
+			action(child, nsNodesAll)
+			child.iterateChildren(nsNodesAll, map[kube.ResourceKey]bool{res.ResourceKey(): true}, func(err error, child *Resource, namespaceResources map[kube.ResourceKey]*Resource) {
+				if err != nil {
+					c.log.V(2).Info(err.Error())
+					return
+				}
+				action(child, namespaceResources)
+			})
 		}
 	}
 }
 
 // IsNamespaced answers if specified group/kind is a namespaced resource API or not
 func (c *clusterCache) IsNamespaced(gk schema.GroupKind) (bool, error) {
-	if isNamespaced, ok := c.namespacedResources[gk]; ok {
+	if isNamespaced, ok := c.namespacedResources.Load(gk); ok {
 		return isNamespaced, nil
 	}
 	return false, errors.NewNotFound(schema.GroupResource{Group: gk.Group}, "")
 }
 
 func (c *clusterCache) managesNamespace(namespace string) bool {
-	for _, ns := range c.namespaces {
-		if ns == namespace {
-			return true
-		}
-	}
-	return false
+	return c.namespaces.Contains(namespace)
 }
 
-// GetManagedLiveObjs helps finding matching live K8S resources for a given resources list.
+// GetManagedLiveObjs helps find matching live K8S resources for a given resources list.
 // The function returns all resources from cache for those `isManaged` function returns true and resources
 // specified in targetObjs list.
 func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructured, isManaged func(r *Resource) bool) (map[kube.ResourceKey]*unstructured.Unstructured, error) {
@@ -818,7 +819,7 @@ func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructure
 	defer c.lock.RUnlock()
 
 	for _, o := range targetObjs {
-		if len(c.namespaces) > 0 {
+		if c.namespaces.Len() > 0 {
 			if o.GetNamespace() == "" && !c.clusterResources {
 				return nil, fmt.Errorf("Cluster level %s %q can not be managed when in namespaced mode", o.GetKind(), o.GetName())
 			} else if o.GetNamespace() != "" && !c.managesNamespace(o.GetNamespace()) {
@@ -829,11 +830,12 @@ func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructure
 
 	managedObjs := make(map[kube.ResourceKey]*unstructured.Unstructured)
 	// iterate all objects in live state cache to find ones associated with app
-	for key, o := range c.resources {
+	c.resources.Range(func(key kube.ResourceKey, o *Resource) bool {
 		if isManaged(o) && o.Resource != nil && len(o.OwnerRefs) == 0 {
 			managedObjs[key] = o.Resource
 		}
-	}
+		return true
+	})
 	// but are simply missing our label
 	lock := &sync.Mutex{}
 	err := kube.RunAllAsync(len(targetObjs), func(i int) error {
@@ -844,7 +846,7 @@ func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructure
 		lock.Unlock()
 
 		if managedObj == nil {
-			if existingObj, exists := c.resources[key]; exists {
+			if existingObj, exists := c.resources.Load(key); exists {
 				if existingObj.Resource != nil {
 					managedObj = existingObj.Resource
 				} else {
@@ -857,7 +859,7 @@ func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructure
 						return err
 					}
 				}
-			} else if _, watched := c.apisMeta[key.GroupKind()]; !watched {
+			} else if _, watched := c.apisMeta.Load(key.GroupKind()); !watched {
 				var err error
 				managedObj, err = c.kubectl.GetResource(context.TODO(), c.config, targetObj.GroupVersionKind(), targetObj.GetName(), targetObj.GetNamespace())
 				if err != nil {
@@ -897,6 +899,7 @@ func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructure
 	return managedObjs, nil
 }
 
+// processEvent handles events from the k8s watcher
 func (c *clusterCache) processEvent(event watch.EventType, un *unstructured.Unstructured) {
 	for _, h := range c.getEventHandlers() {
 		h(event, un)
@@ -906,9 +909,8 @@ func (c *clusterCache) processEvent(event watch.EventType, un *unstructured.Unst
 		return
 	}
 
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	existingNode, exists := c.resources[key]
+	existingNode, exists := c.resources.Load(key)
+	// TODO node update not atomic here
 	if event == watch.Deleted {
 		if exists {
 			c.onNodeRemoved(key)
@@ -918,34 +920,43 @@ func (c *clusterCache) processEvent(event watch.EventType, un *unstructured.Unst
 	}
 }
 
+// onNodeUpdated updates the cache with the new resource
 func (c *clusterCache) onNodeUpdated(oldRes *Resource, newRes *Resource) {
 	c.setNode(newRes)
 	for _, h := range c.getResourceUpdatedHandlers() {
-		h(newRes, oldRes, c.nsIndex[newRes.Ref.Namespace])
+		res, ok := c.nsIndex.Load(newRes.Ref.Namespace)
+		if !ok {
+			continue
+		}
+		h(newRes, oldRes, res.All())
 	}
 }
 
 func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) {
-	existing, ok := c.resources[key]
+	// TODO load and delete is not atomic here
+	existing, ok := c.resources.Load(key)
 	if ok {
-		delete(c.resources, key)
-		ns, ok := c.nsIndex[key.Namespace]
+		c.resources.Delete(key)
+		ns, ok := c.nsIndex.Load(key.Namespace)
+		// clear resources in namespace
+		nsAll := ns.All()
 		if ok {
-			delete(ns, key)
-			if len(ns) == 0 {
-				delete(c.nsIndex, key.Namespace)
+			ns.Delete(key)
+			if ns.Len() == 0 {
+				c.nsIndex.Delete(key.Namespace)
 			}
 			// remove ownership references from children with inferred references
 			if existing.isInferredParentOf != nil {
-				for k, v := range ns {
+				ns.Range(func(k kube.ResourceKey, v *Resource) bool {
 					if mightHaveInferredOwner(v) && existing.isInferredParentOf(k) {
 						v.setOwnerRef(existing.toOwnerRef(), false)
 					}
-				}
+					return true
+				})
 			}
 		}
 		for _, h := range c.getResourceUpdatedHandlers() {
-			h(nil, existing, ns)
+			h(nil, existing, nsAll)
 		}
 	}
 }
@@ -964,13 +975,26 @@ func (c *clusterCache) GetClusterInfo() ClusterInfo {
 	defer c.syncStatus.lock.Unlock()
 
 	return ClusterInfo{
-		APIsCount:         len(c.apisMeta),
+		APIsCount:         c.apisMeta.Len(),
 		K8SVersion:        c.serverVersion,
-		ResourcesCount:    len(c.resources),
+		ResourcesCount:    c.resources.Len(),
 		Server:            c.config.Host,
 		LastCacheSyncTime: c.syncStatus.syncTime,
 		SyncError:         c.syncStatus.syncError,
-		APIGroups:         c.apiGroups,
+		APIGroups:         c.apiGroups.GetReferrerList(), // TODO using snapshots, references cause leaks
+	}
+}
+
+// GetClusterInfoSnapshot returns cluster cache statistics
+func (c *clusterCache) GetClusterInfoSnapshot() ClusterInfo {
+	return ClusterInfo{
+		APIsCount:         c.apisMeta.Len(),
+		K8SVersion:        c.serverVersion,
+		ResourcesCount:    c.resources.Len(),
+		Server:            c.config.Host,
+		LastCacheSyncTime: c.syncStatus.syncTime,
+		SyncError:         c.syncStatus.syncError,
+		APIGroups:         c.apiGroups.GetReferrerList(), // TODO using snapshots, references cause leaks
 	}
 }
 

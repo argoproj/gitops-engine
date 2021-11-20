@@ -4,21 +4,27 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	goflags "flag"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"k8s.io/klog/v2"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2/klogr"
+
+	_ "net/http/pprof"
 
 	"github.com/argoproj/gitops-engine/pkg/cache"
 	"github.com/argoproj/gitops-engine/pkg/engine"
@@ -30,8 +36,12 @@ const (
 	annotationGCMark = "gitops-agent.argoproj.io/gc-mark"
 )
 
+var fs *goflags.FlagSet
+
 func main() {
 	log := klogr.New() // Delegates to klog
+	fs = goflags.NewFlagSet("", goflags.PanicOnError)
+	klog.InitFlags(fs)
 	err := newCmd(log).Execute()
 	checkError(err, log)
 }
@@ -120,11 +130,17 @@ func newCmd(log logr.Logger) *cobra.Command {
 				namespace, _, err = clientConfig.Namespace()
 				checkError(err, log)
 			}
-
 			var namespaces []string
 			if namespaced {
 				namespaces = []string{namespace}
 			}
+
+			runtime.SetBlockProfileRate(1)
+			runtime.SetMutexProfileFraction(1)
+			go func() {
+				log.Info("pprof", "err", http.ListenAndServe("localhost:6060", nil))
+			}()
+
 			clusterCache := cache.NewClusterCache(config,
 				cache.SetNamespaces(namespaces),
 				cache.SetLogr(log),
@@ -193,6 +209,7 @@ func newCmd(log logr.Logger) *cobra.Command {
 	cmd.Flags().StringVar(&namespace, "default-namespace", "",
 		"The namespace that should be used if resource namespace is not specified. "+
 			"By default resources are installed into the same namespace where gitops-agent is installed.")
+	cmd.Flags().AddGoFlagSet(fs)
 	return &cmd
 }
 
