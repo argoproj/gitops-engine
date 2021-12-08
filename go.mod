@@ -4,10 +4,10 @@ go 1.16
 
 require (
 	github.com/davecgh/go-spew v1.1.1
-	github.com/evanphx/json-patch v4.11.0+incompatible
-	github.com/go-logr/logr v0.4.0
+	github.com/evanphx/json-patch v4.12.0+incompatible
+	github.com/go-logr/logr v1.2.0
 	github.com/golang/mock v1.5.0
-	github.com/spf13/cobra v1.1.3
+	github.com/spf13/cobra v1.2.1
 	github.com/stretchr/testify v1.7.0
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	k8s.io/api v0.22.2
@@ -15,10 +15,10 @@ require (
 	k8s.io/apimachinery v0.22.2
 	k8s.io/cli-runtime v0.22.2
 	k8s.io/client-go v0.22.2
-	k8s.io/klog/v2 v2.9.0
+	k8s.io/klog/v2 v2.30.0
 	k8s.io/kube-aggregator v0.22.2
 	k8s.io/kubectl v0.22.2
-	k8s.io/kubernetes v1.22.2
+	k8s.io/kubernetes v1.23.0
 	sigs.k8s.io/yaml v1.2.0
 )
 
