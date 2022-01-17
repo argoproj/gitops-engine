@@ -15,6 +15,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	extensionsv1beta1 "k8s.io/api/extensions/v1beta1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -98,6 +99,14 @@ func newCluster(t *testing.T, objs ...runtime.Object) *clusterCache {
 	}, {
 		GroupKind:            schema.GroupKind{Group: "apps", Kind: "StatefulSet"},
 		GroupVersionResource: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"},
+		Meta:                 metav1.APIResource{Namespaced: true},
+	}, {
+		GroupKind:            schema.GroupKind{Group: "rbac.authorization.k8s.io", Kind: "ClusterRole"},
+		GroupVersionResource: schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterroles"},
+		Meta:                 metav1.APIResource{Namespaced: false},
+	}, {
+		GroupKind:            schema.GroupKind{Group: "", Kind: "ServiceAccount"},
+		GroupVersionResource: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "serviceaccounts"},
 		Meta:                 metav1.APIResource{Namespaced: true},
 	}}
 
@@ -273,7 +282,7 @@ func TestEnsureSyncedSingleNamespace(t *testing.T) {
 }
 
 func TestGetChildren(t *testing.T) {
-	cluster := newCluster(t, testPod(), testRS(), testDeploy())
+	cluster := newCluster(t, testPod(), testRS(), testDeploy(), testClusterRole(), testSA())
 	err := cluster.EnsureSynced()
 	require.NoError(t, err)
 
@@ -313,6 +322,22 @@ func TestGetChildren(t *testing.T) {
 			Time: testCreationTime.Local(),
 		},
 	}}, rsChildren...), deployChildren)
+
+	crChildren := getChildren(cluster, mustToUnstructured(testClusterRole()))
+	assert.Equal(t, []*Resource{{
+		Ref: corev1.ObjectReference{
+			Kind:       "ServiceAccount",
+			Namespace:  "default",
+			Name:       "helm-guestbook-sa",
+			APIVersion: "v1",
+			UID:        "4",
+		},
+		ResourceVersion: "123",
+		OwnerRefs:       []metav1.OwnerReference{{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRole", Name: "helm-guestbook-cr", UID: "5"}},
+		CreationTimestamp: &metav1.Time{
+			Time: testCreationTime.Local(),
+		},
+	}}, crChildren)
 }
 
 func TestGetManagedLiveObjs(t *testing.T) {
@@ -1005,4 +1030,43 @@ func TestIterateHierachy(t *testing.T) {
 			},
 			keys)
 	})
+}
+
+func testSA() *corev1.ServiceAccount {
+	return &corev1.ServiceAccount{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "ServiceAccount",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "helm-guestbook-sa",
+			Namespace:         "default",
+			UID:               "4",
+			ResourceVersion:   "123",
+			CreationTimestamp: metav1.NewTime(testCreationTime),
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "rbac.authorization.k8s.io/v1",
+					UID:        "5",
+					Kind:       "ClusterRole",
+					Name:       "helm-guestbook-cr",
+				},
+			},
+		},
+	}
+}
+
+func testClusterRole() *rbacv1.ClusterRole {
+	return &rbacv1.ClusterRole{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "rbac.authorization.k8s.io/v1",
+			Kind:       "ClusterRole",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "helm-guestbook-cr",
+			UID:               "5",
+			ResourceVersion:   "123",
+			CreationTimestamp: metav1.NewTime(testCreationTime),
+		},
+	}
 }
