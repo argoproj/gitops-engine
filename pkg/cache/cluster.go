@@ -976,6 +976,10 @@ func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(resour
 		if !action(res, nsNodes) {
 			return
 		}
+		if key.Namespace == "" {
+			// if the resource is cluster scoped, include objects from all namespaces
+			nsNodes = c.resources
+		}
 		childrenByUID := make(map[types.UID][]*Resource)
 		for _, child := range nsNodes {
 			if res.isParentOf(child) {
