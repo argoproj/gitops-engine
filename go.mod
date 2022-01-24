@@ -5,7 +5,7 @@ go 1.16
 require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/evanphx/json-patch v4.12.0+incompatible
-	github.com/go-logr/logr v1.2.0
+	github.com/go-logr/logr v1.2.2
 	github.com/golang/mock v1.5.0
 	github.com/spf13/cobra v1.2.1
 	github.com/stretchr/testify v1.7.0
@@ -18,7 +18,7 @@ require (
 	k8s.io/klog/v2 v2.30.0
 	k8s.io/kube-aggregator v0.23.1
 	k8s.io/kubectl v0.23.1
-	k8s.io/kubernetes v1.23.1
+	k8s.io/kubernetes v1.23.2
 	sigs.k8s.io/yaml v1.2.0
 )
 
