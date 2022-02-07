@@ -148,7 +148,7 @@ func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCa
 		resourceUpdatedHandlers: map[uint64]OnResourceUpdatedHandler{},
 		eventHandlers:           map[uint64]OnEventHandler{},
 		log:                     log,
-		listRetryLimit:          0,
+		listRetryLimit:          1,
 		listRetryUseBackoff:     false,
 		listRetryFunc:           ListRetryFuncNever,
 	}
@@ -493,13 +493,12 @@ func (c *clusterCache) listResources(ctx context.Context, resClient dynamic.Reso
 		}
 
 		listRetry.Steps = int(c.listRetryLimit)
-
 		err := retry.OnError(listRetry, c.listRetryFunc, func() error {
 			var ierr error
 			res, ierr = resClient.List(ctx, opts)
 			if ierr != nil {
 				// Log out a retry
-				if c.listRetryLimit > 0 && c.listRetryFunc(ierr) {
+				if c.listRetryLimit > 1 && c.listRetryFunc(ierr) {
 					retryCount += 1
 					c.log.Info(fmt.Sprintf("Error while listing resources: %v (try %d/%d)", ierr, retryCount, c.listRetryLimit))
 				}
