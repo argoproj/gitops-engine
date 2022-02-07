@@ -508,9 +508,6 @@ func (c *clusterCache) listResources(ctx context.Context, resClient dynamic.Reso
 			resourceVersion = res.GetResourceVersion()
 			return nil
 		})
-		if err == nil {
-			resourceVersion = res.GetResourceVersion()
-		}
 		return res, err
 	})
 	listPager.PageBufferSize = c.listPageBufferSize
