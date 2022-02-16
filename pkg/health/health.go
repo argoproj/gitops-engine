@@ -111,6 +111,11 @@ func GetHealthCheckFunc(gvk schema.GroupVersionKind) func(obj *unstructured.Unst
 		case kube.DaemonSetKind:
 			return getDaemonSetHealth
 		}
+	case "extensions":
+		switch gvk.Kind {
+		case kube.IngressKind:
+			return getIngressHealth
+		}
 	case "argoproj.io":
 		switch gvk.Kind {
 		case "Workflow":
