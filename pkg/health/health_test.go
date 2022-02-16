@@ -161,5 +161,142 @@ func TestGetArgoWorkflowHealth(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, HealthStatusProgressing, health.Status)
 	assert.Equal(t, "", health.Message)
+}
 
+func TestGetArgoCronWorkflowHealth(t *testing.T) {
+	sampleCronWorkflow := unstructured.Unstructured{Object: map[string]interface{}{
+			"spec": map[string]interface{}{
+				"entrypoint":    "sampleEntryPoint",
+			},
+			"status": map[string]interface{}{
+				"conditions":   []interface{}{
+					map[string]interface{}{
+						"type":   ConditionTypePodRunning,
+						"status": ConditionTrue,
+						"message": "Working on it",
+					},
+				},
+			},
+		},
+	}
+	health, err := getArgoCronWorkflowHealth(&sampleCronWorkflow)
+	require.NoError(t, err)
+	assert.Equal(t, HealthStatusProgressing, health.Status)
+	assert.Equal(t, "Working on it", health.Message)
+
+	// Still progressing since the condition status is false
+	sampleCronWorkflow = unstructured.Unstructured{Object: map[string]interface{}{
+			"spec": map[string]interface{}{
+				"entrypoint":    "sampleEntryPoint",
+			},
+			"status": map[string]interface{}{
+				"conditions":   []interface{}{
+					map[string]interface{}{
+						"type":   ConditionTypeCompleted,
+						"status": ConditionFalse,
+						"message": "Working on it",
+					},
+				},
+			},
+		},
+	}
+	health, err = getArgoCronWorkflowHealth(&sampleCronWorkflow)
+	require.NoError(t, err)
+	assert.Equal(t, HealthStatusProgressing, health.Status)
+	assert.Equal(t, "", health.Message)
+
+	// Test multiple conditions
+	sampleCronWorkflow = unstructured.Unstructured{Object: map[string]interface{}{
+			"spec": map[string]interface{}{
+				"entrypoint":    "sampleEntryPoint",
+			},
+			"status": map[string]interface{}{
+				"conditions":   []interface{}{
+					map[string]interface{}{
+						"type":   ConditionTypeCompleted,
+						"status": ConditionFalse,
+						"message": "Working on it",
+					},
+					map[string]interface{}{
+						"type":   ConditionTypePodRunning,
+						"status": ConditionTrue,
+						"message": "Still running",
+					},
+				},
+			},
+		},
+	}
+	health, err = getArgoCronWorkflowHealth(&sampleCronWorkflow)
+	require.NoError(t, err)
+	assert.Equal(t, HealthStatusProgressing, health.Status)
+	assert.Equal(t, "Still running", health.Message)
+
+	sampleCronWorkflow = unstructured.Unstructured{Object: map[string]interface{}{
+			"spec": map[string]interface{}{
+				"entrypoint":    "sampleEntryPoint",
+			},
+			"status": map[string]interface{}{
+				"conditions":   []interface{}{
+					map[string]interface{}{
+						"type":   ConditionTypeCompleted,
+						"status": ConditionTrue,
+						"message": "We are done",
+					},
+				},
+			},
+		},
+	}
+	health, err = getArgoCronWorkflowHealth(&sampleCronWorkflow)
+	require.NoError(t, err)
+	assert.Equal(t, HealthStatusHealthy, health.Status)
+	assert.Equal(t, "We are done", health.Message)
+
+	sampleCronWorkflow = unstructured.Unstructured{Object: map[string]interface{}{
+			"spec": map[string]interface{}{
+				"entrypoint":    "sampleEntryPoint",
+			},
+			"status": map[string]interface{}{
+				"conditions":   []interface{}{
+					map[string]interface{}{
+						"type":   ConditionTypeSpecError,
+						"status": ConditionTrue,
+						"message": "Something is definitely wrong with the spec. Please check",
+					},
+					map[string]interface{}{
+						"type":   ConditionTypeSpecWarning,
+						"status": ConditionTrue,
+						"message": "Something might be wrong with the spec",
+					},
+				},
+			},
+		},
+	}
+	health, err = getArgoCronWorkflowHealth(&sampleCronWorkflow)
+	require.NoError(t, err)
+	assert.Equal(t, HealthStatusDegraded, health.Status)
+	assert.Equal(t, "Something is definitely wrong with the spec. Please check", health.Message)
+
+	// Test that we are agnostic to extraneous keys
+	sampleCronWorkflow = unstructured.Unstructured{Object: map[string]interface{}{
+			"spec": map[string]interface{}{
+				"entrypoint":    "sampleEntryPoint",
+				"extraneousKey": "we are agnostic to extraneous keys",
+			},
+			"status": map[string]interface{}{
+				"conditions":   []interface{}{
+					map[string]interface{}{
+						"type":   ConditionTypePodRunning,
+						"status": ConditionTrue,
+						"message": "Working on it",
+						"extraneousKey": "we are agnostic to extraneous keys",
+					},
+				},
+				"extraneousKey": "we are agnostic to extraneous keys",
+			},
+		},
+	}
+	health, err = getArgoCronWorkflowHealth(&sampleCronWorkflow)
+	require.NoError(t, err)
+	assert.Equal(t, HealthStatusProgressing, health.Status)
+	assert.Equal(t, "Working on it", health.Message)
 }
