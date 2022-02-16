@@ -57,7 +57,7 @@ func init() {
 		"StatefulSet",
 		"Job",
 		"CronJob",
-		"IngressClass"
+		"IngressClass",
 		"Ingress",
 		"APIService",
 	}
