@@ -231,6 +231,7 @@ func TestGetArgoCronWorkflowHealth(t *testing.T) {
 	assert.Equal(t, HealthStatusProgressing, health.Status)
 	assert.Equal(t, "Still running", health.Message)
 
+	// Test healthy conditions when there's no error
 	sampleCronWorkflow = unstructured.Unstructured{Object: map[string]interface{}{
 			"spec": map[string]interface{}{
 				"entrypoint":    "sampleEntryPoint",
@@ -251,6 +252,28 @@ func TestGetArgoCronWorkflowHealth(t *testing.T) {
 	assert.Equal(t, HealthStatusHealthy, health.Status)
 	assert.Equal(t, "We are done", health.Message)
 
+	// Test health status when there's error that can be ignored.
+	sampleCronWorkflow = unstructured.Unstructured{Object: map[string]interface{}{
+			"spec": map[string]interface{}{
+				"entrypoint":    "sampleEntryPoint",
+			},
+			"status": map[string]interface{}{
+				"conditions":   []interface{}{
+					map[string]interface{}{
+						"type":   ConditionTypeMetricsError,
+						"status": ConditionTrue,
+						"message": "This is an error during metric emission and is not critical",
+					},
+				},
+			},
+		},
+	}
+	health, err = getArgoCronWorkflowHealth(&sampleCronWorkflow)
+	require.NoError(t, err)
+	assert.Equal(t, HealthStatusProgressing, health.Status)
+	assert.Equal(t, "This is an error during metric emission and is not critical", health.Message)
+
+	// Test degraded health status
 	sampleCronWorkflow = unstructured.Unstructured{Object: map[string]interface{}{
 			"spec": map[string]interface{}{
 				"entrypoint":    "sampleEntryPoint",

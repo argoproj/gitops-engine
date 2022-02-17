@@ -1,8 +1,6 @@
 package health
 
 import (
-	"os"
-
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -27,10 +25,6 @@ const (
 	// Indicates that resource is missing in the cluster.
 	HealthStatusMissing HealthStatusCode = "Missing"
 )
-
-// enableArgoCronWorkflowHealthCheck is an environment variable to control whether to enable health check for
-// Argo CronWorkflow. Defaults to false.
-var enableArgoCronWorkflowHealthCheck = os.Getenv("ENABLE_ARGO_CRON_WORKFLOW_HEALTH_CHECK") == "true"
 
 // Implements custom health assessment that overrides built-in assessment
 type HealthOverride interface {
@@ -133,9 +127,7 @@ func GetHealthCheckFunc(gvk schema.GroupVersionKind) func(obj *unstructured.Unst
 		case "Workflow":
 			return getArgoWorkflowHealth
 		case "CronWorkflow":
-			if enableArgoCronWorkflowHealthCheck {
-				return getArgoCronWorkflowHealth
-			}
+			return getArgoCronWorkflowHealth
 		}
 	case "apiregistration.k8s.io":
 		switch gvk.Kind {

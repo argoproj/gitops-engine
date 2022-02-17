@@ -100,8 +100,14 @@ func getArgoCronWorkflowHealth(obj *unstructured.Unstructured) (*HealthStatus, e
 	complete := false
 	var message string
 	for _, condition := range cronWf.Status.Conditions {
+		// We treat the following as unhealthy conditions:
+		// 1. ConditionTypeSpecError when the CronWorkflow spec is invalid.
+		// 2. ConditionTypeSubmissionError when:
+		//		* The ConcurrencyPolicy is invalid, or
+		//		* There is an error stopping a current workflow, or
+		// 		* There is an error submitting a workflow with Argo Server
 		switch condition.Type {
-		case ConditionTypeSpecError, ConditionTypeMetricsError, ConditionTypeSubmissionError:
+		case ConditionTypeSpecError, ConditionTypeSubmissionError:
 			if condition.Status == ConditionTrue {
 				failed = true
 				complete = true
