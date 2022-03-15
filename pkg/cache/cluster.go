@@ -100,7 +100,8 @@ type ClusterCache interface {
 	Invalidate(opts ...UpdateSettingsFunc)
 	// FindResources returns resources that matches given list of predicates from specified namespace or everywhere if specified namespace is empty
 	FindResources(namespace string, predicates ...func(r *Resource) bool) map[kube.ResourceKey]*Resource
-	// IterateHierarchy iterates resource tree starting from the specified top level resource and executes callback for each resource in the tree
+	// IterateHierarchy iterates resource tree starting from the specified top level resource and executes callback for each resource in the tree.
+	// The action callback returns true if iteration should continue and false otherwise.
 	IterateHierarchy(key kube.ResourceKey, action func(resource *Resource, namespaceResources map[kube.ResourceKey]*Resource) bool)
 	// IsNamespaced answers if specified group/kind is a namespaced resource API or not
 	IsNamespaced(gk schema.GroupKind) (bool, error)
@@ -828,7 +829,9 @@ func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(resour
 	defer c.lock.RUnlock()
 	if res, ok := c.resources[key]; ok {
 		nsNodes := c.nsIndex[key.Namespace]
-		action(res, nsNodes)
+		if !action(res, nsNodes) {
+			return
+		}
 		childrenByUID := make(map[types.UID][]*Resource)
 		for _, child := range nsNodes {
 			if res.isParentOf(child) {
