@@ -153,6 +153,7 @@ func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCa
 		listSemaphore:      semaphore.NewWeighted(defaultListSemaphoreWeight),
 		resources:          make(map[kube.ResourceKey]*Resource),
 		nsIndex:            make(map[string]map[kube.ResourceKey]*Resource),
+		childrenByParent:   make(map[kube.ResourceKey][]kube.ResourceKey),
 		config:             config,
 		kubectl: &kube.KubectlCmd{
 			Log:    log,
@@ -206,6 +207,8 @@ type clusterCache struct {
 	lock      sync.RWMutex
 	resources map[kube.ResourceKey]*Resource
 	nsIndex   map[string]map[kube.ResourceKey]*Resource
+	// childrenByParent maps a parent ref to the list of child refs
+	childrenByParent map[kube.ResourceKey][]kube.ResourceKey
 
 	kubectl          kube.Kubectl
 	log              logr.Logger
@@ -974,12 +977,16 @@ func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(resour
 	defer c.lock.RUnlock()
 	if res, ok := c.resources[key]; ok {
 		nsNodes := c.nsIndex[key.Namespace]
+		if key.Namespace == "" {
+			childRefs := c.childrenByParent[key]
+			for _, childRef := range childRefs {
+				if _, ok := nsNodes[childRef]; !ok {
+					nsNodes[childRef] = c.resources[childRef]
+				}
+			}
+		}
 		if !action(res, nsNodes) {
 			return
-		}
-		if key.Namespace == "" {
-			// if the resource is cluster scoped, include objects from all namespaces
-			nsNodes = c.resources
 		}
 		childrenByUID := make(map[types.UID][]*Resource)
 		for _, child := range nsNodes {
@@ -1138,6 +1145,7 @@ func (c *clusterCache) processEvent(event watch.EventType, un *unstructured.Unst
 }
 
 func (c *clusterCache) onNodeUpdated(oldRes *Resource, newRes *Resource) {
+	c.updateChildrenByParentMap(newRes)
 	c.setNode(newRes)
 	for _, h := range c.getResourceUpdatedHandlers() {
 		h(newRes, oldRes, c.nsIndex[newRes.Ref.Namespace])
@@ -1145,6 +1153,9 @@ func (c *clusterCache) onNodeUpdated(oldRes *Resource, newRes *Resource) {
 }
 
 func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) {
+	if _, ok := c.childrenByParent[key]; ok {
+		delete(c.childrenByParent, key)
+	}
 	existing, ok := c.resources[key]
 	if ok {
 		delete(c.resources, key)
@@ -1166,6 +1177,38 @@ func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) {
 		for _, h := range c.getResourceUpdatedHandlers() {
 			h(nil, existing, ns)
 		}
+	}
+}
+
+func (c *clusterCache) updateChildrenByParentMap(res *Resource) {
+	if res == nil {
+		return
+	}
+	childKey := res.ResourceKey()
+	if _, ok := c.childrenByParent[childKey]; !ok {
+		c.childrenByParent[childKey] = []kube.ResourceKey{}
+	}
+	for _, parent := range res.OwnerRefs {
+		parentGvk := schema.FromAPIVersionAndKind(parent.APIVersion, parent.Kind)
+		var namespace string
+		if isNamespaced, _ := c.IsNamespaced(parentGvk.GroupKind()); isNamespaced {
+			namespace = res.Ref.Namespace
+		}
+		parentKey := kube.NewResourceKey(parentGvk.Group, parentGvk.Kind, namespace, parent.Name)
+		childRefs, ok := c.childrenByParent[parentKey]
+		if !ok {
+			c.childrenByParent[parentKey] = []kube.ResourceKey{}
+		}
+		exists := false
+		for _, cr := range childRefs {
+			if cr == childKey {
+				exists = true
+			}
+		}
+		if !exists {
+			childRefs = append(childRefs, childKey)
+		}
+		c.childrenByParent[parentKey] = childRefs
 	}
 }
 
