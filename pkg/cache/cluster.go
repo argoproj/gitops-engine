@@ -980,7 +980,7 @@ func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(resour
 		if key.Namespace == "" {
 			childRefs := c.childrenByParent[key]
 			for _, childRef := range childRefs {
-				if _, ok := nsNodes[childRef]; !ok {
+				if c.resources[childRef] != nil {
 					nsNodes[childRef] = c.resources[childRef]
 				}
 			}
@@ -1153,9 +1153,7 @@ func (c *clusterCache) onNodeUpdated(oldRes *Resource, newRes *Resource) {
 }
 
 func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) {
-	if _, ok := c.childrenByParent[key]; ok {
-		delete(c.childrenByParent, key)
-	}
+	delete(c.childrenByParent, key)
 	existing, ok := c.resources[key]
 	if ok {
 		delete(c.resources, key)
