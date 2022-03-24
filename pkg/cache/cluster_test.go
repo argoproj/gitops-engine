@@ -323,6 +323,13 @@ func TestGetChildren(t *testing.T) {
 		},
 	}}, rsChildren...), deployChildren)
 
+	unstructuredClusterRole := mustToUnstructured(testClusterRole())
+	unstructuredSA := mustToUnstructured(testSA())
+	cluster.childrenByParent = map[kube.ResourceKey][]kube.ResourceKey{
+		kube.GetResourceKey(unstructuredClusterRole): {
+			kube.GetResourceKey(unstructuredSA),
+		},
+	}
 	crChildren := getChildren(cluster, mustToUnstructured(testClusterRole()))
 	assert.Equal(t, []*Resource{{
 		Ref: corev1.ObjectReference{
@@ -338,6 +345,59 @@ func TestGetChildren(t *testing.T) {
 			Time: testCreationTime.Local(),
 		},
 	}}, crChildren)
+}
+
+func TestUpdateChildrenByParentMap(t *testing.T) {
+	cluster := newCluster(t, testDeploy(), testClusterRole(), testSA())
+	err := cluster.EnsureSynced()
+	require.NoError(t, err)
+
+	res := &Resource{
+		Ref: corev1.ObjectReference{
+			Kind:       "ServiceAccount",
+			Namespace:  "default",
+			Name:       "helm-guestbook-sa",
+			APIVersion: "v1",
+			UID:        "4",
+		},
+		ResourceVersion: "123",
+		CreationTimestamp: &metav1.Time{
+			Time: testCreationTime.Local(),
+		},
+	}
+
+	saResourceKey := kube.NewResourceKey("", "ServiceAccount", "default", "helm-guestbook-sa")
+	crResourceKey := kube.NewResourceKey("rbac.authorization.k8s.io", "ClusterRole", "", "helm-guestbook-cr")
+	deployResourceKey := kube.NewResourceKey("apps", "Deployment", "default", "helm-guestbook")
+
+	t.Run("resource with no owner refs", func(t *testing.T) {
+		cluster.updateChildrenByParentMap(res)
+		assert.Equal(t, map[kube.ResourceKey][]kube.ResourceKey{
+			saResourceKey: {},
+		}, cluster.childrenByParent)
+	})
+
+	t.Run("resource with an owner ref", func(t *testing.T) {
+		res.OwnerRefs = []metav1.OwnerReference{{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRole", Name: "helm-guestbook-cr", UID: "5"}}
+		cluster.updateChildrenByParentMap(res)
+		assert.Equal(t, map[kube.ResourceKey][]kube.ResourceKey{
+			saResourceKey: {},
+			crResourceKey: {saResourceKey},
+		}, cluster.childrenByParent)
+	})
+
+	t.Run("resource with multiple owner refs", func(t *testing.T) {
+		res.OwnerRefs = []metav1.OwnerReference{
+			{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRole", Name: "helm-guestbook-cr", UID: "5"},
+			{APIVersion: "apps/v1", Kind: "Deployment", Name: "helm-guestbook", UID: "3"},
+		}
+		cluster.updateChildrenByParentMap(res)
+		assert.Equal(t, map[kube.ResourceKey][]kube.ResourceKey{
+			saResourceKey:     {},
+			crResourceKey:     {saResourceKey},
+			deployResourceKey: {saResourceKey},
+		}, cluster.childrenByParent)
+	})
 }
 
 func TestGetManagedLiveObjs(t *testing.T) {
