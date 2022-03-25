@@ -560,7 +560,7 @@ func (sc *syncContext) GetState() (common.OperationPhase, string, []common.Resou
 }
 
 func (sc *syncContext) setOperationFailed(syncFailTasks, syncFailedTasks syncTasks, message string) {
-	errorMessageFactory := func(tasks []*syncTask, message string) string {
+	errorMessageFactory := func(message string) string {
 		messages := syncFailedTasks.Map(func(task *syncTask) string {
 			return task.message
 		})
@@ -570,7 +570,7 @@ func (sc *syncContext) setOperationFailed(syncFailTasks, syncFailedTasks syncTas
 		return message
 	}
 
-	errorMessage := errorMessageFactory(syncFailedTasks, message)
+	errorMessage := errorMessageFactory(message)
 
 	if len(syncFailTasks) > 0 {
 		// if all the failure hooks are completed, don't run them again, and mark the sync as failed

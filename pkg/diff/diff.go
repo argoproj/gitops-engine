@@ -178,7 +178,7 @@ func applyPatch(liveBytes []byte, patchBytes []byte, newVersionedObject func() (
 		// are sorted in a consistent order (we do the same below, so that they can be
 		// lexicographically compared with one another)
 		var result map[string]interface{}
-		err = json.Unmarshal([]byte(predictedLiveBytes), &result)
+		err = json.Unmarshal(predictedLiveBytes, &result)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -210,7 +210,7 @@ func applyPatch(liveBytes []byte, patchBytes []byte, newVersionedObject func() (
 
 		// Ensure the fields are sorted in a consistent order (as above)
 		var result map[string]interface{}
-		err = json.Unmarshal([]byte(liveBytes), &result)
+		err = json.Unmarshal(liveBytes, &result)
 		if err != nil {
 			return nil, nil, err
 		}
