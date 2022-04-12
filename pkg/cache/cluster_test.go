@@ -490,6 +490,8 @@ metadata:
 }
 
 func TestGetManagedLiveObjsFailedConversion(t *testing.T) {
+	cronTabGroup := "stable.example.com"
+
 	testCases := []struct{
 		name string
 		localConvertFails bool
@@ -518,8 +520,8 @@ func TestGetManagedLiveObjsFailedConversion(t *testing.T) {
 			cluster := newCluster(t, testCRD(), testCronTab()).
 				WithAPIResources([]kube.APIResourceInfo{
 					{
-						GroupKind:            schema.GroupKind{Group: "stable.example.com", Kind: "CronTab"},
-						GroupVersionResource: schema.GroupVersionResource{Group: "stable.example.com", Version: "v1", Resource: "crontabs"},
+						GroupKind:            schema.GroupKind{Group: cronTabGroup, Kind: "CronTab"},
+						GroupVersionResource: schema.GroupVersionResource{Group: cronTabGroup, Version: "v1", Resource: "crontabs"},
 						Meta:                 metav1.APIResource{Namespaced: true},
 					},
 				})
@@ -563,7 +565,7 @@ metadata:
 			assert.Equal(t, testCaseCopy.expectConvertToVersionCalled, convertToVersionWasCalled)
 			assert.Equal(t, testCaseCopy.expectGetResourceCalled, getResourceWasCalled)
 			assert.Equal(t, managedObjs, map[kube.ResourceKey]*unstructured.Unstructured{
-				kube.NewResourceKey("stable.example.com", "CronTab", "default", "test-crontab"): mustToUnstructured(testCronTab()),
+				kube.NewResourceKey(cronTabGroup, "CronTab", "default", "test-crontab"): mustToUnstructured(testCronTab()),
 			})
 		})
 	}
