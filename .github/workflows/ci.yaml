@@ -8,27 +8,31 @@ on:
   pull_request:
     branches:
       - 'master'
+env:
+  # Golang version to use across CI steps
+  GOLANG_VERSION: '1.17'
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@master
-      - uses: actions/cache@v2
+      - uses: actions/cache@v2.1.6
         with:
           path: ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
-      - uses: actions/setup-go@v2.1.3
+      - uses: actions/setup-go@v2.1.4
         with:
-          go-version: '1.15.6'
+          go-version: ${{ env.GOLANG_VERSION }}
       - run: make test
-      - uses: actions-contrib/golangci-lint@v1
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v2
         with:
-          args: run --timeout=5m
-        env:
-          GOROOT: ""
-      - uses: codecov/codecov-action@v1.2.1
+          version: v1.38.0
+          args: --timeout 5m
+          skip-go-installation: true
+      - uses: codecov/codecov-action@v1.5.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }} #required
           file: ./coverage.out

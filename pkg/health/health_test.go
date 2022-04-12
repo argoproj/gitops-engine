@@ -79,9 +79,11 @@ func TestJob(t *testing.T) {
 
 func TestHPA(t *testing.T) {
 	assertAppHealth(t, "./testdata/hpa-v2beta2-healthy.yaml", HealthStatusHealthy)
+	assertAppHealth(t, "./testdata/hpa-v2beta1-healthy-disabled.yaml", HealthStatusHealthy)
 	assertAppHealth(t, "./testdata/hpa-v2beta1-healthy.yaml", HealthStatusHealthy)
 	assertAppHealth(t, "./testdata/hpa-v1-degraded.yaml", HealthStatusDegraded)
 	assertAppHealth(t, "./testdata/hpa-v1-healthy.yaml", HealthStatusHealthy)
+	assertAppHealth(t, "./testdata/hpa-v1-healthy-toofew.yaml", HealthStatusHealthy)
 	assertAppHealth(t, "./testdata/hpa-v1-progressing.yaml", HealthStatusProgressing)
 	assertAppHealth(t, "./testdata/hpa-v1-progressing-with-no-annotations.yaml", HealthStatusProgressing)
 }
@@ -146,4 +148,18 @@ func TestGetArgoWorkflowHealth(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, HealthStatusHealthy, health.Status)
 	assert.Equal(t, "This node is has succeeded", health.Message)
+
+	sampleWorkflow = unstructured.Unstructured{Object: map[string]interface{}{
+		"spec": map[string]interface{}{
+			"entrypoint":    "sampleEntryPoint",
+			"extraneousKey": "we are agnostic to extraneous keys",
+		},
+	},
+	}
+
+	health, err = getArgoWorkflowHealth(&sampleWorkflow)
+	require.NoError(t, err)
+	assert.Equal(t, HealthStatusProgressing, health.Status)
+	assert.Equal(t, "", health.Message)
+
 }

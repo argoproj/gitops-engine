@@ -12,6 +12,11 @@ import (
 	"github.com/argoproj/gitops-engine/pkg/utils/tracing"
 )
 
+// NewNoopSettings returns cache settings that has not health customizations and don't filter any resources
+func NewNoopSettings() *noopSettings {
+	return &noopSettings{}
+}
+
 type noopSettings struct {
 }
 
@@ -61,6 +66,14 @@ func SetNamespaces(namespaces []string) UpdateSettingsFunc {
 	}
 }
 
+// SetClusterResources specifies if cluster level resource included or not.
+// Flag is used only if cluster is changed to namespaced mode using SetNamespaces setting
+func SetClusterResources(val bool) UpdateSettingsFunc {
+	return func(cache *clusterCache) {
+		cache.clusterResources = val
+	}
+}
+
 // SetConfig updates cluster rest config
 func SetConfig(config *rest.Config) UpdateSettingsFunc {
 	return func(cache *clusterCache) {
@@ -100,6 +113,20 @@ func SetResyncTimeout(timeout time.Duration) UpdateSettingsFunc {
 	}
 }
 
+// SetWatchResyncTimeout updates cluster re-sync timeout
+func SetWatchResyncTimeout(timeout time.Duration) UpdateSettingsFunc {
+	return func(cache *clusterCache) {
+		cache.watchResyncTimeout = timeout
+	}
+}
+
+// SetClusterSyncRetryTimeout updates cluster sync retry timeout when sync error happens
+func SetClusterSyncRetryTimeout(timeout time.Duration) UpdateSettingsFunc {
+	return func(cache *clusterCache) {
+		cache.clusterSyncRetryTimeout = timeout
+	}
+}
+
 // SetLogr sets the logger to use.
 func SetLogr(log logr.Logger) UpdateSettingsFunc {
 	return func(cache *clusterCache) {
@@ -116,5 +143,18 @@ func SetTracer(tracer tracing.Tracer) UpdateSettingsFunc {
 		if kcmd, ok := cache.kubectl.(*kube.KubectlCmd); ok {
 			kcmd.Tracer = tracer
 		}
+	}
+}
+
+// SetRetryOptions sets cluster list retry options
+func SetRetryOptions(maxRetries int32, useBackoff bool, retryFunc ListRetryFunc) UpdateSettingsFunc {
+	return func(cache *clusterCache) {
+		// Max retries must be at least one
+		if maxRetries < 1 {
+			maxRetries = 1
+		}
+		cache.listRetryLimit = maxRetries
+		cache.listRetryUseBackoff = useBackoff
+		cache.listRetryFunc = retryFunc
 	}
 }

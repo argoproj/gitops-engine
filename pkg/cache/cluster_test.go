@@ -73,10 +73,11 @@ func newCluster(t *testing.T, objs ...runtime.Object) *clusterCache {
 	reactor := client.ReactionChain[0]
 	client.PrependReactor("list", "*", func(action testcore.Action) (handled bool, ret runtime.Object, err error) {
 		handled, ret, err = reactor.React(action)
-		// make sure list response have resource version
-		if list, ok := ret.(*unstructured.UnstructuredList); ok {
-			list.SetResourceVersion("123")
+		if err != nil || !handled {
+			return
 		}
+		// make sure list response have resource version
+		ret.(metav1.ListInterface).SetResourceVersion("123")
 		return
 	})
 
@@ -108,8 +109,9 @@ func newCluster(t *testing.T, objs ...runtime.Object) *clusterCache {
 
 func getChildren(cluster *clusterCache, un *unstructured.Unstructured) []*Resource {
 	hierarchy := make([]*Resource, 0)
-	cluster.IterateHierarchy(kube.GetResourceKey(un), func(child *Resource, _ map[kube.ResourceKey]*Resource) {
+	cluster.IterateHierarchy(kube.GetResourceKey(un), func(child *Resource, _ map[kube.ResourceKey]*Resource) bool {
 		hierarchy = append(hierarchy, child)
+		return true
 	})
 	return hierarchy[1:]
 }
@@ -355,6 +357,47 @@ metadata:
 	assert.EqualError(t, err, "Cluster level Deployment \"helm-guestbook\" can not be managed when in namespaced mode")
 }
 
+func TestGetManagedLiveObjsNamespacedModeClusterLevelResource_ClusterResourceEnabled(t *testing.T) {
+	cluster := newCluster(t, testPod(), testRS(), testDeploy())
+	cluster.Invalidate(SetPopulateResourceInfoHandler(func(un *unstructured.Unstructured, isRoot bool) (info interface{}, cacheManifest bool) {
+		return nil, true
+	}))
+	cluster.namespaces = []string{"default", "production"}
+	cluster.clusterResources = true
+
+	err := cluster.EnsureSynced()
+	require.NoError(t, err)
+
+	clusterLevelRes := strToUnstructured(`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: helm-guestbook
+  labels:
+    app: helm-guestbook`)
+
+	cluster.clusterResources = true
+	_, err = cluster.GetManagedLiveObjs([]*unstructured.Unstructured{clusterLevelRes}, func(r *Resource) bool {
+		return len(r.OwnerRefs) == 0
+	})
+	assert.Nil(t, err)
+
+	otherNamespaceRes := strToUnstructured(`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: helm-guestbook
+  namespace: some-other-namespace
+  labels:
+    app: helm-guestbook`)
+
+	cluster.clusterResources = true
+	_, err = cluster.GetManagedLiveObjs([]*unstructured.Unstructured{otherNamespaceRes}, func(r *Resource) bool {
+		return len(r.OwnerRefs) == 0
+	})
+	assert.EqualError(t, err, "Namespace \"some-other-namespace\" for Deployment \"helm-guestbook\" is not managed")
+}
+
 func TestGetManagedLiveObjsAllNamespaces(t *testing.T) {
 	cluster := newCluster(t, testPod(), testRS(), testDeploy())
 	cluster.Invalidate(SetPopulateResourceInfoHandler(func(un *unstructured.Unstructured, isRoot bool) (info interface{}, cacheManifest bool) {
@@ -576,6 +619,56 @@ func TestGetDuplicatedChildren(t *testing.T) {
 	}
 }
 
+func TestGetClusterInfo(t *testing.T) {
+	cluster := newCluster(t)
+	cluster.apiResources = []kube.APIResourceInfo{{GroupKind: schema.GroupKind{Group: "test", Kind: "test kind"}}}
+	cluster.serverVersion = "v1.16"
+	info := cluster.GetClusterInfo()
+	assert.Equal(t, ClusterInfo{
+		Server:       cluster.config.Host,
+		APIResources: cluster.apiResources,
+		K8SVersion:   cluster.serverVersion,
+	}, info)
+}
+
+func TestDeleteAPIResource(t *testing.T) {
+	cluster := newCluster(t)
+	cluster.apiResources = []kube.APIResourceInfo{{
+		GroupKind:            schema.GroupKind{Group: "test", Kind: "test kind"},
+		GroupVersionResource: schema.GroupVersionResource{Version: "v1"},
+	}}
+
+	cluster.deleteAPIResource(kube.APIResourceInfo{GroupKind: schema.GroupKind{Group: "wrong group", Kind: "wrong kind"}})
+	assert.Len(t, cluster.apiResources, 1)
+	cluster.deleteAPIResource(kube.APIResourceInfo{
+		GroupKind:            schema.GroupKind{Group: "test", Kind: "test kind"},
+		GroupVersionResource: schema.GroupVersionResource{Version: "wrong version"},
+	})
+	assert.Len(t, cluster.apiResources, 1)
+
+	cluster.deleteAPIResource(kube.APIResourceInfo{
+		GroupKind:            schema.GroupKind{Group: "test", Kind: "test kind"},
+		GroupVersionResource: schema.GroupVersionResource{Version: "v1"},
+	})
+	assert.Empty(t, cluster.apiResources)
+}
+
+func TestAppendAPIResource(t *testing.T) {
+	cluster := newCluster(t)
+
+	resourceInfo := kube.APIResourceInfo{
+		GroupKind:            schema.GroupKind{Group: "test", Kind: "test kind"},
+		GroupVersionResource: schema.GroupVersionResource{Version: "v1"},
+	}
+
+	cluster.appendAPIResource(resourceInfo)
+	assert.ElementsMatch(t, []kube.APIResourceInfo{resourceInfo}, cluster.apiResources)
+
+	// make sure same group, kind version is not added twice
+	cluster.appendAPIResource(resourceInfo)
+	assert.ElementsMatch(t, []kube.APIResourceInfo{resourceInfo}, cluster.apiResources)
+}
+
 func ExampleNewClusterCache_resourceUpdatedEvents() {
 	// kubernetes cluster config here
 	config := &rest.Config{}
@@ -703,4 +796,69 @@ func testDeploy() *appsv1.Deployment {
 			},
 		},
 	}
+}
+
+func TestIterateHierachy(t *testing.T) {
+	cluster := newCluster(t, testPod(), testRS(), testDeploy())
+	err := cluster.EnsureSynced()
+	require.NoError(t, err)
+
+	t.Run("IterateAll", func(t *testing.T) {
+		keys := []kube.ResourceKey{}
+		cluster.IterateHierarchy(kube.GetResourceKey(mustToUnstructured(testDeploy())), func(child *Resource, _ map[kube.ResourceKey]*Resource) bool {
+			keys = append(keys, child.ResourceKey())
+			return true
+		})
+
+		assert.ElementsMatch(t,
+			[]kube.ResourceKey{
+				kube.GetResourceKey(mustToUnstructured(testPod())),
+				kube.GetResourceKey(mustToUnstructured(testRS())),
+				kube.GetResourceKey(mustToUnstructured(testDeploy()))},
+			keys)
+	})
+
+	t.Run("ExitAtRoot", func(t *testing.T) {
+		keys := []kube.ResourceKey{}
+		cluster.IterateHierarchy(kube.GetResourceKey(mustToUnstructured(testDeploy())), func(child *Resource, _ map[kube.ResourceKey]*Resource) bool {
+			keys = append(keys, child.ResourceKey())
+			return false
+		})
+
+		assert.ElementsMatch(t,
+			[]kube.ResourceKey{
+				kube.GetResourceKey(mustToUnstructured(testDeploy()))},
+			keys)
+	})
+
+	t.Run("ExitAtSecondLevelChild", func(t *testing.T) {
+		keys := []kube.ResourceKey{}
+		cluster.IterateHierarchy(kube.GetResourceKey(mustToUnstructured(testDeploy())), func(child *Resource, _ map[kube.ResourceKey]*Resource) bool {
+			keys = append(keys, child.ResourceKey())
+			return child.ResourceKey().Kind != kube.ReplicaSetKind
+		})
+
+		assert.ElementsMatch(t,
+			[]kube.ResourceKey{
+				kube.GetResourceKey(mustToUnstructured(testDeploy())),
+				kube.GetResourceKey(mustToUnstructured(testRS())),
+			},
+			keys)
+	})
+
+	t.Run("ExitAtThirdLevelChild", func(t *testing.T) {
+		keys := []kube.ResourceKey{}
+		cluster.IterateHierarchy(kube.GetResourceKey(mustToUnstructured(testDeploy())), func(child *Resource, _ map[kube.ResourceKey]*Resource) bool {
+			keys = append(keys, child.ResourceKey())
+			return child.ResourceKey().Kind != kube.PodKind
+		})
+
+		assert.ElementsMatch(t,
+			[]kube.ResourceKey{
+				kube.GetResourceKey(mustToUnstructured(testDeploy())),
+				kube.GetResourceKey(mustToUnstructured(testRS())),
+				kube.GetResourceKey(mustToUnstructured(testPod())),
+			},
+			keys)
+	})
 }

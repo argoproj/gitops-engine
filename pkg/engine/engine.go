@@ -84,12 +84,14 @@ func (e *gitOpsEngine) Sync(ctx context.Context,
 		return nil, err
 	}
 	opts = append(opts, sync.WithSkipHooks(!diffRes.Modified))
-	syncCtx, err := sync.NewSyncContext(revision, result, e.config, e.config, e.kubectl, namespace, opts...)
+	syncCtx, cleanup, err := sync.NewSyncContext(revision, result, e.config, e.config, e.kubectl, namespace, e.cache.GetOpenAPISchema(), opts...)
 	if err != nil {
 		return nil, err
 	}
+	defer cleanup()
 
 	resUpdated := make(chan bool)
+	resIgnore := make(chan struct{})
 	unsubscribe := e.cache.OnResourceUpdated(func(newRes *cache.Resource, oldRes *cache.Resource, namespaceResources map[kube.ResourceKey]*cache.Resource) {
 		var key kube.ResourceKey
 		if newRes != nil {
@@ -98,9 +100,13 @@ func (e *gitOpsEngine) Sync(ctx context.Context,
 			key = oldRes.ResourceKey()
 		}
 		if _, ok := managedResources[key]; ok {
-			resUpdated <- true
+			select {
+			case resUpdated <- true:
+			case <-resIgnore:
+			}
 		}
 	})
+	defer close(resIgnore)
 	defer unsubscribe()
 	for {
 		syncCtx.Sync()

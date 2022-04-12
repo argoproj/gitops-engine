@@ -18,8 +18,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/jsonmergepatch"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/kubernetes/pkg/api/v1/endpoints"
 
+	"github.com/argoproj/gitops-engine/internal/kubernetes_vendor/pkg/api/v1/endpoints"
 	jsonutil "github.com/argoproj/gitops-engine/pkg/utils/json"
 	kubescheme "github.com/argoproj/gitops-engine/pkg/utils/kube/scheme"
 )
@@ -304,8 +304,8 @@ func removeNamespaceAnnotation(orig *unstructured.Unstructured) *unstructured.Un
 			if annotationsIf == nil {
 				shouldDelete = true
 			} else {
-				annotation := annotationsIf.(map[string]interface{})
-				if len(annotation) == 0 {
+				annotation, ok := annotationsIf.(map[string]interface{})
+				if ok && len(annotation) == 0 {
 					shouldDelete = true
 				}
 			}
@@ -517,6 +517,17 @@ func normalizeEndpoint(un *unstructured.Unstructured, o options) {
 		return
 	}
 
+	// add default protocol to subsets ports if it is empty
+	for s := range ep.Subsets {
+		subset := &ep.Subsets[s]
+		for p := range subset.Ports {
+			port := &subset.Ports[p]
+			if port.Protocol == "" {
+				port.Protocol = corev1.ProtocolTCP
+			}
+		}
+	}
+
 	endpoints.SortSubsets(ep.Subsets)
 
 	newObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&ep)
@@ -614,10 +625,18 @@ func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstru
 		for _, obj := range []*unstructured.Unstructured{target, live, orig} {
 			var data map[string]interface{}
 			if obj != nil {
+				// handles an edge case when secret data has nil value
+				// https://github.com/argoproj/argo-cd/issues/5584
+				dataValue, ok := obj.Object["data"]
+				if ok {
+					if dataValue == nil {
+						continue
+					}
+				}
 				var err error
 				data, _, err = unstructured.NestedMap(obj.Object, "data")
 				if err != nil {
-					return nil, nil, err
+					return nil, nil, fmt.Errorf("unstructured.NestedMap error: %s", err)
 				}
 			}
 			if data == nil {
@@ -637,7 +656,7 @@ func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstru
 			data[k] = replacement
 			err := unstructured.SetNestedField(obj.Object, data, "data")
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, fmt.Errorf("unstructured.SetNestedField error: %s", err)
 			}
 		}
 	}
@@ -648,7 +667,7 @@ func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstru
 		}
 		lastAppliedData, err := json.Marshal(orig)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("error marshaling json: %s", err)
 		}
 		annotations[corev1.LastAppliedConfigAnnotation] = string(lastAppliedData)
 		live.SetAnnotations(annotations)
