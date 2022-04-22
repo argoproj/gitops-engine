@@ -97,6 +97,9 @@ type ClusterCache interface {
 	GetAPIResources() []kube.APIResourceInfo
 	// GetOpenAPISchema returns open API schema of supported API resources
 	GetOpenAPISchema() openapi.Resources
+	// GetGVKParser returns a parser able to build a TypedValue used in
+	// structured merge diffs.
+	GetGVKParser() *managedfields.GvkParser
 	// Invalidate cache and executes callback that optionally might update cache settings
 	Invalidate(opts ...UpdateSettingsFunc)
 	// FindResources returns resources that matches given list of predicates from specified namespace or everywhere if specified namespace is empty
