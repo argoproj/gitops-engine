@@ -112,6 +112,20 @@ func isSupportedVerb(apiResource *metav1.APIResource, verb string) bool {
 	return false
 }
 
+type CreateGVKParserError struct {
+	err error
+}
+
+func NewCreateGVKParserError(err error) *CreateGVKParserError {
+	return &CreateGVKParserError{
+		err: err,
+	}
+}
+
+func (e *CreateGVKParserError) Error() string {
+	return fmt.Sprintf("error creating gvk parser: %s", e.err)
+}
+
 // LoadOpenAPISchema will load all existing resource schemas from the cluster
 // and return:
 // - openapi.Resources: used for getting the proto.Schema from a GVK
@@ -124,23 +138,34 @@ func (k *KubectlCmd) LoadOpenAPISchema(config *rest.Config) (openapi.Resources, 
 	}
 
 	oapiGetter := openapi.NewOpenAPIGetter(disco)
-	doc, err := oapiGetter.OpenAPISchema()
-	if err != nil {
-		return nil, nil, fmt.Errorf("error getting openapi schema: %s", err)
-	}
-	models, err := proto.NewOpenAPIData(doc)
-	if err != nil {
-		return nil, nil, fmt.Errorf("error getting openapi data: %s", err)
-	}
-	gvkParser, err := managedfields.NewGVKParser(models, false)
-	if err != nil {
-		return nil, nil, fmt.Errorf("error getting gvk parser: %s", err)
-	}
 	oapiResources, err := openapi.NewOpenAPIParser(oapiGetter).Parse()
 	if err != nil {
 		return nil, nil, fmt.Errorf("error getting openapi resources: %s", err)
 	}
+	gvkParser, err := newGVKParser(oapiGetter)
+	if err != nil {
+		// return a specific error type to allow gracefully handle
+		// creating GVK Parser bug:
+		// https://github.com/kubernetes/kubernetes/issues/103597
+		return oapiResources, nil, NewCreateGVKParserError(err)
+	}
 	return oapiResources, gvkParser, nil
+}
+
+func newGVKParser(oapiGetter *openapi.CachedOpenAPIGetter) (*managedfields.GvkParser, error) {
+	doc, err := oapiGetter.OpenAPISchema()
+	if err != nil {
+		return nil, fmt.Errorf("error getting openapi schema: %s", err)
+	}
+	models, err := proto.NewOpenAPIData(doc)
+	if err != nil {
+		return nil, fmt.Errorf("error getting openapi data: %s", err)
+	}
+	gvkParser, err := managedfields.NewGVKParser(models, false)
+	if err != nil {
+		return nil, err
+	}
+	return gvkParser, nil
 }
 
 func (k *KubectlCmd) GetAPIResources(config *rest.Config, preferred bool, resourceFilter ResourceFilter) ([]APIResourceInfo, error) {

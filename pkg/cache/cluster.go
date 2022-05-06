@@ -662,9 +662,15 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 					err = runSynced(&c.lock, func() error {
 						openAPISchema, gvkParser, err := c.kubectl.LoadOpenAPISchema(c.config)
 						if err != nil {
-							return err
+							e, ok := err.(*kube.CreateGVKParserError)
+							if !ok {
+								return err
+							}
+							c.log.Error(e, "warning loading openapi schema")
 						}
-						c.gvkParser = gvkParser
+						if gvkParser != nil {
+							c.gvkParser = gvkParser
+						}
 						c.openAPISchema = openAPISchema
 						return nil
 					})
@@ -720,10 +726,17 @@ func (c *clusterCache) sync() error {
 
 	openAPISchema, gvkParser, err := c.kubectl.LoadOpenAPISchema(config)
 	if err != nil {
-		return err
+		e, ok := err.(*kube.CreateGVKParserError)
+		if !ok {
+			return err
+		}
+		c.log.Error(e, "warning loading openapi schema")
 	}
 
-	c.gvkParser = gvkParser
+	if gvkParser != nil {
+		c.gvkParser = gvkParser
+	}
+
 	c.openAPISchema = openAPISchema
 
 	apis, err := c.kubectl.GetAPIResources(c.config, true, c.settings.ResourcesFilter)
