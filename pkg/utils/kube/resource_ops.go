@@ -306,6 +306,9 @@ func (k *kubectlResourceOperations) newApplyOptions(ioStreams genericclioptions.
 	if manager != "" {
 		o.FieldManager = manager
 	}
+	if serverSideApply {
+		o.ForceConflicts = true
+	}
 	return o, nil
 }
 
