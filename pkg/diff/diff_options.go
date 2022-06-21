@@ -2,6 +2,7 @@ package diff
 
 import (
 	"github.com/go-logr/logr"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	"k8s.io/klog/v2/klogr"
 )
 
@@ -13,6 +14,8 @@ type options struct {
 	ignoreAggregatedRoles bool
 	normalizer            Normalizer
 	log                   logr.Logger
+	serverSideApply       bool
+	gvkParser             *managedfields.GvkParser
 }
 
 func applyOptions(opts []Option) options {
@@ -42,5 +45,17 @@ func WithNormalizer(normalizer Normalizer) Option {
 func WithLogr(log logr.Logger) Option {
 	return func(o *options) {
 		o.log = log
+	}
+}
+
+func WithServerSideApply(ssa bool) Option {
+	return func(o *options) {
+		o.serverSideApply = ssa
+	}
+}
+
+func WithGVKParser(gvkParser *managedfields.GvkParser) Option {
+	return func(o *options) {
+		o.gvkParser = gvkParser
 	}
 }
