@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/jsonmergepatch"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/structured-merge-diff/v4/typed"
 
 	"github.com/argoproj/gitops-engine/internal/kubernetes_vendor/pkg/api/v1/endpoints"
 	jsonutil "github.com/argoproj/gitops-engine/pkg/utils/json"
@@ -71,6 +72,13 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 		live = remarshal(live, o)
 		Normalize(live, opts...)
 	}
+	if o.serverSideApply {
+		r, err := StructuredMergeDiff(config, live, o.parseableType)
+		if err != nil {
+			return nil, fmt.Errorf("error calculating structured merge diff: %w", err)
+		}
+		return r, nil
+	}
 	orig, err := GetLastAppliedConfigAnnotation(live)
 	if err != nil {
 		o.log.V(1).Info(fmt.Sprintf("Failed to get last applied configuration: %v", err))
@@ -85,6 +93,41 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 		}
 	}
 	return TwoWayDiff(config, live)
+}
+
+func StructuredMergeDiff(config, live *unstructured.Unstructured, pt *typed.ParseableType) (*DiffResult, error) {
+	tvLive, err := pt.FromUnstructured(live)
+	if err != nil {
+		return nil, fmt.Errorf("error building parseable type from live resource: %w", err)
+	}
+	tvConfig, err := pt.FromUnstructured(config)
+	if err != nil {
+		return nil, fmt.Errorf("error building parseable type from live resource: %w", err)
+	}
+	tvResult, err := tvLive.Merge(tvConfig)
+	if err != nil {
+		return nil, fmt.Errorf("strategic merge patch error: %w", err)
+	}
+	ru := tvResult.AsValue().Unstructured()
+	r, ok := ru.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("error converting merged typedValue: expected map got %T", ru)
+	}
+	mergedUnstructured := &unstructured.Unstructured{Object: r}
+	mergedBytes, err := json.Marshal(mergedUnstructured)
+	if err != nil {
+		return nil, fmt.Errorf("error while marshaling merged unstructured: %w", err)
+	}
+
+	normBytes, err := json.Marshal(live)
+	if err != nil {
+		return nil, fmt.Errorf("error while marshaling live unstructured: %w", err)
+	}
+	return &DiffResult{
+		Modified:       string(normBytes) != string(mergedBytes),
+		NormalizedLive: normBytes,
+		PredictedLive:  mergedBytes,
+	}, nil
 }
 
 // TwoWayDiff performs a three-way diff and uses specified config as a recently applied config

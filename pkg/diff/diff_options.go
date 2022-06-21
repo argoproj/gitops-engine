@@ -2,8 +2,8 @@ package diff
 
 import (
 	"github.com/go-logr/logr"
-	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	"k8s.io/klog/v2/klogr"
+	"sigs.k8s.io/structured-merge-diff/v4/typed"
 )
 
 type Option func(*options)
@@ -15,7 +15,7 @@ type options struct {
 	normalizer            Normalizer
 	log                   logr.Logger
 	serverSideApply       bool
-	gvkParser             *managedfields.GvkParser
+	parseableType         *typed.ParseableType
 }
 
 func applyOptions(opts []Option) options {
@@ -54,8 +54,8 @@ func WithServerSideApply(ssa bool) Option {
 	}
 }
 
-func WithGVKParser(gvkParser *managedfields.GvkParser) Option {
+func WithParseableType(parseableType *typed.ParseableType) Option {
 	return func(o *options) {
-		o.gvkParser = gvkParser
+		o.parseableType = parseableType
 	}
 }
