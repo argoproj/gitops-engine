@@ -16,9 +16,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/jsonmergepatch"
+	"k8s.io/apimachinery/pkg/util/managedfields"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/kubernetes/scheme"
-	"sigs.k8s.io/structured-merge-diff/v4/typed"
 
 	"github.com/argoproj/gitops-engine/internal/kubernetes_vendor/pkg/api/v1/endpoints"
 	jsonutil "github.com/argoproj/gitops-engine/pkg/utils/json"
@@ -72,8 +72,11 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 		live = remarshal(live, o)
 		Normalize(live, opts...)
 	}
-	if o.serverSideApply {
-		r, err := StructuredMergeDiff(config, live, o.parseableType)
+	// structuredMergeDiff is mainly used as a feature flag to enable
+	// calculating diffs using the structured-merge-diff library
+	// used in k8s while performing server-side applies.
+	if o.structuredMergeDiff {
+		r, err := StructuredMergeDiff(config, live, o.gvkParser)
 		if err != nil {
 			return nil, fmt.Errorf("error calculating structured merge diff: %w", err)
 		}
@@ -95,7 +98,11 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 	return TwoWayDiff(config, live)
 }
 
-func StructuredMergeDiff(config, live *unstructured.Unstructured, pt *typed.ParseableType) (*DiffResult, error) {
+// StructuredMergeDiff will calculate the diff using the structured-merge-diff
+// k8s library (https://github.com/kubernetes-sigs/structured-merge-diff).
+func StructuredMergeDiff(config, live *unstructured.Unstructured, gvkParser *managedfields.GvkParser) (*DiffResult, error) {
+	gvk := config.GetObjectKind().GroupVersionKind()
+	pt := ResolveParseableType(gvk, gvkParser)
 	tvLive, err := pt.FromUnstructured(live)
 	if err != nil {
 		return nil, fmt.Errorf("error building parseable type from live resource: %w", err)
