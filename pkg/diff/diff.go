@@ -105,6 +105,13 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 // StructuredMergeDiff will calculate the diff using the structured-merge-diff
 // k8s library (https://github.com/kubernetes-sigs/structured-merge-diff).
 func StructuredMergeDiff(config, live *unstructured.Unstructured, gvkParser *managedfields.GvkParser) (*DiffResult, error) {
+	if live != nil && config != nil {
+		return structuredMergeDiff(config, live, gvkParser)
+	}
+	return handleResourceCreateOrDeleteDiff(config, live)
+}
+
+func structuredMergeDiff(config, live *unstructured.Unstructured, gvkParser *managedfields.GvkParser) (*DiffResult, error) {
 	gvk := config.GetObjectKind().GroupVersionKind()
 	pt := gescheme.ResolveParseableType(gvk, gvkParser)
 	tvLive, err := pt.FromUnstructured(live.Object)
@@ -145,7 +152,18 @@ func StructuredMergeDiff(config, live *unstructured.Unstructured, gvkParser *man
 func TwoWayDiff(config, live *unstructured.Unstructured) (*DiffResult, error) {
 	if live != nil && config != nil {
 		return ThreeWayDiff(config, config.DeepCopy(), live)
-	} else if live != nil {
+	}
+	return handleResourceCreateOrDeleteDiff(config, live)
+}
+
+// handleResourceCreateOrDeleteDiff will calculate the diff in case of resource creation or
+// deletion. Expects that config or live is nil which means that the resource is being
+// created or being deleted. Will return error if both are nil or if none are nil.
+func handleResourceCreateOrDeleteDiff(config, live *unstructured.Unstructured) (*DiffResult, error) {
+	if live != nil && config != nil {
+		return nil, errors.New("unnexpected state: expected live or config to be null: not create or delete operation")
+	}
+	if live != nil {
 		liveData, err := json.Marshal(live)
 		if err != nil {
 			return nil, err
