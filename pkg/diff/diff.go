@@ -22,6 +22,7 @@ import (
 
 	"github.com/argoproj/gitops-engine/internal/kubernetes_vendor/pkg/api/v1/endpoints"
 	jsonutil "github.com/argoproj/gitops-engine/pkg/utils/json"
+	gescheme "github.com/argoproj/gitops-engine/pkg/utils/kube/scheme"
 	kubescheme "github.com/argoproj/gitops-engine/pkg/utils/kube/scheme"
 )
 
@@ -74,7 +75,10 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 	}
 	// structuredMergeDiff is mainly used as a feature flag to enable
 	// calculating diffs using the structured-merge-diff library
-	// used in k8s while performing server-side applies.
+	// used in k8s while performing server-side applies. It checks the
+	// given diff Option or if the desired state resource has the
+	// Server-Side apply sync option annotation enabled.
+	// structuredMergeDiff := o.structuredMergeDiff || resource.HasAnnotationOption(config, common.AnnotationSyncOptions, common.SyncOptionServerSideApply)
 	if o.structuredMergeDiff {
 		r, err := StructuredMergeDiff(config, live, o.gvkParser)
 		if err != nil {
@@ -102,14 +106,14 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 // k8s library (https://github.com/kubernetes-sigs/structured-merge-diff).
 func StructuredMergeDiff(config, live *unstructured.Unstructured, gvkParser *managedfields.GvkParser) (*DiffResult, error) {
 	gvk := config.GetObjectKind().GroupVersionKind()
-	pt := ResolveParseableType(gvk, gvkParser)
-	tvLive, err := pt.FromUnstructured(live)
+	pt := gescheme.ResolveParseableType(gvk, gvkParser)
+	tvLive, err := pt.FromUnstructured(live.Object)
 	if err != nil {
-		return nil, fmt.Errorf("error building parseable type from live resource: %w", err)
+		return nil, fmt.Errorf("error building typed value from live resource: %w", err)
 	}
-	tvConfig, err := pt.FromUnstructured(config)
+	tvConfig, err := pt.FromUnstructured(config.Object)
 	if err != nil {
-		return nil, fmt.Errorf("error building parseable type from live resource: %w", err)
+		return nil, fmt.Errorf("error building typed value from config resource: %w", err)
 	}
 	tvResult, err := tvLive.Merge(tvConfig)
 	if err != nil {

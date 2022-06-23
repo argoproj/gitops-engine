@@ -1,10 +1,9 @@
-package diff
+package scheme
 
 import (
 	"reflect"
 	"sync"
 
-	"github.com/argoproj/gitops-engine/pkg/utils/kube/scheme"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/managedfields"
 	"sigs.k8s.io/structured-merge-diff/v4/typed"
@@ -30,7 +29,7 @@ func resolveFromStaticParser(gvk schema.GroupVersionKind, parser *managedfields.
 	gvkNameMap := getGvkMap(parser)
 	name := gvkNameMap[gvk]
 
-	p := scheme.StaticParser()
+	p := StaticParser()
 	if p == nil || name == "" {
 		return nil
 	}
