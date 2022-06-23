@@ -122,9 +122,13 @@ func structuredMergeDiff(config, live *unstructured.Unstructured, gvkParser *man
 	if err != nil {
 		return nil, fmt.Errorf("error building typed value from config resource: %w", err)
 	}
-	tvResult, err := tvLive.NormalizeUnions(tvConfig)
+	mergedLive, err := tvLive.Merge(tvConfig)
 	if err != nil {
-		return nil, fmt.Errorf("strategic merge patch error: %w", err)
+		return nil, fmt.Errorf("error merging config into live: %w", err)
+	}
+	tvResult, err := tvLive.NormalizeUnionsApply(mergedLive)
+	if err != nil {
+		return nil, fmt.Errorf("normalize unions error: %w", err)
 	}
 	ru := tvResult.AsValue().Unstructured()
 	r, ok := ru.(map[string]interface{})
