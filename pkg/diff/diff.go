@@ -13,14 +13,14 @@ import (
 
 	jsonpatch "github.com/evanphx/json-patch"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	// metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/jsonmergepatch"
 	"k8s.io/apimachinery/pkg/util/managedfields"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/kubernetes/scheme"
-	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
+	// "sigs.k8s.io/structured-merge-diff/v4/fieldpath"
 
 	"github.com/argoproj/gitops-engine/internal/kubernetes_vendor/pkg/api/v1/endpoints"
 	jsonutil "github.com/argoproj/gitops-engine/pkg/utils/json"
@@ -121,33 +121,38 @@ func structuredMergeDiff(config, live *unstructured.Unstructured, gvkParser *man
 	if err != nil {
 		return nil, fmt.Errorf("error building typed value from live resource: %w", err)
 	}
-
-	managedFields := live.GetManagedFields()
-	var managedFieldEntry metav1.ManagedFieldsEntry
-
-	// search for the given manager
-	managerFound := false
-	for _, mf := range managedFields {
-		if mf.Manager == "argocd-controller" {
-			managedFieldEntry = mf
-			managerFound = true
-			break
-		}
-	}
-	// if manager is found then remove its fields from live state
-	if managerFound {
-		managedFieldSet := &fieldpath.Set{}
-		err := managedFieldSet.FromJSON(bytes.NewReader(managedFieldEntry.FieldsV1.Raw))
-		if err != nil {
-			return nil, fmt.Errorf("error building managed field set: %w", err)
-		}
-		tvLive = tvLive.RemoveItems(managedFieldSet)
-	}
-
 	tvConfig, err := pt.FromUnstructured(config.Object)
 	if err != nil {
 		return nil, fmt.Errorf("error building typed value from config resource: %w", err)
 	}
+
+	configFieldSet, err := tvConfig.ToFieldSet()
+	if err != nil {
+		return nil, fmt.Errorf("error converting typed value config to fieldset: %w", err)
+	}
+	tvLive = tvLive.RemoveItems(configFieldSet)
+
+	// managedFields := live.GetManagedFields()
+	// var managedFieldEntry metav1.ManagedFieldsEntry
+	//
+	// // search for the given manager
+	// managerFound := false
+	// for _, mf := range managedFields {
+	// 	if mf.Manager == "argocd-controller" {
+	// 		managedFieldEntry = mf
+	// 		managerFound = true
+	// 		break
+	// 	}
+	// }
+	// // if manager is found then remove its fields from live state
+	// if managerFound {
+	// 	managedFieldSet := &fieldpath.Set{}
+	// 	err := managedFieldSet.FromJSON(bytes.NewReader(managedFieldEntry.FieldsV1.Raw))
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("error building managed field set: %w", err)
+	// 	}
+	// 	tvLive = tvLive.RemoveItems(managedFieldSet)
+	// }
 	tvResult, err := tvLive.Merge(tvConfig)
 	if err != nil {
 		return nil, fmt.Errorf("merge error: %w", err)
