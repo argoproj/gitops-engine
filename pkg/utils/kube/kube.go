@@ -172,14 +172,19 @@ func IsCRD(obj *unstructured.Unstructured) bool {
 	return IsCRDGroupVersionKind(obj.GroupVersionKind())
 }
 
+// ServerResourceForGroupVersionKind looks up and returns the API resource from
+// the server for a given GVK scheme. If verb is set to the non-empty string,
+// it will return the API resource which supports the verb. There are some edge
+// cases, where the same GVK is represented by more than one API.
+//
 // See: https://github.com/ksonnet/ksonnet/blob/master/utils/client.go
-func ServerResourceForGroupVersionKind(disco discovery.DiscoveryInterface, gvk schema.GroupVersionKind) (*metav1.APIResource, error) {
+func ServerResourceForGroupVersionKind(disco discovery.DiscoveryInterface, gvk schema.GroupVersionKind, verb string) (*metav1.APIResource, error) {
 	resources, err := disco.ServerResourcesForGroupVersion(gvk.GroupVersion().String())
 	if err != nil {
 		return nil, err
 	}
 	for _, r := range resources.APIResources {
-		if r.Kind == gvk.Kind {
+		if r.Kind == gvk.Kind && isSupportedVerb(&r, verb) {
 			return &r, nil
 		}
 	}
