@@ -147,14 +147,24 @@ func structuredMergeDiff(config, live *unstructured.Unstructured, pt *typed.Pars
 	// 3) Remove config fieldset from live so it can be simply merged.
 	// This is necessary to make sure that fields removed from config
 	// are also removed from live when merging them.
-	tvLive = tvLive.RemoveItems(configFieldSet)
+	cleanLive := tvLive.RemoveItems(configFieldSet)
 
 	// 4) Merge config with defaults in cleaned live.
-	tvResult, err := tvLive.Merge(tvConfig)
+	tvResult, err := cleanLive.Merge(tvConfig)
 	if err != nil {
 		return nil, fmt.Errorf("error merging config into live: %w", err)
 	}
-	return buildDiffResult(tvResult, live)
+
+	result, err := tvLive.NormalizeUnionsApply(tvResult)
+	if err != nil {
+		return nil, fmt.Errorf("error normalizing union between live and merged result: %w", err)
+	}
+	// comparison, err := tvResult.Compare(tvLive)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("error comparing merged result with live: %w", err)
+	// }
+	// fmt.Println(comparison.String())
+	return buildDiffResult(result, live)
 }
 
 func buildDiffResult(result *typed.TypedValue, live *unstructured.Unstructured) (*DiffResult, error) {
