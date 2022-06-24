@@ -136,12 +136,7 @@ func structuredMergeDiff(config, live *unstructured.Unstructured, gvkParser *man
 	if err != nil {
 		return nil, fmt.Errorf("error building typed value from live resource: %w", err)
 	}
-	liveFieldSet, err := tvLive.ToFieldSet()
-	if err != nil {
-		return nil, fmt.Errorf("error building live field set: %w", err)
-	}
-	unmanagedFieldSet := liveFieldSet.Difference(managedFieldSet)
-	tvLive = tvLive.RemoveItems(unmanagedFieldSet)
+	tvLive = tvLive.ExtractItems(managedFieldSet)
 
 	tvConfig, err := pt.FromUnstructured(config.Object)
 	if err != nil {
