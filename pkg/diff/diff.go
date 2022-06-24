@@ -155,7 +155,7 @@ func structuredMergeDiff(config, live *unstructured.Unstructured, pt *typed.Pars
 		return nil, fmt.Errorf("error merging config into live: %w", err)
 	}
 
-	result, err := tvLive.NormalizeUnionsApply(tvResult)
+	result, err := tvResult.NormalizeUnionsApply(tvLive)
 	if err != nil {
 		return nil, fmt.Errorf("error normalizing union between live and merged result: %w", err)
 	}
