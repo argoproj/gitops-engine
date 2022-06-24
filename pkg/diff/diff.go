@@ -126,34 +126,32 @@ func structuredMergeDiff(config, live *unstructured.Unstructured, gvkParser *man
 		return nil, fmt.Errorf("error building typed value from config resource: %w", err)
 	}
 
+	// 1) Extract config fields from live resource.
+	liveFieldSet, err := tvLive.ToFieldSet()
+	if err != nil {
+		return nil, fmt.Errorf("error converting live typed value to fieldset: %w", err)
+	}
 	configFieldSet, err := tvConfig.ToFieldSet()
 	if err != nil {
-		return nil, fmt.Errorf("error converting typed value config to fieldset: %w", err)
+		return nil, fmt.Errorf("error converting config typed value to fieldset: %w", err)
 	}
+	intersectionFieldSet := liveFieldSet.Intersection(configFieldSet)
+	extracted := tvLive.ExtractItems(intersectionFieldSet)
+
+	// 2) Merge config state into extracted fields so default
+	// values are preserved.
+	tvConfigWithDefaults, err := extracted.Merge(tvConfig)
+	if err != nil {
+		return nil, fmt.Errorf("error merging config typed value in extracted defaults, %w", err)
+	}
+
+	// 3) Remove config fieldset from live so it can be simply merged.
+	// This is necessary to make sure that fields removed from config
+	// are also removed from live when merging them.
 	tvLive = tvLive.RemoveItems(configFieldSet)
 
-	// managedFields := live.GetManagedFields()
-	// var managedFieldEntry metav1.ManagedFieldsEntry
-	//
-	// // search for the given manager
-	// managerFound := false
-	// for _, mf := range managedFields {
-	// 	if mf.Manager == "argocd-controller" {
-	// 		managedFieldEntry = mf
-	// 		managerFound = true
-	// 		break
-	// 	}
-	// }
-	// // if manager is found then remove its fields from live state
-	// if managerFound {
-	// 	managedFieldSet := &fieldpath.Set{}
-	// 	err := managedFieldSet.FromJSON(bytes.NewReader(managedFieldEntry.FieldsV1.Raw))
-	// 	if err != nil {
-	// 		return nil, fmt.Errorf("error building managed field set: %w", err)
-	// 	}
-	// 	tvLive = tvLive.RemoveItems(managedFieldSet)
-	// }
-	tvResult, err := tvLive.Merge(tvConfig)
+	// 4) Merge config with defaults in cleaned live.
+	tvResult, err := tvLive.Merge(tvConfigWithDefaults)
 	if err != nil {
 		return nil, fmt.Errorf("merge error: %w", err)
 	}
@@ -168,13 +166,13 @@ func structuredMergeDiff(config, live *unstructured.Unstructured, gvkParser *man
 		return nil, fmt.Errorf("error while marshaling merged unstructured: %w", err)
 	}
 
-	normBytes, err := json.Marshal(live)
+	liveBytes, err := json.Marshal(live)
 	if err != nil {
 		return nil, fmt.Errorf("error while marshaling live unstructured: %w", err)
 	}
 	return &DiffResult{
-		Modified:       string(normBytes) != string(mergedBytes),
-		NormalizedLive: normBytes,
+		Modified:       string(liveBytes) != string(mergedBytes),
+		NormalizedLive: liveBytes,
 		PredictedLive:  mergedBytes,
 	}, nil
 }
