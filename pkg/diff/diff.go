@@ -13,14 +13,13 @@ import (
 
 	jsonpatch "github.com/evanphx/json-patch"
 	corev1 "k8s.io/api/core/v1"
-	// metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/jsonmergepatch"
 	"k8s.io/apimachinery/pkg/util/managedfields"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/kubernetes/scheme"
-	// "sigs.k8s.io/structured-merge-diff/v4/fieldpath"
+	"sigs.k8s.io/structured-merge-diff/v4/typed"
 
 	"github.com/argoproj/gitops-engine/internal/kubernetes_vendor/pkg/api/v1/endpoints"
 	jsonutil "github.com/argoproj/gitops-engine/pkg/utils/json"
@@ -108,15 +107,14 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 // k8s library (https://github.com/kubernetes-sigs/structured-merge-diff).
 func StructuredMergeDiff(config, live *unstructured.Unstructured, gvkParser *managedfields.GvkParser) (*DiffResult, error) {
 	if live != nil && config != nil {
-		return structuredMergeDiff(config, live, gvkParser)
+		gvk := config.GetObjectKind().GroupVersionKind()
+		pt := gescheme.ResolveParseableType(gvk, gvkParser)
+		return structuredMergeDiff(config, live, pt)
 	}
 	return handleResourceCreateOrDeleteDiff(config, live)
 }
 
-func structuredMergeDiff(config, live *unstructured.Unstructured, gvkParser *managedfields.GvkParser) (*DiffResult, error) {
-	gvk := config.GetObjectKind().GroupVersionKind()
-	pt := gescheme.ResolveParseableType(gvk, gvkParser)
-
+func structuredMergeDiff(config, live *unstructured.Unstructured, pt *typed.ParseableType) (*DiffResult, error) {
 	tvLive, err := pt.FromUnstructured(live.Object)
 	if err != nil {
 		return nil, fmt.Errorf("error building typed value from live resource: %w", err)
@@ -127,23 +125,24 @@ func structuredMergeDiff(config, live *unstructured.Unstructured, gvkParser *man
 	}
 
 	// 1) Extract config fields from live resource.
-	liveFieldSet, err := tvLive.ToFieldSet()
-	if err != nil {
-		return nil, fmt.Errorf("error converting live typed value to fieldset: %w", err)
-	}
+	// liveFieldSet, err := tvLive.ToFieldSet()
+	// if err != nil {
+	// 	return nil, fmt.Errorf("error converting live typed value to fieldset: %w", err)
+	// }
 	configFieldSet, err := tvConfig.ToFieldSet()
 	if err != nil {
 		return nil, fmt.Errorf("error converting config typed value to fieldset: %w", err)
 	}
-	intersectionFieldSet := liveFieldSet.Intersection(configFieldSet)
-	extracted := tvLive.ExtractItems(intersectionFieldSet)
+	// intersectionFieldSet := liveFieldSet.Intersection(configFieldSet)
+	// extracted := tvLive.ExtractItems(intersectionFieldSet)
+	// extracted := tvLive.ExtractItems(configFieldSet).
 
 	// 2) Merge config state into extracted fields so default
 	// values are preserved.
-	tvConfigWithDefaults, err := extracted.Merge(tvConfig)
-	if err != nil {
-		return nil, fmt.Errorf("error merging config typed value in extracted defaults, %w", err)
-	}
+	// tvConfigWithDefaults, err := tvConfig.Merge(extracted)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("error merging config typed value in extracted defaults, %w", err)
+	// }
 
 	// 3) Remove config fieldset from live so it can be simply merged.
 	// This is necessary to make sure that fields removed from config
@@ -151,14 +150,18 @@ func structuredMergeDiff(config, live *unstructured.Unstructured, gvkParser *man
 	tvLive = tvLive.RemoveItems(configFieldSet)
 
 	// 4) Merge config with defaults in cleaned live.
-	tvResult, err := tvLive.Merge(tvConfigWithDefaults)
+	tvResult, err := tvLive.Merge(tvConfig)
 	if err != nil {
-		return nil, fmt.Errorf("merge error: %w", err)
+		return nil, fmt.Errorf("error merging config into live: %w", err)
 	}
-	ru := tvResult.AsValue().Unstructured()
+	return buildDiffResult(tvResult, live)
+}
+
+func buildDiffResult(result *typed.TypedValue, live *unstructured.Unstructured) (*DiffResult, error) {
+	ru := result.AsValue().Unstructured()
 	r, ok := ru.(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("error converting merged typedValue: expected map got %T", ru)
+		return nil, fmt.Errorf("error converting result typedValue: expected map got %T", ru)
 	}
 	mergedUnstructured := &unstructured.Unstructured{Object: r}
 	mergedBytes, err := json.Marshal(mergedUnstructured)
