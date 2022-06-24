@@ -117,26 +117,32 @@ func structuredMergeDiff(config, live *unstructured.Unstructured, gvkParser *man
 	gvk := config.GetObjectKind().GroupVersionKind()
 	pt := gescheme.ResolveParseableType(gvk, gvkParser)
 
-	managedFields := live.GetManagedFields()
-	var managedFieldEntry metav1.ManagedFieldsEntry
-
-	for _, mf := range managedFields {
-		if mf.Manager == "argocd-controller" {
-			managedFieldEntry = mf
-			break
-		}
-	}
-	managedFieldSet := &fieldpath.Set{}
-	err := managedFieldSet.FromJSON(bytes.NewReader(managedFieldEntry.FieldsV1.Raw))
-	if err != nil {
-		return nil, fmt.Errorf("error building managed field set: %w", err)
-	}
-
 	tvLive, err := pt.FromUnstructured(live.Object)
 	if err != nil {
 		return nil, fmt.Errorf("error building typed value from live resource: %w", err)
 	}
-	tvLive = tvLive.RemoveItems(managedFieldSet)
+
+	managedFields := live.GetManagedFields()
+	var managedFieldEntry metav1.ManagedFieldsEntry
+
+	// search for the given manager
+	managerFound := false
+	for _, mf := range managedFields {
+		if mf.Manager == "argocd-controller" {
+			managedFieldEntry = mf
+			managerFound = true
+			break
+		}
+	}
+	// if manager is found then remove its fields from live state
+	if managerFound {
+		managedFieldSet := &fieldpath.Set{}
+		err := managedFieldSet.FromJSON(bytes.NewReader(managedFieldEntry.FieldsV1.Raw))
+		if err != nil {
+			return nil, fmt.Errorf("error building managed field set: %w", err)
+		}
+		tvLive = tvLive.RemoveItems(managedFieldSet)
+	}
 
 	tvConfig, err := pt.FromUnstructured(config.Object)
 	if err != nil {
