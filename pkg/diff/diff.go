@@ -124,6 +124,10 @@ func structuredMergeDiff(config, live *unstructured.Unstructured, pt *typed.Pars
 		return nil, fmt.Errorf("error building typed value from config resource: %w", err)
 	}
 
+	mergedLive, err := tvLive.Merge(tvConfig)
+	if err != nil {
+		return nil, fmt.Errorf("error merging config into live: %w", err)
+	}
 	// 1) Extract config fields from live resource.
 	// liveFieldSet, err := tvLive.ToFieldSet()
 	// if err != nil {
@@ -131,12 +135,17 @@ func structuredMergeDiff(config, live *unstructured.Unstructured, pt *typed.Pars
 	// }
 	configFieldSet, err := tvConfig.ToFieldSet()
 	if err != nil {
-		return nil, fmt.Errorf("error converting config typed value to fieldset: %w", err)
+		return nil, fmt.Errorf("error converting config to fieldset: %w", err)
 	}
 	extracted := tvLive.ExtractItems(configFieldSet)
-	extractedfs, _ := extracted.ToFieldSet()
-	toRemove := configFieldSet.Difference(extractedfs)
-	cleanLive := tvLive.RemoveItems(toRemove)
+	extractedFieldSet, err := extracted.ToFieldSet()
+	if err != nil {
+		return nil, fmt.Errorf("error converting extracted to fieldset: %w", err)
+	}
+	diffFieldSet := extractedFieldSet.Difference(configFieldSet)
+	tvResult := mergedLive.RemoveItems(diffFieldSet)
+
+	// cleanLive := tvLive.RemoveItems(configFieldSet)
 	// extracted := tvLive.ExtractItems(intersectionFieldSet)
 
 	// 2) Merge config state into extracted fields so default
@@ -152,10 +161,10 @@ func structuredMergeDiff(config, live *unstructured.Unstructured, pt *typed.Pars
 	// cleanLive := tvLive.RemoveItems(configFieldSet)
 
 	// 4) Merge config with defaults in cleaned live.
-	tvResult, err := cleanLive.Merge(tvConfig)
-	if err != nil {
-		return nil, fmt.Errorf("error merging config into live: %w", err)
-	}
+	// tvResult, err := cleanLive.Merge(configWithDefaults)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("error merging config into live: %w", err)
+	// }
 
 	// result, err := tvResult.NormalizeUnionsApply(tvLive)
 	// if err != nil {
