@@ -124,10 +124,10 @@ func structuredMergeDiff(config, live *unstructured.Unstructured, pt *typed.Pars
 		return nil, fmt.Errorf("error building typed value from config resource: %w", err)
 	}
 
-	mergedLive, err := tvLive.Merge(tvConfig)
-	if err != nil {
-		return nil, fmt.Errorf("error merging config into live: %w", err)
-	}
+	// mergedLive, err := tvLive.Merge(tvConfig)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("error merging config into live: %w", err)
+	// }
 	// liveFieldSet, err := tvLive.ToFieldSet()
 	// if err != nil {
 	// 	return nil, fmt.Errorf("error converting live to fieldset: %w", err)
@@ -142,15 +142,16 @@ func structuredMergeDiff(config, live *unstructured.Unstructured, pt *typed.Pars
 	if err != nil {
 		return nil, fmt.Errorf("error merging config into clean live: %w", err)
 	}
-	comparison, err := mergedLive.Compare(mergedCleanLive)
-	if err != nil {
-		return nil, fmt.Errorf("error comparing live with clean live: %w", err)
-	}
-	tvResult := mergedLive
-	if !comparison.Removed.Empty() {
-		tvResult = mergedLive.RemoveItems(comparison.Removed)
-	}
-
+	tvResult := mergedCleanLive
+	// comparison, err := mergedLive.Compare(mergedCleanLive)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("error comparing live with clean live: %w", err)
+	// }
+	// tvResult := mergedLive
+	// if !comparison.Removed.Empty() {
+	// 	tvResult = mergedLive.RemoveItems(comparison.Removed)
+	// }
+	//
 	// cleanLive := tvLive.RemoveItems(configFieldSet)
 	// extracted := tvLive.ExtractItems(intersectionFieldSet)
 
