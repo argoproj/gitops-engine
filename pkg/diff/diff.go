@@ -208,6 +208,18 @@ func buildDiffResult(result *typed.TypedValue, live *unstructured.Unstructured) 
 		if err != nil {
 			return nil, fmt.Errorf("error while marshaling merged object: %w", err)
 		}
+
+		// keep order
+		var result map[string]interface{}
+		err = json.Unmarshal(mergedBytes, &result)
+		if err != nil {
+			return nil, err
+		}
+		mergedBytes, err = json.Marshal(result)
+		if err != nil {
+			return nil, err
+		}
+
 	}
 
 	liveBytes, err := json.Marshal(live)
