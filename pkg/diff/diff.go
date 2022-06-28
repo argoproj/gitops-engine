@@ -193,14 +193,19 @@ func buildDiffResult(result *typed.TypedValue, live *unstructured.Unstructured) 
 	}
 	mergedUnstructured := &unstructured.Unstructured{Object: r}
 
+	mergedBytes := []byte{}
 	obj, err := scheme.Scheme.New(mergedUnstructured.GroupVersionKind())
 	if err != nil {
-		return nil, fmt.Errorf("error building new runtime Object: %w", err)
-	}
-	kubescheme.Scheme.Default(obj)
-	mergedBytes, err := json.Marshal(obj)
-	if err != nil {
-		return nil, fmt.Errorf("error while marshaling merged unstructured: %w", err)
+		mergedBytes, err = json.Marshal(mergedUnstructured)
+		if err != nil {
+			return nil, fmt.Errorf("error while marshaling merged unstructured: %w", err)
+		}
+	} else {
+		kubescheme.Scheme.Default(obj)
+		mergedBytes, err = json.Marshal(obj)
+		if err != nil {
+			return nil, fmt.Errorf("error while marshaling merged object: %w", err)
+		}
 	}
 
 	liveBytes, err := json.Marshal(live)
