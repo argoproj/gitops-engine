@@ -192,8 +192,13 @@ func buildDiffResult(result *typed.TypedValue, live *unstructured.Unstructured) 
 		return nil, fmt.Errorf("error converting result typedValue: expected map got %T", ru)
 	}
 	mergedUnstructured := &unstructured.Unstructured{Object: r}
-	kubescheme.Scheme.Default(mergedUnstructured)
-	mergedBytes, err := json.Marshal(mergedUnstructured)
+
+	obj, err := scheme.Scheme.New(mergedUnstructured.GroupVersionKind())
+	if err != nil {
+		return nil, fmt.Errorf("error building new runtime Object: %w", err)
+	}
+	kubescheme.Scheme.Default(obj)
+	mergedBytes, err := json.Marshal(obj)
 	if err != nil {
 		return nil, fmt.Errorf("error while marshaling merged unstructured: %w", err)
 	}
