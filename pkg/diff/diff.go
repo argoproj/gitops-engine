@@ -203,23 +203,11 @@ func buildDiffResult(result *typed.TypedValue, live *unstructured.Unstructured) 
 		if err != nil {
 			return nil, fmt.Errorf("error unmarshaling merged bytes into object: %w", err)
 		}
-		kubescheme.Scheme.Default(obj)
-		mergedBytes, err = json.Marshal(obj)
-		if err != nil {
-			return nil, fmt.Errorf("error while marshaling merged object: %w", err)
-		}
 
-		// keep order
-		var result map[string]interface{}
-		err = json.Unmarshal(mergedBytes, &result)
+		mergedBytes, err = applySchemeDefauts(mergedBytes, obj)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error applying defaults: %w", err)
 		}
-		mergedBytes, err = json.Marshal(result)
-		if err != nil {
-			return nil, err
-		}
-
 	}
 
 	liveBytes, err := json.Marshal(live)
@@ -379,6 +367,42 @@ func applyPatch(liveBytes []byte, patchBytes []byte, newVersionedObject func() (
 	}
 
 	return liveBytes, predictedLiveBytes, nil
+}
+
+func applySchemeDefauts(objBytes []byte, obj runtime.Object) ([]byte, error) {
+	// 1) Calls 'kubescheme.Scheme.Default(predictedLive)' and generates a patch containing the delta of that
+	// call, which can then be applied to predictedLiveBytes.
+	//
+	// Why do we do this? Since predictedLive is "tainted" (missing extra fields), we cannot use it to populate
+	// predictedLiveBytes, BUT we still need predictedLive itself in order to call the default scheme functions.
+	// So, we call the default scheme functions on the "tainted" struct, to generate a patch, and then
+	// apply that patch to the untainted JSON.
+	patch, err := generateSchemeDefaultPatch(obj)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2) Apply the default-funcs patch against the original "untainted" JSON
+	// This allows us to apply the scheme default values generated above, against JSON that does not fully conform
+	// to its k8s resource type (eg the JSON may contain those invalid fields that we do not wish to discard).
+	patchedBytes, err := strategicpatch.StrategicMergePatch(objBytes, patch, obj)
+	if err != nil {
+		return nil, err
+	}
+
+	// 3) Unmarshall into a map[string]interface{}, then back into byte[], to ensure the fields
+	// are sorted in a consistent order (we do the same below, so that they can be
+	// lexicographically compared with one another)
+	var result map[string]interface{}
+	err = json.Unmarshal([]byte(patchedBytes), &result)
+	if err != nil {
+		return nil, err
+	}
+	patchedBytes, err = json.Marshal(result)
+	if err != nil {
+		return nil, err
+	}
+	return patchedBytes, nil
 }
 
 // ThreeWayDiff performs a diff with the understanding of how to incorporate the
