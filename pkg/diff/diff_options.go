@@ -16,6 +16,7 @@ type options struct {
 	log                   logr.Logger
 	structuredMergeDiff   bool
 	gvkParser             *managedfields.GvkParser
+	manager               string
 }
 
 func applyOptions(opts []Option) options {
@@ -57,5 +58,11 @@ func WithStructuredMergeDiff(smd bool) Option {
 func WithGVKParser(parser *managedfields.GvkParser) Option {
 	return func(o *options) {
 		o.gvkParser = parser
+	}
+}
+
+func WithManager(manager string) Option {
+	return func(o *options) {
+		o.manager = manager
 	}
 }
