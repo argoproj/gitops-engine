@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/structured-merge-diff/v4/typed"
 
 	"github.com/argoproj/gitops-engine/internal/kubernetes_vendor/pkg/api/v1/endpoints"
+	"github.com/argoproj/gitops-engine/pkg/sync/resource"
 	jsonutil "github.com/argoproj/gitops-engine/pkg/utils/json"
 	gescheme "github.com/argoproj/gitops-engine/pkg/utils/kube/scheme"
 	kubescheme "github.com/argoproj/gitops-engine/pkg/utils/kube/scheme"
@@ -79,8 +80,8 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 	// used in k8s while performing server-side applies. It checks the
 	// given diff Option or if the desired state resource has the
 	// Server-Side apply sync option annotation enabled.
-	// structuredMergeDiff := o.structuredMergeDiff || resource.HasAnnotationOption(config, common.AnnotationSyncOptions, common.SyncOptionServerSideApply)
-	if o.structuredMergeDiff {
+	structuredMergeDiff := o.structuredMergeDiff || resource.HasAnnotationOption(config, "argocd.argoproj.io/sync-options", "ServerSideApply=true")
+	if structuredMergeDiff {
 		r, err := StructuredMergeDiff(config, live, o.gvkParser)
 		if err != nil {
 			return nil, fmt.Errorf("error calculating structured merge diff: %w", err)
@@ -124,14 +125,6 @@ func structuredMergeDiff(config, live *unstructured.Unstructured, pt *typed.Pars
 		return nil, fmt.Errorf("error building typed value from config resource: %w", err)
 	}
 
-	// mergedLive, err := tvLive.Merge(tvConfig)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("error merging config into live: %w", err)
-	// }
-	// liveFieldSet, err := tvLive.ToFieldSet()
-	// if err != nil {
-	// 	return nil, fmt.Errorf("error converting live to fieldset: %w", err)
-	// }
 	configFieldSet, err := tvConfig.ToFieldSet()
 	if err != nil {
 		return nil, fmt.Errorf("error converting config to fieldset: %w", err)
@@ -143,45 +136,6 @@ func structuredMergeDiff(config, live *unstructured.Unstructured, pt *typed.Pars
 		return nil, fmt.Errorf("error merging config into clean live: %w", err)
 	}
 	tvResult := mergedCleanLive
-	// comparison, err := mergedLive.Compare(mergedCleanLive)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("error comparing live with clean live: %w", err)
-	// }
-	// tvResult := mergedLive
-	// if !comparison.Removed.Empty() {
-	// 	tvResult = mergedLive.RemoveItems(comparison.Removed)
-	// }
-	//
-	// cleanLive := tvLive.RemoveItems(configFieldSet)
-	// extracted := tvLive.ExtractItems(intersectionFieldSet)
-
-	// 2) Merge config state into extracted fields so default
-	// values are preserved.
-	// tvConfigWithDefaults, err := tvConfig.Merge(extracted)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("error merging config typed value in extracted defaults, %w", err)
-	// }
-
-	// 3) Remove config fieldset from live so it can be simply merged.
-	// This is necessary to make sure that fields removed from config
-	// are also removed from live when merging them.
-	// cleanLive := tvLive.RemoveItems(configFieldSet)
-
-	// 4) Merge config with defaults in cleaned live.
-	// tvResult, err := cleanLive.Merge(configWithDefaults)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("error merging config into live: %w", err)
-	// }
-
-	// result, err := tvResult.NormalizeUnionsApply(tvLive)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("error normalizing union between live and merged result: %w", err)
-	// }
-	// comparison, err := tvResult.Compare(tvLive)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("error comparing merged result with live: %w", err)
-	// }
-	// fmt.Println(comparison.String())
 	return buildDiffResult(tvResult, live)
 }
 
@@ -203,7 +157,6 @@ func buildDiffResult(result *typed.TypedValue, live *unstructured.Unstructured) 
 		if err != nil {
 			return nil, fmt.Errorf("error unmarshaling merged bytes into object: %w", err)
 		}
-
 		mergedBytes, err = applySchemeDefauts(mergedBytes, obj)
 		if err != nil {
 			return nil, fmt.Errorf("error applying defaults: %w", err)
@@ -370,37 +323,30 @@ func applyPatch(liveBytes []byte, patchBytes []byte, newVersionedObject func() (
 }
 
 func applySchemeDefauts(objBytes []byte, obj runtime.Object) ([]byte, error) {
-	// 1) Calls 'kubescheme.Scheme.Default(predictedLive)' and generates a patch containing the delta of that
-	// call, which can then be applied to predictedLiveBytes.
-	//
-	// Why do we do this? Since predictedLive is "tainted" (missing extra fields), we cannot use it to populate
-	// predictedLiveBytes, BUT we still need predictedLive itself in order to call the default scheme functions.
-	// So, we call the default scheme functions on the "tainted" struct, to generate a patch, and then
-	// apply that patch to the untainted JSON.
+	// 1) Call 'kubescheme.Scheme.Default(obj)' to generate a patch containing
+	// the default values for the given scheme.
 	patch, err := generateSchemeDefaultPatch(obj)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error generating patch for default values: %w", err)
 	}
 
-	// 2) Apply the default-funcs patch against the original "untainted" JSON
-	// This allows us to apply the scheme default values generated above, against JSON that does not fully conform
-	// to its k8s resource type (eg the JSON may contain those invalid fields that we do not wish to discard).
+	// 2) Apply the patch with default values in objBytes.
 	patchedBytes, err := strategicpatch.StrategicMergePatch(objBytes, patch, obj)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error applying patch for default values: %w", err)
 	}
 
-	// 3) Unmarshall into a map[string]interface{}, then back into byte[], to ensure the fields
-	// are sorted in a consistent order (we do the same below, so that they can be
-	// lexicographically compared with one another)
+	// 3) Unmarshall into a map[string]interface{}, then back into byte[], to
+	// ensure the fields are sorted in a consistent order (we do the same below,
+	// so that they can be lexicographically compared with one another).
 	var result map[string]interface{}
 	err = json.Unmarshal([]byte(patchedBytes), &result)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error unmarshaling patched bytes: %w", err)
 	}
 	patchedBytes, err = json.Marshal(result)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error marshaling patched bytes: %w", err)
 	}
 	return patchedBytes, nil
 }
