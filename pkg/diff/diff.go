@@ -76,12 +76,21 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 		live = remarshal(live, o)
 		Normalize(live, opts...)
 	}
+
+	// TODO The two variables bellow are necessary because there is a cyclic
+	// dependency with the kube package that blocks the usage of constants
+	// from common package. common package needs to be refactored and exclude
+	// dependency from kube.
+	syncOptAnnotation := "argocd.argoproj.io/sync-options"
+	ssaAnnotation := "ServerSideApply=true"
+
 	// structuredMergeDiff is mainly used as a feature flag to enable
 	// calculating diffs using the structured-merge-diff library
 	// used in k8s while performing server-side applies. It checks the
 	// given diff Option or if the desired state resource has the
 	// Server-Side apply sync option annotation enabled.
-	structuredMergeDiff := o.structuredMergeDiff || resource.HasAnnotationOption(config, "argocd.argoproj.io/sync-options", "ServerSideApply=true")
+	structuredMergeDiff := o.structuredMergeDiff ||
+		(config != nil && resource.HasAnnotationOption(config, syncOptAnnotation, ssaAnnotation))
 	if structuredMergeDiff {
 		r, err := StructuredMergeDiff(config, live, o.gvkParser, o.manager)
 		if err != nil {
