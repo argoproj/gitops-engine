@@ -179,16 +179,24 @@ func IsCRD(obj *unstructured.Unstructured) bool {
 //
 // See: https://github.com/ksonnet/ksonnet/blob/master/utils/client.go
 func ServerResourceForGroupVersionKind(disco discovery.DiscoveryInterface, gvk schema.GroupVersionKind, verb string) (*metav1.APIResource, error) {
+	// default is to return a not found for the requested resource
+	retErr := apierr.NewNotFound(schema.GroupResource{Group: gvk.Group, Resource: gvk.Kind}, "")
 	resources, err := disco.ServerResourcesForGroupVersion(gvk.GroupVersion().String())
 	if err != nil {
 		return nil, err
 	}
 	for _, r := range resources.APIResources {
-		if r.Kind == gvk.Kind && isSupportedVerb(&r, verb) {
-			return &r, nil
+		if r.Kind == gvk.Kind {
+			if isSupportedVerb(&r, verb) {
+				return &r, nil
+			} else {
+				// We have a match, but the API does not support the action
+				// that was requested. Memorize this.
+				retErr = apierr.NewMethodNotSupported(schema.GroupResource{Group: gvk.Group, Resource: gvk.Kind}, verb)
+			}
 		}
 	}
-	return nil, apierr.NewNotFound(schema.GroupResource{Group: gvk.Group, Resource: gvk.Kind}, "")
+	return nil, retErr
 }
 
 var (
