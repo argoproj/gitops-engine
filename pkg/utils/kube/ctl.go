@@ -307,7 +307,7 @@ func (k *KubectlCmd) GetServerVersion(config *rest.Config) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%s.%s", v.Major, v.Minor), nil
+	return fmt.Sprintf("%s", v.GitCommit), nil
 }
 
 func (k *KubectlCmd) NewDynamicClient(config *rest.Config) (dynamic.Interface, error) {
