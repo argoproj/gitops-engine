@@ -800,6 +800,20 @@ func TestStructuredMergeDiff(t *testing.T) {
 		assert.NotNil(t, result)
 		assert.Equal(t, string(expectedLiveBytes), string(result.PredictedLive))
 	})
+	t.Run("will apply service with multiple ports", func(t *testing.T) {
+		// given
+		liveState := StrToUnstructured(testdata.ServiceLiveYAML)
+		desiredState := StrToUnstructured(testdata.ServiceConfigWithSamePortsYAML)
+
+		// when
+		result, err := structuredMergeDiff(desiredState, liveState, &svcParseType, manager)
+
+		// then
+		require.NoError(t, err)
+		assert.NotNil(t, result)
+		svc := YamlToSvc(t, result.PredictedLive)
+		assert.Equal(t, 5, len(svc.Spec.Ports))
+	})
 }
 
 func createSecret(data map[string]string) *unstructured.Unstructured {
@@ -1048,6 +1062,16 @@ func diffOptionsForTest() []Option {
 		WithLogr(klogr.New()),
 		IgnoreAggregatedRoles(false),
 	}
+}
+
+func YamlToSvc(t *testing.T, y []byte) *corev1.Service {
+	t.Helper()
+	svc := corev1.Service{}
+	err := yaml.Unmarshal(y, &svc)
+	if err != nil {
+		t.Fatalf("error unmarshaling service bytes: %s", err)
+	}
+	return &svc
 }
 
 func StrToUnstructured(yamlStr string) *unstructured.Unstructured {

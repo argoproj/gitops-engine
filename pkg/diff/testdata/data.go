@@ -20,4 +20,7 @@ var (
 
 	//go:embed smd-service-live-with-type.yaml
 	LiveServiceWithTypeYAML string
+
+	//go:embed smd-service-config-ports.yaml
+	ServiceConfigWithSamePortsYAML string
 )
