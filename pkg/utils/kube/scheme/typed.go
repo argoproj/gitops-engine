@@ -28,9 +28,12 @@ func ResolveParseableType(gvk schema.GroupVersionKind, parser *managedfields.Gvk
 func resolveFromStaticParser(gvk schema.GroupVersionKind, parser *managedfields.GvkParser) *typed.ParseableType {
 	gvkNameMap := getGvkMap(parser)
 	name := gvkNameMap[gvk]
+	if name == "" {
+		return nil
+	}
 
 	p := StaticParser()
-	if p == nil || name == "" {
+	if p == nil {
 		return nil
 	}
 	pt := p.Type(name)
