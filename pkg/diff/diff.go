@@ -184,7 +184,7 @@ func structuredMergeDiff(config, live *unstructured.Unstructured, pt *typed.Pars
 		return nil, fmt.Errorf("error applying default values in live: %w", err)
 	}
 
-	return buildDiffResult(predictedLive, taintedLive)
+	return buildDiffResult(predictedLive, taintedLive), nil
 }
 
 func applyDefaultValues(result *typed.TypedValue) ([]byte, error) {
@@ -213,13 +213,12 @@ func applyDefaultValues(result *typed.TypedValue) ([]byte, error) {
 	return mergedBytes, nil
 }
 
-func buildDiffResult(predictedBytes []byte, liveBytes []byte) (*DiffResult, error) {
-
+func buildDiffResult(predictedBytes []byte, liveBytes []byte) *DiffResult {
 	return &DiffResult{
 		Modified:       string(liveBytes) != string(predictedBytes),
 		NormalizedLive: liveBytes,
 		PredictedLive:  predictedBytes,
-	}, nil
+	}
 }
 
 // TwoWayDiff performs a three-way diff and uses specified config as a recently applied config
@@ -431,13 +430,7 @@ func ThreeWayDiff(orig, config, live *unstructured.Unstructured) (*DiffResult, e
 		return nil, err
 	}
 
-	// 3. compare live and expected live object
-	dr := DiffResult{
-		PredictedLive:  predictedLiveBytes,
-		NormalizedLive: liveBytes,
-		Modified:       string(predictedLiveBytes) != string(liveBytes),
-	}
-	return &dr, nil
+	return buildDiffResult(predictedLiveBytes, liveBytes), nil
 }
 
 // stripTypeInformation strips any type information (e.g. float64 vs. int) from the unstructured
