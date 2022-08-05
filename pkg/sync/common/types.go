@@ -140,3 +140,10 @@ type ResourceSyncResult struct {
 	// indicates the particular phase of the sync that this is for
 	SyncPhase SyncPhase
 }
+
+// NamespaceMetadata is a metadata that namespace can have, includes all the objects
+// users want to create.
+type NamespaceMetadata struct {
+	Annotations map[string]string
+	Labels      map[string]string
+}
