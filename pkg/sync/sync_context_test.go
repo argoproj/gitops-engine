@@ -785,7 +785,7 @@ func TestNamespaceAutoCreation(t *testing.T) {
 			Version:     task.version(),
 			Status:      task.syncStatus,
 			Message:     task.message,
-			HookType:    task.hookType(),git 
+			HookType:    task.hookType(),
 			HookPhase:   task.operationState,
 			SyncPhase:   task.phase,
 		}
