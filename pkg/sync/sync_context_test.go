@@ -842,7 +842,7 @@ func TestNamespaceAutoCreationForNotExistNs(t *testing.T) {
 
 		assert.True(t, creatorCalled)
 		assert.True(t, successful)
-		assert.Len(t, tasks, 2)
+		assert.Len(t, tasks, 1)
 	})
 
 }
