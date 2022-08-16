@@ -794,9 +794,8 @@ func (sc *syncContext) autoCreateNamespace(tasks syncTasks) syncTasks {
 					}
 				}
 			} else if apierr.IsNotFound(err) {
-				unstructuredObjCopy := unstructuredObj.DeepCopy()
-				if sc.namespaceCreator(unstructuredObjCopy) {
-					tasks = append(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObjCopy, liveObj: nil})
+				if sc.namespaceCreator(unstructuredObj) {
+					tasks = append(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj, liveObj: nil})
 				}
 			} else {
 				task := &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj}
