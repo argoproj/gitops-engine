@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	errors2 "k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"reflect"
 	"testing"
@@ -801,7 +801,7 @@ func TestNamespaceAutoCreation(t *testing.T) {
 
 func TestNamespaceAutoCreationForNotExistNs(t *testing.T) {
 	getResourceFunc := func(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string) (*unstructured.Unstructured, error) {
-		return nil, errors2.NewNotFound(schema.GroupResource{}, FakeArgoCDNamespace)
+		return nil, apierrors.NewNotFound(schema.GroupResource{}, FakeArgoCDNamespace)
 	}
 
 	pod := NewPod()
