@@ -17,6 +17,7 @@ import (
 	apierr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
@@ -695,9 +696,18 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 		task.liveObj = sc.liveObj(task.targetObj)
 	}
 
+	var gvkResponses map[schema.GroupVersionKind]*metav1.APIResource
 	// check permissions
 	for _, task := range tasks {
-		serverRes, err := kube.ServerResourceForGroupVersionKind(sc.disco, task.groupVersionKind(), "get")
+		gvk := task.groupVersionKind()
+		serverRes, ok := gvkResponses[gvk]
+		var err error
+		if !ok {
+			serverRes, err = kube.ServerResourceForGroupVersionKind(sc.disco, gvk, "get")
+			if err != nil {
+				gvkResponses[gvk] = serverRes
+			}
+		}
 		if err != nil {
 			// Special case for custom resources: if CRD is not yet known by the K8s API server,
 			// and the CRD is part of this sync or the resource is annotated with SkipDryRunOnMissingResource=true,
