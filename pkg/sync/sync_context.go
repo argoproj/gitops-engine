@@ -704,7 +704,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 		var err error
 		if !ok {
 			serverRes, err = kube.ServerResourceForGroupVersionKind(sc.disco, gvk, "get")
-			if err != nil {
+			if err == nil {
 				gvkResponses[gvk] = serverRes
 			}
 		}
