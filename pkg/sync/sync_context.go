@@ -17,9 +17,9 @@ import (
 	apierr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2/klogr"
@@ -211,6 +211,7 @@ func NewSyncContext(
 	if err != nil {
 		return nil, nil, err
 	}
+	discoMem := memory.NewMemCacheClient(disco)
 	extensionsclientset, err := clientset.NewForConfig(restConfig)
 	if err != nil {
 		return nil, nil, err
@@ -226,7 +227,7 @@ func NewSyncContext(
 		config:              restConfig,
 		rawConfig:           rawConfig,
 		dynamicIf:           dynamicIf,
-		disco:               disco,
+		disco:               discoMem,
 		extensionsclientset: extensionsclientset,
 		kubectl:             kubectl,
 		resourceOps:         resourceOps,
@@ -696,18 +697,9 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 		task.liveObj = sc.liveObj(task.targetObj)
 	}
 
-	gvkResponses := map[schema.GroupVersionKind]*metav1.APIResource{}
 	// check permissions
 	for _, task := range tasks {
-		gvk := task.groupVersionKind()
-		serverRes, ok := gvkResponses[gvk]
-		var err error
-		if !ok {
-			serverRes, err = kube.ServerResourceForGroupVersionKind(sc.disco, gvk, "get")
-			if err == nil {
-				gvkResponses[gvk] = serverRes
-			}
-		}
+		serverRes, err := kube.ServerResourceForGroupVersionKind(sc.disco, task.groupVersionKind(), "get")
 		if err != nil {
 			// Special case for custom resources: if CRD is not yet known by the K8s API server,
 			// and the CRD is part of this sync or the resource is annotated with SkipDryRunOnMissingResource=true,
