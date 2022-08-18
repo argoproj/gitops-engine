@@ -696,7 +696,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 		task.liveObj = sc.liveObj(task.targetObj)
 	}
 
-	var gvkResponses map[schema.GroupVersionKind]*metav1.APIResource
+	gvkResponses := map[schema.GroupVersionKind]*metav1.APIResource{}
 	// check permissions
 	for _, task := range tasks {
 		gvk := task.groupVersionKind()
