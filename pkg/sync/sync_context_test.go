@@ -463,7 +463,9 @@ func TestSyncPruneFailure(t *testing.T) {
 }
 
 type APIServerMock struct {
-	calls int
+	calls       int
+	errorStatus int
+	errorBody   []byte
 }
 
 func (s *APIServerMock) newHttpServer(t *testing.T, apiFailuresCount int) *httptest.Server {
@@ -476,24 +478,13 @@ func (s *APIServerMock) newHttpServer(t *testing.T, apiFailuresCount int) *httpt
 			{Name: "namespaces", Namespaced: false, Kind: "Namespace"},
 		},
 	}
-	unauthorizedStatus := &metav1.Status{
-		Status:  metav1.StatusFailure,
-		Code:    http.StatusUnauthorized,
-		Reason:  metav1.StatusReasonUnauthorized,
-		Message: "some error",
-	}
-	unauthorizedJSON, err := json.Marshal(unauthorizedStatus)
-	if err != nil {
-		t.Errorf("unexpected encoding error while marshaling unauthorizedStatus: %v", err)
-		return nil
-	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		s.calls++
 		if s.calls <= apiFailuresCount {
 			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			w.Write(unauthorizedJSON)
+			w.WriteHeader(s.errorStatus)
+			w.Write(s.errorBody)
 			return
 		}
 		var list interface{}
@@ -526,9 +517,25 @@ func TestServerResourcesRetry(t *testing.T) {
 		httpServer    *httptest.Server
 		syncCtx       *syncContext
 	}
-	setup := func(apiFailuresCount int) *fixture {
+	setup := func(t *testing.T, apiFailuresCount int) *fixture {
+		t.Helper()
 		syncCtx := newTestSyncCtx(WithOperationSettings(false, false, false, true))
-		server := &APIServerMock{}
+
+		unauthorizedStatus := &metav1.Status{
+			Status:  metav1.StatusFailure,
+			Code:    http.StatusUnauthorized,
+			Reason:  metav1.StatusReasonUnauthorized,
+			Message: "some error",
+		}
+		unauthorizedJSON, err := json.Marshal(unauthorizedStatus)
+		if err != nil {
+			t.Errorf("unexpected encoding error while marshaling unauthorizedStatus: %v", err)
+			return nil
+		}
+		server := &APIServerMock{
+			errorStatus: http.StatusUnauthorized,
+			errorBody:   unauthorizedJSON,
+		}
 		httpServer := server.newHttpServer(t, apiFailuresCount)
 
 		syncCtx.disco = discovery.NewDiscoveryClientForConfigOrDie(&rest.Config{Host: httpServer.URL})
@@ -547,12 +554,13 @@ func TestServerResourcesRetry(t *testing.T) {
 
 	}
 	type testCase struct {
-		desc              string
-		apiFailureCount   int
-		expectedAPICalls  int
-		expectedResources int
-		expectedPhase     synccommon.OperationPhase
-		expectedMessage   string
+		desc               string
+		apiFailureCount    int
+		apiErrorHTTPStatus int
+		expectedAPICalls   int
+		expectedResources  int
+		expectedPhase      synccommon.OperationPhase
+		expectedMessage    string
 	}
 	testCases := []testCase{
 		{
@@ -603,14 +611,26 @@ func TestServerResourcesRetry(t *testing.T) {
 			expectedPhase:     common.OperationFailed,
 			expectedMessage:   "not valid",
 		},
+		{
+			desc:               "will not retry if returned error is different than Unauthorized",
+			apiErrorHTTPStatus: http.StatusConflict,
+			apiFailureCount:    1,
+			expectedAPICalls:   1,
+			expectedResources:  1,
+			expectedPhase:      common.OperationFailed,
+			expectedMessage:    "not valid",
+		},
 	}
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.desc, func(t *testing.T) {
 			// Given
 			t.Parallel()
-			fixture := setup(tc.apiFailureCount)
+			fixture := setup(t, tc.apiFailureCount)
 			defer fixture.httpServer.Close()
+			if tc.apiErrorHTTPStatus != 0 {
+				fixture.apiServerMock.errorStatus = tc.apiErrorHTTPStatus
+			}
 
 			// When
 			fixture.syncCtx.Sync()

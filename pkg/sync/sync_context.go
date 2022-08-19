@@ -690,7 +690,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 		task.liveObj = sc.liveObj(task.targetObj)
 	}
 
-	isRetriable := func(err error) bool {
+	isRetryable := func(err error) bool {
 		if apierr.IsUnauthorized(err) {
 			return true
 		}
@@ -709,7 +709,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 			serverRes = val
 			err = nil
 		} else {
-			retry.OnError(retry.DefaultRetry, isRetriable, func() error {
+			retry.OnError(retry.DefaultRetry, isRetryable, func() error {
 				serverRes, err = kube.ServerResourceForGroupVersionKind(sc.disco, task.groupVersionKind(), "get")
 				return err
 			})
