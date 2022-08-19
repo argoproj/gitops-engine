@@ -490,7 +490,7 @@ func (s *APIServerMock) newHttpServer(t *testing.T, apiFailuresCount int) *httpt
 		if s.calls <= apiFailuresCount {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(s.errorStatus)
-			w.Write(s.errorBody)
+			w.Write(s.errorBody) // nolint:errcheck
 			return
 		}
 		var list interface{}
@@ -512,7 +512,7 @@ func (s *APIServerMock) newHttpServer(t *testing.T, apiFailuresCount int) *httpt
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(output)
+		w.Write(output) // nolint:errcheck
 	}))
 	return server
 }
