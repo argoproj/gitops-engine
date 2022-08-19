@@ -700,10 +700,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	}
 
 	isRetryable := func(err error) bool {
-		if apierr.IsUnauthorized(err) {
-			return true
-		}
-		return false
+		return apierr.IsUnauthorized(err)
 	}
 
 	serverResCache := make(map[schema.GroupVersionKind]*metav1.APIResource)
@@ -718,7 +715,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 			serverRes = val
 			err = nil
 		} else {
-			retry.OnError(retry.DefaultRetry, isRetryable, func() error {
+			err = retry.OnError(retry.DefaultRetry, isRetryable, func() error {
 				serverRes, err = kube.ServerResourceForGroupVersionKind(sc.disco, task.groupVersionKind(), "get")
 				return err
 			})
