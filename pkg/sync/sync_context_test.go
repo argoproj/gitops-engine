@@ -519,7 +519,7 @@ func TestServerResourcesRetry(t *testing.T) {
 	}
 	setup := func(t *testing.T, apiFailuresCount int) *fixture {
 		t.Helper()
-		syncCtx := newTestSyncCtx(nil, WithOperationSettings(false, false, false, true))
+		syncCtx := newTestSyncCtx(WithOperationSettings(false, false, false, true))
 
 		unauthorizedStatus := &metav1.Status{
 			Status:  metav1.StatusFailure,
