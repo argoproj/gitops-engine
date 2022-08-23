@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -690,7 +688,7 @@ func TestDoNotPrunePruneFalse(t *testing.T) {
 	assert.Equal(t, synccommon.OperationSucceeded, phase)
 }
 
-//// make sure Validate=false means we don't validate
+// // make sure Validate=false means we don't validate
 func TestSyncOptionValidate(t *testing.T) {
 	tests := []struct {
 		name          string
