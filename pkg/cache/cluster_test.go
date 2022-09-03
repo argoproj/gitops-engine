@@ -731,9 +731,7 @@ func TestGetServerVersion(t *testing.T) {
 	cluster.serverVersion = &version.Info{
 		Major: "1",
 		Minor: "16",
-		// GitCommit: "v1.16.5",
 	}
-	// serverVersion := cluster.GetServerVersion()
 
 	assert.Equal(t, "1.16", cluster.GetServerVersion())
 }
