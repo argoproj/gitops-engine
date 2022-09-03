@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/managedfields"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -167,9 +168,10 @@ func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCa
 type clusterCache struct {
 	syncStatus clusterCacheSync
 
-	apisMeta      map[schema.GroupKind]*apiMeta
-	serverVersion string
-	apiResources  []kube.APIResourceInfo
+	apisMeta          map[schema.GroupKind]*apiMeta
+	serverVersion     *version.Info
+	fullServerVersion bool
+	apiResources      []kube.APIResourceInfo
 	// namespacedResources is a simple map which indicates a groupKind is namespaced
 	namespacedResources map[schema.GroupKind]bool
 
@@ -281,7 +283,11 @@ func (c *clusterCache) getEventHandlers() []OnEventHandler {
 
 // GetServerVersion returns observed cluster version
 func (c *clusterCache) GetServerVersion() string {
-	return c.serverVersion
+	if c.fullServerVersion {
+		return c.serverVersion.GitCommit
+	}
+
+	return fmt.Sprintf("%s.%s", c.serverVersion.Major, c.serverVersion.Minor)
 }
 
 // GetAPIResources returns information about observed API resources

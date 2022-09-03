@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/managedfields"
+	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -296,18 +297,18 @@ func (k *KubectlCmd) ConvertToVersion(obj *unstructured.Unstructured, group stri
 	return convertToVersionWithScheme(obj, group, version)
 }
 
-func (k *KubectlCmd) GetServerVersion(config *rest.Config) (string, error) {
+func (k *KubectlCmd) GetServerVersion(config *rest.Config) (*version.Info, error) {
 	span := k.Tracer.StartSpan("GetServerVersion")
 	defer span.Finish()
 	client, err := discovery.NewDiscoveryClientForConfig(config)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	v, err := client.ServerVersion()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return v.GitCommit, nil
+	return v, nil
 }
 
 func (k *KubectlCmd) NewDynamicClient(config *rest.Config) (dynamic.Interface, error) {
