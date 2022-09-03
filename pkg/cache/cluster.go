@@ -1068,7 +1068,7 @@ func (c *clusterCache) GetClusterInfo() ClusterInfo {
 
 	return ClusterInfo{
 		APIsCount:         len(c.apisMeta),
-		K8SVersion:        c.serverVersion,
+		K8SVersion:        c.GetServerVersion(),
 		ResourcesCount:    len(c.resources),
 		Server:            c.config.Host,
 		LastCacheSyncTime: c.syncStatus.syncTime,

@@ -36,7 +36,7 @@ type Kubectl interface {
 	GetResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string) (*unstructured.Unstructured, error)
 	PatchResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string, patchType types.PatchType, patchBytes []byte, subresources ...string) (*unstructured.Unstructured, error)
 	GetAPIResources(config *rest.Config, preferred bool, resourceFilter ResourceFilter) ([]APIResourceInfo, error)
-	GetServerVersion(config *rest.Config) (string, error)
+	GetServerVersion(config *rest.Config) (*version.Info, error)
 	NewDynamicClient(config *rest.Config) (dynamic.Interface, error)
 	SetOnKubectlRun(onKubectlRun OnKubectlRunFunc)
 }
