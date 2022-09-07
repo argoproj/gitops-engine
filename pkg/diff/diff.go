@@ -29,7 +29,10 @@ import (
 	kubescheme "github.com/argoproj/gitops-engine/pkg/utils/kube/scheme"
 )
 
-const couldNotMarshalErrMsg = "Could not unmarshal to object of type %s: %v"
+const (
+	couldNotMarshalErrMsg       = "Could not unmarshal to object of type %s: %v"
+	AnnotationLastAppliedConfig = "kubectl.kubernetes.io/last-applied-configuration"
+)
 
 // Holds diffing result of two resources
 type DiffResult struct {
@@ -197,7 +200,7 @@ func normalizeTypedValue(tv *typed.TypedValue) ([]byte, error) {
 		return nil, fmt.Errorf("error converting result typedValue: expected map got %T", ru)
 	}
 	resultUn := &unstructured.Unstructured{Object: r}
-	unstructured.RemoveNestedField(resultUn.Object, "metadata", "annotations", "kubectl.kubernetes.io/last-applied-configuration")
+	unstructured.RemoveNestedField(resultUn.Object, "metadata", "annotations", AnnotationLastAppliedConfig)
 
 	resultBytes, err := json.Marshal(resultUn)
 	if err != nil {
