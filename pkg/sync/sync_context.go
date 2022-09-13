@@ -30,7 +30,7 @@ import (
 	"github.com/argoproj/gitops-engine/pkg/diff"
 	"github.com/argoproj/gitops-engine/pkg/health"
 	"github.com/argoproj/gitops-engine/pkg/sync/common"
-	"github.com/argoproj/gitops-engine/pkg/sync/hook"
+	hookutil "github.com/argoproj/gitops-engine/pkg/sync/hook"
 	resourceutil "github.com/argoproj/gitops-engine/pkg/sync/resource"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 	kubeutil "github.com/argoproj/gitops-engine/pkg/utils/kube"
@@ -290,6 +290,22 @@ const (
 
 // getOperationPhase returns a hook status from an _live_ unstructured object
 func (sc *syncContext) getOperationPhase(hook *unstructured.Unstructured) (common.OperationPhase, string, error) {
+	// start by detecting resources that:
+	// 1. have BeforeHookCreation deletion policies
+	// 2. were already deleted from the cluster
+	// 3. DELETE watch event from kubernetes control plane was not processed yet,
+	//    this can happen under high load of controller and/or k8s control plane
+	// This results in old version still being present in cache and prematurely ending the sync wave,
+	// it is fixed by verifying creationTimestamp against Sync's start date
+	// fixes https://github.com/argoproj/gitops-engine/issues/446
+	// related to artificial sync wave delays in ArgoCD:
+	//   https://github.com/argoproj/argo-cd/blob/9fac0f6ae6e52d6f4978a1eaaf51fbffb9c0958a/controller/sync.go#L465-L485
+	for _, policy := range hookutil.DeletePolicies(hook) {
+		if policy == common.HookDeletePolicyBeforeHookCreation && sc.startedAt.After(hook.GetCreationTimestamp().Time) {
+			return common.OperationRunning, fmt.Sprintf("%s pending recreation", hook.GetName()), nil
+		}
+	}
+
 	phase := common.OperationSucceeded
 	message := fmt.Sprintf("%s created", hook.GetName())
 
@@ -627,7 +643,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 		obj := obj(resource.Target, resource.Live)
 
 		// this creates garbage tasks
-		if hook.IsHook(obj) {
+		if hookutil.IsHook(obj) {
 			sc.log.WithValues("group", obj.GroupVersionKind().Group, "kind", obj.GetKind(), "namespace", obj.GetNamespace(), "name", obj.GetName()).V(1).Info("Skipping hook")
 			continue
 		}
