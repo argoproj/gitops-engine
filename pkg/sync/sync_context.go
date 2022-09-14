@@ -302,7 +302,8 @@ func (sc *syncContext) getOperationPhase(hook *unstructured.Unstructured) (commo
 	//   https://github.com/argoproj/argo-cd/blob/9fac0f6ae6e52d6f4978a1eaaf51fbffb9c0958a/controller/sync.go#L465-L485
 	for _, policy := range hookutil.DeletePolicies(hook) {
 		if policy == common.HookDeletePolicyBeforeHookCreation && sc.startedAt.After(hook.GetCreationTimestamp().Time) {
-			return common.OperationRunning, fmt.Sprintf("%s pending recreation", hook.GetName()), nil
+			key := kube.GetResourceKey(hook)
+			return common.OperationRunning, fmt.Sprintf("%s is recreating", key.String()), nil
 		}
 	}
 
