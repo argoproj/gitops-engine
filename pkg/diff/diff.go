@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
+	"sigs.k8s.io/structured-merge-diff/v4/merge"
 	"sigs.k8s.io/structured-merge-diff/v4/typed"
 
 	"github.com/argoproj/gitops-engine/internal/kubernetes_vendor/pkg/api/v1/endpoints"
@@ -121,14 +122,60 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 // k8s library (https://github.com/kubernetes-sigs/structured-merge-diff).
 func StructuredMergeDiff(config, live *unstructured.Unstructured, gvkParser *managedfields.GvkParser, manager string) (*DiffResult, error) {
 	if live != nil && config != nil {
-		gvk := config.GetObjectKind().GroupVersionKind()
-		pt := gescheme.ResolveParseableType(gvk, gvkParser)
-		return structuredMergeDiff(config, live, pt, manager)
+		return structuredMergeDiff2(config, live, gvkParser, manager)
 	}
 	return handleResourceCreateOrDeleteDiff(config, live)
 }
 
-func structuredMergeDiff(config, live *unstructured.Unstructured, pt *typed.ParseableType, manager string) (*DiffResult, error) {
+func structuredMergeDiff2(config, live *unstructured.Unstructured, gvkParser *managedfields.GvkParser, manager string) (*DiffResult, error) {
+	gvk := config.GetObjectKind().GroupVersionKind()
+	pt := gescheme.ResolveParseableType(gvk, gvkParser)
+
+	// 1) Build typed value from live and config unstructures
+	tvLive, err := pt.FromUnstructured(live.Object)
+	if err != nil {
+		return nil, fmt.Errorf("error building typed value from live resource: %w", err)
+	}
+	tvConfig, err := pt.FromUnstructured(config.Object)
+	if err != nil {
+		return nil, fmt.Errorf("error building typed value from config resource: %w", err)
+	}
+
+	updater := merge.Updater{
+		Converter: newVersionConverter(NewTypeConverter(gvkParser), scheme.Scheme, config.GroupVersionKind().GroupVersion()),
+		// IgnoredFields: resetFields,
+	}
+
+	managed, err := DecodeManagedFields(live.GetManagedFields())
+	if err != nil {
+		return nil, fmt.Errorf("error decoding managed fields: %w", err)
+	}
+
+	mergedLive, _, err := updater.Apply(tvLive, tvConfig, "", managed.Fields(), manager, true)
+	if err != nil {
+		return nil, fmt.Errorf("error while running updater.Apply: %w", err)
+	}
+
+	// 6) Apply default values in predicted live
+	predictedLive, err := normalizeTypedValue(mergedLive)
+	if err != nil {
+		return nil, fmt.Errorf("error applying default values in predicted live: %w", err)
+	}
+
+	// 7) Apply default values in live
+	taintedLive, err := normalizeTypedValue(tvLive)
+	if err != nil {
+		return nil, fmt.Errorf("error applying default values in live: %w", err)
+	}
+
+	return buildDiffResult(predictedLive, taintedLive), nil
+
+}
+
+func structuredMergeDiff(config, live *unstructured.Unstructured, gvkParser *managedfields.GvkParser, manager string) (*DiffResult, error) {
+	gvk := config.GetObjectKind().GroupVersionKind()
+	pt := gescheme.ResolveParseableType(gvk, gvkParser)
+
 	// 1) Build typed value from live and config unstructures
 	tvLive, err := pt.FromUnstructured(live.Object)
 	if err != nil {
