@@ -17,4 +17,13 @@ var (
 
 	//go:embed smd-service-config-ports.yaml
 	ServiceConfigWithSamePortsYAML string
+
+	//go:embed smd-deploy-live.yaml
+	DeploymentLiveYAML string
+
+	//go:embed smd-deploy-config.yaml
+	DeploymentConfigYAML string
+
+	//go:embed openapiv2.bin
+	OpenAPIV2Doc []byte
 )

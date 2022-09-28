@@ -13,6 +13,7 @@ import (
 
 	jsonpatch "github.com/evanphx/json-patch"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/jsonmergepatch"
@@ -24,6 +25,7 @@ import (
 	"sigs.k8s.io/structured-merge-diff/v4/typed"
 
 	"github.com/argoproj/gitops-engine/internal/kubernetes_vendor/pkg/api/v1/endpoints"
+	"github.com/argoproj/gitops-engine/pkg/diff/internal/fieldmanager"
 	"github.com/argoproj/gitops-engine/pkg/sync/resource"
 	jsonutil "github.com/argoproj/gitops-engine/pkg/utils/json"
 	gescheme "github.com/argoproj/gitops-engine/pkg/utils/kube/scheme"
@@ -122,119 +124,115 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 // k8s library (https://github.com/kubernetes-sigs/structured-merge-diff).
 func StructuredMergeDiff(config, live *unstructured.Unstructured, gvkParser *managedfields.GvkParser, manager string) (*DiffResult, error) {
 	if live != nil && config != nil {
-		return structuredMergeDiff2(config, live, gvkParser, manager)
+		params := &SMDParams{
+			config:    config,
+			live:      live,
+			gvkParser: gvkParser,
+			manager:   manager,
+		}
+		return structuredMergeDiff(params)
 	}
 	return handleResourceCreateOrDeleteDiff(config, live)
 }
 
-func structuredMergeDiff2(config, live *unstructured.Unstructured, gvkParser *managedfields.GvkParser, manager string) (*DiffResult, error) {
-	gvk := config.GetObjectKind().GroupVersionKind()
-	pt := gescheme.ResolveParseableType(gvk, gvkParser)
+// SMDParams defines the parameters required by the structuredMergeDiff
+// function
+type SMDParams struct {
+	config    *unstructured.Unstructured
+	live      *unstructured.Unstructured
+	gvkParser *managedfields.GvkParser
+	manager   string
+}
+
+func structuredMergeDiff(p *SMDParams) (*DiffResult, error) {
+
+	gvk := p.config.GetObjectKind().GroupVersionKind()
+	pt := gescheme.ResolveParseableType(gvk, p.gvkParser)
 
 	// 1) Build typed value from live and config unstructures
-	tvLive, err := pt.FromUnstructured(live.Object)
+	tvLive, err := pt.FromUnstructured(p.live.Object)
 	if err != nil {
 		return nil, fmt.Errorf("error building typed value from live resource: %w", err)
 	}
-	tvConfig, err := pt.FromUnstructured(config.Object)
+	tvConfig, err := pt.FromUnstructured(p.config.Object)
 	if err != nil {
 		return nil, fmt.Errorf("error building typed value from config resource: %w", err)
 	}
 
-	updater := merge.Updater{
-		Converter: newVersionConverter(NewTypeConverter(gvkParser), scheme.Scheme, config.GroupVersionKind().GroupVersion()),
-		// IgnoredFields: resetFields,
-	}
-
-	managed, err := DecodeManagedFields(live.GetManagedFields())
+	// 2) Invoke the apply function to calculate the diff using
+	// the structured-merge-diff library
+	mergedLive, err := apply(tvConfig, tvLive, p)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding managed fields: %w", err)
+		return nil, fmt.Errorf("error calculating diff: %w", err)
 	}
 
-	mergedLive, _, err := updater.Apply(tvLive, tvConfig, "", managed.Fields(), manager, true)
-	if err != nil {
-		return nil, fmt.Errorf("error while running updater.Apply: %w", err)
+	// 3) When mergedLive is nil it means that there is no change
+	if mergedLive == nil {
+		liveBytes, err := json.Marshal(p.live)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling live resource: %w", err)
+		}
+		// In this case diff result will have live state for both,
+		// predicted and live.
+		return buildDiffResult(liveBytes, liveBytes), nil
 	}
 
-	// 6) Apply default values in predicted live
+	// 4) Normalize merged live
 	predictedLive, err := normalizeTypedValue(mergedLive)
 	if err != nil {
 		return nil, fmt.Errorf("error applying default values in predicted live: %w", err)
 	}
 
-	// 7) Apply default values in live
+	// 5) Normalize live
 	taintedLive, err := normalizeTypedValue(tvLive)
 	if err != nil {
 		return nil, fmt.Errorf("error applying default values in live: %w", err)
 	}
 
 	return buildDiffResult(predictedLive, taintedLive), nil
-
 }
 
-func structuredMergeDiff(config, live *unstructured.Unstructured, gvkParser *managedfields.GvkParser, manager string) (*DiffResult, error) {
-	gvk := config.GetObjectKind().GroupVersionKind()
-	pt := gescheme.ResolveParseableType(gvk, gvkParser)
+// apply will build all the dependency required to invoke the smd.merge.updater.Apply
+// to correctly calculate the diff with the same logic used in k8s with server-side
+// apply.
+func apply(tvConfig, tvLive *typed.TypedValue, p *SMDParams) (*typed.TypedValue, error) {
 
-	// 1) Build typed value from live and config unstructures
-	tvLive, err := pt.FromUnstructured(live.Object)
+	// 2) Build the structured-merge-diff Updater
+	updater := merge.Updater{
+		Converter: fieldmanager.NewVersionConverter(p.gvkParser, scheme.Scheme, p.config.GroupVersionKind().GroupVersion()),
+	}
+
+	// 3) Build a list of managers and which API version they own
+	managed, err := fieldmanager.DecodeManagedFields(p.live.GetManagedFields())
 	if err != nil {
-		return nil, fmt.Errorf("error building typed value from live resource: %w", err)
+		return nil, fmt.Errorf("error decoding managed fields: %w", err)
 	}
-	tvConfig, err := pt.FromUnstructured(config.Object)
+
+	// 4) Use the desired manifest to extract the target resource version
+	version := fieldpath.APIVersion(p.config.GetAPIVersion())
+
+	// 5) The manager string needs to be converted to the internal manager
+	// key used inside structured-merge-diff apply logic
+	managerKey, err := buildManagerInfoForApply(p.manager)
 	if err != nil {
-		return nil, fmt.Errorf("error building typed value from config resource: %w", err)
+		return nil, fmt.Errorf("error building manager info: %w", err)
 	}
 
-	previousFieldSet := &fieldpath.Set{}
-	managerFound := false
-	// 2) Search for manager to find all fields managed by it
-	// so it can be removed from live state before merging desired
-	// state (config).
-	if manager != "" {
-		for _, m := range live.GetManagedFields() {
-			if m.Manager == manager {
-				err := previousFieldSet.FromJSON(bytes.NewReader(m.FieldsV1.Raw))
-				if err != nil {
-					return nil, fmt.Errorf("error parsing manager fields from JSON: %w", err)
-				}
-				managerFound = true
-			}
-		}
-	}
-
-	// 3) When manager is not found, it means that the resource
-	// wasn't being synced with the given manager up to this point.
-	// In this case config fields will be used to clean live state.
-	if !managerFound {
-		previousFieldSet, err = tvConfig.ToFieldSet()
-		if err != nil {
-			return nil, fmt.Errorf("error converting config to fieldset: %w", err)
-		}
-	}
-
-	// 4) Remove previous fields from live
-	cleanLive := tvLive.RemoveItems(previousFieldSet)
-
-	// 5) Merge desired state in clean live
-	mergedCleanLive, err := cleanLive.Merge(tvConfig)
+	// 6) Finally invoke Apply to execute the same function used in k8s
+	// server-side applies
+	mergedLive, _, err := updater.Apply(tvLive, tvConfig, version, managed.Fields(), managerKey, true)
 	if err != nil {
-		return nil, fmt.Errorf("error merging config into clean live: %w", err)
+		return nil, fmt.Errorf("error while running updater.Apply: %w", err)
 	}
+	return mergedLive, err
+}
 
-	// 6) Apply default values in predicted live
-	predictedLive, err := normalizeTypedValue(mergedCleanLive)
-	if err != nil {
-		return nil, fmt.Errorf("error applying default values in predicted live: %w", err)
+func buildManagerInfoForApply(manager string) (string, error) {
+	managerInfo := metav1.ManagedFieldsEntry{
+		Manager:   manager,
+		Operation: metav1.ManagedFieldsOperationApply,
 	}
-
-	// 7) Apply default values in live
-	taintedLive, err := normalizeTypedValue(tvLive)
-	if err != nil {
-		return nil, fmt.Errorf("error applying default values in live: %w", err)
-	}
-
-	return buildDiffResult(predictedLive, taintedLive), nil
+	return fieldmanager.BuildManagerIdentifier(&managerInfo)
 }
 
 // normalizeTypedValue will prepare the given tv so it can be used in diffs by:

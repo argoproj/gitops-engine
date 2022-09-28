@@ -1,6 +1,20 @@
-package diff
+/*
+Copyright 2018 The Kubernetes Authors.
 
-// file borrowed from k8s.io/apiserver/pkg/endpoints/handlers/fieldmanager/typeconverter.go
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package fieldmanager
 
 import (
 	"fmt"
@@ -21,6 +35,35 @@ type TypeConverter interface {
 	TypedToObject(*typed.TypedValue) (runtime.Object, error)
 }
 
+// DeducedTypeConverter is a TypeConverter for CRDs that don't have a
+// schema. It does implement the same interface though (and create the
+// same types of objects), so that everything can still work the same.
+// CRDs are merged with all their fields being "atomic" (lists
+// included).
+//
+// Note that this is not going to be sufficient for converting to/from
+// CRDs that have a schema defined (we don't support that schema yet).
+// TODO(jennybuckley): Use the schema provided by a CRD if it exists.
+type DeducedTypeConverter struct{}
+
+var _ TypeConverter = DeducedTypeConverter{}
+
+// ObjectToTyped converts an object into a TypedValue with a "deduced type".
+func (DeducedTypeConverter) ObjectToTyped(obj runtime.Object) (*typed.TypedValue, error) {
+	switch o := obj.(type) {
+	case *unstructured.Unstructured:
+		return typed.DeducedParseableType.FromUnstructured(o.UnstructuredContent())
+	default:
+		return typed.DeducedParseableType.FromStructured(obj)
+	}
+}
+
+// TypedToObject transforms the typed value into a runtime.Object. That
+// is not specific to deduced type.
+func (DeducedTypeConverter) TypedToObject(value *typed.TypedValue) (runtime.Object, error) {
+	return valueToObject(value.AsValue())
+}
+
 type typeConverter struct {
 	parser *managedfields.GvkParser
 }
@@ -30,8 +73,12 @@ var _ TypeConverter = &typeConverter{}
 // NewTypeConverter builds a TypeConverter from a proto.Models. This
 // will automatically find the proper version of the object, and the
 // corresponding schema information.
-func NewTypeConverter(gvkParser *managedfields.GvkParser) TypeConverter {
-	return &typeConverter{parser: gvkParser}
+func NewTypeConverter(models proto.Models, preserveUnknownFields bool) (TypeConverter, error) {
+	parser, err := managedfields.NewGVKParser(models, preserveUnknownFields)
+	if err != nil {
+		return nil, err
+	}
+	return &typeConverter{parser: parser}, nil
 }
 
 func (c *typeConverter) ObjectToTyped(obj runtime.Object) (*typed.TypedValue, error) {
