@@ -783,6 +783,7 @@ func TestStructuredMergeDiff(t *testing.T) {
 
 	t.Run("will apply default values", func(t *testing.T) {
 		// given
+		t.Parallel()
 		liveState := StrToUnstructured(testdata.ServiceLiveYAML)
 		desiredState := StrToUnstructured(testdata.ServiceConfigYAML)
 		params := buildParams(liveState, desiredState)
@@ -805,6 +806,7 @@ func TestStructuredMergeDiff(t *testing.T) {
 	})
 	t.Run("will remove entries in list", func(t *testing.T) {
 		// given
+		t.Parallel()
 		liveState := StrToUnstructured(testdata.ServiceLiveYAML)
 		desiredState := StrToUnstructured(testdata.ServiceConfigWith2Ports)
 		params := buildParams(liveState, desiredState)
@@ -821,6 +823,7 @@ func TestStructuredMergeDiff(t *testing.T) {
 	})
 	t.Run("will remove previously added fields not present in desired state", func(t *testing.T) {
 		// given
+		t.Parallel()
 		liveState := StrToUnstructured(testdata.LiveServiceWithTypeYAML)
 		desiredState := StrToUnstructured(testdata.ServiceConfigYAML)
 		params := buildParams(liveState, desiredState)
@@ -837,6 +840,7 @@ func TestStructuredMergeDiff(t *testing.T) {
 	})
 	t.Run("will apply service with multiple ports", func(t *testing.T) {
 		// given
+		t.Parallel()
 		liveState := StrToUnstructured(testdata.ServiceLiveYAML)
 		desiredState := StrToUnstructured(testdata.ServiceConfigWithSamePortsYAML)
 		params := buildParams(liveState, desiredState)
@@ -853,6 +857,7 @@ func TestStructuredMergeDiff(t *testing.T) {
 	})
 	t.Run("will apply deployment defaults correctly", func(t *testing.T) {
 		// given
+		t.Parallel()
 		liveState := StrToUnstructured(testdata.DeploymentLiveYAML)
 		desiredState := StrToUnstructured(testdata.DeploymentConfigYAML)
 		params := buildParams(liveState, desiredState)
