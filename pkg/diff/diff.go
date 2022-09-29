@@ -149,7 +149,7 @@ func structuredMergeDiff(p *SMDParams) (*DiffResult, error) {
 	gvk := p.config.GetObjectKind().GroupVersionKind()
 	pt := gescheme.ResolveParseableType(gvk, p.gvkParser)
 
-	// 1) Build typed value from live and config unstructures
+	// Build typed value from live and config unstructures
 	tvLive, err := pt.FromUnstructured(p.live.Object)
 	if err != nil {
 		return nil, fmt.Errorf("error building typed value from live resource: %w", err)
@@ -159,14 +159,14 @@ func structuredMergeDiff(p *SMDParams) (*DiffResult, error) {
 		return nil, fmt.Errorf("error building typed value from config resource: %w", err)
 	}
 
-	// 2) Invoke the apply function to calculate the diff using
+	// Invoke the apply function to calculate the diff using
 	// the structured-merge-diff library
 	mergedLive, err := apply(tvConfig, tvLive, p)
 	if err != nil {
 		return nil, fmt.Errorf("error calculating diff: %w", err)
 	}
 
-	// 3) When mergedLive is nil it means that there is no change
+	// When mergedLive is nil it means that there is no change
 	if mergedLive == nil {
 		liveBytes, err := json.Marshal(p.live)
 		if err != nil {
@@ -177,13 +177,13 @@ func structuredMergeDiff(p *SMDParams) (*DiffResult, error) {
 		return buildDiffResult(liveBytes, liveBytes), nil
 	}
 
-	// 4) Normalize merged live
+	// Normalize merged live
 	predictedLive, err := normalizeTypedValue(mergedLive)
 	if err != nil {
 		return nil, fmt.Errorf("error applying default values in predicted live: %w", err)
 	}
 
-	// 5) Normalize live
+	// Normalize live
 	taintedLive, err := normalizeTypedValue(tvLive)
 	if err != nil {
 		return nil, fmt.Errorf("error applying default values in live: %w", err)
@@ -197,28 +197,28 @@ func structuredMergeDiff(p *SMDParams) (*DiffResult, error) {
 // apply.
 func apply(tvConfig, tvLive *typed.TypedValue, p *SMDParams) (*typed.TypedValue, error) {
 
-	// 2) Build the structured-merge-diff Updater
+	// Build the structured-merge-diff Updater
 	updater := merge.Updater{
 		Converter: fieldmanager.NewVersionConverter(p.gvkParser, scheme.Scheme, p.config.GroupVersionKind().GroupVersion()),
 	}
 
-	// 3) Build a list of managers and which API version they own
+	// Build a list of managers and which API version they own
 	managed, err := fieldmanager.DecodeManagedFields(p.live.GetManagedFields())
 	if err != nil {
 		return nil, fmt.Errorf("error decoding managed fields: %w", err)
 	}
 
-	// 4) Use the desired manifest to extract the target resource version
+	// Use the desired manifest to extract the target resource version
 	version := fieldpath.APIVersion(p.config.GetAPIVersion())
 
-	// 5) The manager string needs to be converted to the internal manager
+	// The manager string needs to be converted to the internal manager
 	// key used inside structured-merge-diff apply logic
 	managerKey, err := buildManagerInfoForApply(p.manager)
 	if err != nil {
 		return nil, fmt.Errorf("error building manager info: %w", err)
 	}
 
-	// 6) Finally invoke Apply to execute the same function used in k8s
+	// Finally invoke Apply to execute the same function used in k8s
 	// server-side applies
 	mergedLive, _, err := updater.Apply(tvLive, tvConfig, version, managed.Fields(), managerKey, true)
 	if err != nil {
