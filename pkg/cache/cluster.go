@@ -1050,6 +1050,7 @@ func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) {
 var (
 	ignoredRefreshResources = map[string]bool{
 		"/" + kube.EndpointsKind: true,
+		"discovery.k8s.io/" + kube.EndpointSliceKind: true,
 	}
 )
 

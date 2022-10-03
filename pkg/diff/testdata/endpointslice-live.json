@@ -1,0 +1,44 @@
+{
+  "apiVersion": "discovery.k8s.io/v1",
+  "kind": "EndpointSlice",
+  "metadata": {
+    "annotations": {
+      "description": "A test endpoint slice",
+      "endpoints.kubernetes.io/last-change-trigger-time": "2022-10-03T06:11:53Z"
+    },
+    "labels": {
+      "app.kubernetes.io/instance": "guestbook"
+    },
+    "name": "test-endpoint-slice",
+    "namespace": "default",
+    "uid": "e39612a3-b386-4f55-9286-ebdd3ad510aa",
+    "creationTimestamp": "2022-10-03T02:27:44Z"
+  },
+  "addressType": "IPv4",
+  "ports": [
+    {
+      "name": "http",
+      "port": 80,
+      "protocol": "TCP"
+    }
+  ],
+  "endpoints": [
+    {
+      "addresses": [
+        "10.1.2.3"
+      ],
+      "conditions": {
+        "ready": true,
+        "serving": true,
+        "terminated": false
+      },
+      "hostname": "node-1",
+      "targetRef": {
+        "kind": "Pod",
+        "name": "http-server-1",
+        "namespace": "default",
+        "uid": "e12ea7f3-4e0e-49db-801b-b86d494954e0"
+      }
+    }
+  ]
+}

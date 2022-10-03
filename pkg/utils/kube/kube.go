@@ -41,6 +41,7 @@ const (
 	ServiceKind                  = "Service"
 	ServiceAccountKind           = "ServiceAccount"
 	EndpointsKind                = "Endpoints"
+	EndpointSliceKind            = "EndpointSlice"
 	DeploymentKind               = "Deployment"
 	ReplicaSetKind               = "ReplicaSet"
 	StatefulSetKind              = "StatefulSet"

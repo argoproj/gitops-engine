@@ -1006,3 +1006,88 @@ func TestIterateHierachy(t *testing.T) {
 			keys)
 	})
 }
+
+func TestProcessModifiedEvent(t *testing.T) {
+	cluster := newCluster(t, testPod())
+	err := cluster.EnsureSynced()
+	require.NoError(t, err)
+
+	hasReceivedModifiedEvent := false
+	// Make sure that the following function is called only once
+	unsubscribe := cluster.OnResourceUpdated(func(newResource *Resource, oldResource *Resource, _ map[kube.ResourceKey]*Resource) {
+		hasReceivedModifiedEvent = true
+	})
+
+	cluster.processEvent(watch.Modified, mustToUnstructured(testPod()))
+	unsubscribe()
+
+	assert.True(t, hasReceivedModifiedEvent)
+}
+
+func TestSkippedEndpointsModifiedEvent(t *testing.T) {
+
+	endpoints := &corev1.Endpoints{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "Endpoints",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "test-endpoints",
+			UID:       "1",
+		},
+		Subsets: []v1.EndpointSubset{{
+			Addresses: []v1.EndpointAddress{{
+				IP: "10.1.2.3",
+			},
+			},
+			Ports: []v1.EndpointPort{{
+				Name: "http",
+				Port: 80,
+			},
+			},
+		},
+		},
+	}
+	modifiedEndpoints := endpoints.DeepCopy()
+	modifiedEndpoints.Subsets[0].Addresses[0].IP = "10.4.5.6"
+
+	cluster := newCluster(t, endpoints)
+	err := cluster.EnsureSynced()
+	require.NoError(t, err)
+
+	hasReceivedModifiedEvent := false
+	// Make sure that the following function is called only once
+	unsubscribe := cluster.OnResourceUpdated(func(newResource *Resource, oldResource *Resource, _ map[kube.ResourceKey]*Resource) {
+		hasReceivedModifiedEvent = true
+	})
+
+	cluster.processEvent(watch.Modified, mustToUnstructured(modifiedEndpoints))
+
+	unsubscribe()
+	assert.False(t, hasReceivedModifiedEvent)
+}
+
+func TestSkippedEndpointSliceModifiedEvent(t *testing.T) {
+
+	endpointSlice := strToUnstructured(`
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: test-endpointslice`)
+
+	cluster := newCluster(t, endpointSlice)
+	err := cluster.EnsureSynced()
+	require.NoError(t, err)
+
+	hasReceivedModifiedEvent := false
+	// Make sure that the following function is called only once
+	unsubscribe := cluster.OnResourceUpdated(func(newResource *Resource, oldResource *Resource, _ map[kube.ResourceKey]*Resource) {
+		hasReceivedModifiedEvent = true
+	})
+
+	cluster.processEvent(watch.Modified, endpointSlice)
+
+	unsubscribe()
+	assert.False(t, hasReceivedModifiedEvent)
+}

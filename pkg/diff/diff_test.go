@@ -747,6 +747,17 @@ func TestUnsortedEndpoints(t *testing.T) {
 	}
 }
 
+func TestUnsortedEndpointSlice(t *testing.T) {
+	configUn := unmarshalFile("testdata/endpointslice-config.json")
+	liveUn := unmarshalFile("testdata/endpointslice-live.json")
+	dr := diff(t, configUn, liveUn, diffOptionsForTest()...)
+	if !assert.False(t, dr.Modified) {
+		ascii, err := printDiff(dr)
+		require.NoError(t, err)
+		t.Log(ascii)
+	}
+}
+
 func TestStructuredMergeDiff(t *testing.T) {
 	parser := scheme.StaticParser()
 	svcParseType := parser.Type("io.k8s.api.core.v1.Service")
