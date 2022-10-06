@@ -11,6 +11,7 @@ func getIngressHealth(obj *unstructured.Unstructured) (*HealthStatus, error) {
 		health.Status = HealthStatusHealthy
 	} else {
 		health.Status = HealthStatusProgressing
+		health.Message = "Length of status.loadBalancer.ingress < 0"
 	}
 	return &health, nil
 }
