@@ -125,6 +125,7 @@ func newCmd(log logr.Logger) *cobra.Command {
 		prune         bool
 		namespace     string
 		namespaced    bool
+		userAgent     string
 	)
 	cmd := cobra.Command{
 		Use: "gitops REPO_PATH",
@@ -139,6 +140,9 @@ func newCmd(log logr.Logger) *cobra.Command {
 			if namespace == "" {
 				namespace, _, err = clientConfig.Namespace()
 				checkError(err, log)
+			}
+			if userAgent != "" {
+				config.UserAgent = userAgent
 			}
 
 			var namespaces []string
@@ -215,6 +219,7 @@ func newCmd(log logr.Logger) *cobra.Command {
 	cmd.Flags().StringVar(&namespace, "default-namespace", "",
 		"The namespace that should be used if resource namespace is not specified. "+
 			"By default resources are installed into the same namespace where gitops-agent is installed.")
+	cmd.Flags().StringVar(&userAgent, "user-agent", "", "User agent name")
 	return &cmd
 }
 
