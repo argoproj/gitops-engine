@@ -22,19 +22,21 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2/klogr"
 
+	_ "net/http/pprof"
+
 	"github.com/argoproj/gitops-engine/pkg/cache"
 	"github.com/argoproj/gitops-engine/pkg/engine"
 	"github.com/argoproj/gitops-engine/pkg/sync"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
-
-	_ "net/http/pprof"
 )
 
 const (
-	annotationGCMark = "gitops-agent.argoproj.io/gc-mark"
-	envProfile       = "GITOPS_ENGINE_PROFILE"
-	envProfileHost   = "GITOPS_ENGINE_PROFILE_HOST"
-	envProfilePort   = "GITOPS_ENGINE_PROFILE_PORT"
+	annotationGCMark   = "gitops-agent.argoproj.io/gc-mark"
+	envProfile         = "GITOPS_ENGINE_PROFILE"
+	envProfileHost     = "GITOPS_ENGINE_PROFILE_HOST"
+	envProfilePort     = "GITOPS_ENGINE_PROFILE_PORT"
+	defaultClientQPS   = 100
+	defaultClientBurst = 200
 )
 
 func main() {
@@ -125,6 +127,8 @@ func newCmd(log logr.Logger) *cobra.Command {
 		prune         bool
 		namespace     string
 		namespaced    bool
+		qps           int
+		burst         int
 	)
 	cmd := cobra.Command{
 		Use: "gitops REPO_PATH",
@@ -140,6 +144,8 @@ func newCmd(log logr.Logger) *cobra.Command {
 				namespace, _, err = clientConfig.Namespace()
 				checkError(err, log)
 			}
+			config.QPS = float32(qps)
+			config.Burst = burst
 
 			var namespaces []string
 			if namespaced {
@@ -162,8 +168,11 @@ func newCmd(log logr.Logger) *cobra.Command {
 			gitOpsEngine := engine.NewEngine(config, clusterCache, engine.WithLogr(log))
 			checkError(err, log)
 
+			start := time.Now().Unix()
 			cleanup, err := gitOpsEngine.Run()
 			checkError(err, log)
+			end := time.Now().Unix()
+			log.Info("agent synced complete", "duration(s)", end-start)
 			defer cleanup()
 
 			resync := make(chan bool)
@@ -215,6 +224,8 @@ func newCmd(log logr.Logger) *cobra.Command {
 	cmd.Flags().StringVar(&namespace, "default-namespace", "",
 		"The namespace that should be used if resource namespace is not specified. "+
 			"By default resources are installed into the same namespace where gitops-agent is installed.")
+	cmd.Flags().IntVar(&qps, "qps", defaultClientQPS, "QPS to use while talking with kubernetes apiserver")
+	cmd.Flags().IntVar(&burst, "burst", defaultClientBurst, "Burst to use while talking with kubernetes apiserver")
 	return &cmd
 }
 
