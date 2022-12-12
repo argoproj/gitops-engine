@@ -120,6 +120,8 @@ func GetHealthCheckFunc(gvk schema.GroupVersionKind) func(obj *unstructured.Unst
 		switch gvk.Kind {
 		case "Workflow":
 			return getArgoWorkflowHealth
+		case "Application":
+			return getArgoAppHealth
 		}
 	case "apiregistration.k8s.io":
 		switch gvk.Kind {

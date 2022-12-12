@@ -26,6 +26,14 @@ type argoWorkflow struct {
 	}
 }
 
+// An agnostic app object only considers Status.Phase and Status.Message. It is agnostic to the API version or any
+// other fields.
+type argoApp struct {
+	Status struct {
+		Health HealthStatus `json:"health,omitempty"`
+	} `json:"status,omitempty"`
+}
+
 func getArgoWorkflowHealth(obj *unstructured.Unstructured) (*HealthStatus, error) {
 	var wf argoWorkflow
 	err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &wf)
@@ -41,4 +49,13 @@ func getArgoWorkflowHealth(obj *unstructured.Unstructured) (*HealthStatus, error
 		return &HealthStatus{Status: HealthStatusDegraded, Message: wf.Status.Message}, nil
 	}
 	return &HealthStatus{Status: HealthStatusUnknown, Message: wf.Status.Message}, nil
+}
+
+func getArgoAppHealth(obj *unstructured.Unstructured) (*HealthStatus, error) {
+	var app argoApp
+	err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &app)
+	if err != nil {
+		return nil, err
+	}
+	return &app.Status.Health, nil
 }
