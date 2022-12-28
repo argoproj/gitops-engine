@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -536,6 +537,8 @@ func (sc *syncContext) Sync() {
 		} else {
 			sc.setRunningPhase(remainingTasks, false)
 		}
+	case warning:
+		sc.setOperationPhase(common.OperationWarning, "synced with warning")
 	default:
 		sc.setRunningPhase(tasks.Filter(func(task *syncTask) bool {
 			return task.deleteOnPhaseCompletion()
@@ -908,7 +911,9 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 	if dryRun {
 		dryRunStrategy = cmdutil.DryRunClient
 	}
-
+	// Warnings handler
+	warn := bytes.NewBuffer(nil)
+	rest.SetDefaultWarningHandler(rest.NewWarningWriter(warn, rest.WarningWriterOptions{}))
 	var err error
 	var message string
 	shouldReplace := sc.replace || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplace)
@@ -942,6 +947,9 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 		if err = sc.ensureCRDReady(crdName); err != nil {
 			sc.log.Error(err, fmt.Sprintf("failed to ensure that CRD %s is ready", crdName))
 		}
+	}
+	if warn.Len() != 0 {
+		return common.ResultCodeSyncedWithWarning, warn.String()
 	}
 	return common.ResultCodeSynced, message
 }
@@ -1067,10 +1075,11 @@ func (sc *syncContext) getResourceIf(task *syncTask, verb string) (dynamic.Resou
 }
 
 var operationPhases = map[common.ResultCode]common.OperationPhase{
-	common.ResultCodeSynced:       common.OperationRunning,
-	common.ResultCodeSyncFailed:   common.OperationFailed,
-	common.ResultCodePruned:       common.OperationSucceeded,
-	common.ResultCodePruneSkipped: common.OperationSucceeded,
+	common.ResultCodeSynced:            common.OperationRunning,
+	common.ResultCodeSyncFailed:        common.OperationFailed,
+	common.ResultCodePruned:            common.OperationSucceeded,
+	common.ResultCodePruneSkipped:      common.OperationSucceeded,
+	common.ResultCodeSyncedWithWarning: common.OperationWarning,
 }
 
 // tri-state
@@ -1078,6 +1087,7 @@ type runState int
 
 const (
 	successful runState = iota
+	warning
 	pending
 	failed
 )
@@ -1190,6 +1200,9 @@ func (sc *syncContext) processCreateTasks(state runState, tasks syncTasks, dryRu
 				logCtx.WithValues("message", message).Info("Apply failed")
 				state = failed
 			}
+			if result == common.ResultCodeSyncedWithWarning {
+				state = warning
+			}
 			if !dryRun || sc.dryRun || result == common.ResultCodeSyncFailed {
 				phase := operationPhases[result]
 				// no resources are created in dry-run, so running phase means validation was
@@ -1291,7 +1304,7 @@ func (s *stateSync) Wait() runState {
 			}
 		case successful:
 			switch result {
-			case pending, failed:
+			case warning, pending, failed:
 				res = result
 			}
 		}

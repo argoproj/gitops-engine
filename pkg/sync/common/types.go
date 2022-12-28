@@ -55,11 +55,12 @@ const (
 	OperationFailed      OperationPhase = "Failed"
 	OperationError       OperationPhase = "Error"
 	OperationSucceeded   OperationPhase = "Succeeded"
+	OperationWarning     OperationPhase = "Warning"
 )
 
 func (os OperationPhase) Completed() bool {
 	switch os {
-	case OperationFailed, OperationError, OperationSucceeded:
+	case OperationFailed, OperationError, OperationSucceeded, OperationWarning:
 		return true
 	}
 	return false
@@ -76,14 +77,19 @@ func (os OperationPhase) Successful() bool {
 func (os OperationPhase) Failed() bool {
 	return os == OperationFailed
 }
+func (os OperationPhase) Warning() bool {
+	return os == OperationWarning
+}
 
 type ResultCode string
 
+// skizimov
 const (
-	ResultCodeSynced       ResultCode = "Synced"
-	ResultCodeSyncFailed   ResultCode = "SyncFailed"
-	ResultCodePruned       ResultCode = "Pruned"
-	ResultCodePruneSkipped ResultCode = "PruneSkipped"
+	ResultCodeSynced            ResultCode = "Synced"
+	ResultCodeSyncFailed        ResultCode = "SyncFailed"
+	ResultCodePruned            ResultCode = "Pruned"
+	ResultCodePruneSkipped      ResultCode = "PruneSkipped"
+	ResultCodeSyncedWithWarning ResultCode = "SyncedWithWarning"
 )
 
 type HookType string
