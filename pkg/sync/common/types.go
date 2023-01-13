@@ -87,7 +87,6 @@ func (os OperationPhase) Warning() bool {
 
 type ResultCode string
 
-// skizimov
 const (
 	ResultCodeSynced            ResultCode = "Synced"
 	ResultCodeSyncFailed        ResultCode = "SyncFailed"
