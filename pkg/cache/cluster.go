@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -57,6 +58,11 @@ const (
 	// Limit is required to avoid memory spikes during cache initialization.
 	// The default limit of 50 is chosen based on experiments.
 	defaultListSemaphoreWeight = 50
+
+	// Set ENABLE_CLUSTER_RESOURCE_CHILDREN to true to show namespace scoped
+	// resources owned by cluster scoped resources. By default, this feature is
+	// disabled due to performance implications.
+	enableClusterResourceChildrenEnv = "ENABLE_CLUSTER_RESOURCE_CHILDREN"
 )
 
 const (
@@ -976,7 +982,7 @@ func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(resour
 	defer c.lock.RUnlock()
 	if res, ok := c.resources[key]; ok {
 		nsNodes := c.nsIndex[key.Namespace]
-		if key.Namespace == "" {
+		if key.Namespace == "" && isClusterResourceChildrenEnabled() {
 			childRefs := c.childrenByParent[key]
 			for _, childRef := range childRefs {
 				if c.resources[childRef] != nil {
@@ -1152,7 +1158,7 @@ func (c *clusterCache) onNodeUpdated(oldRes *Resource, newRes *Resource) {
 }
 
 func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) {
-	delete(c.childrenByParent, key)
+	c.removeFromChildrenByParentMap(key)
 	existing, ok := c.resources[key]
 	if ok {
 		delete(c.resources, key)
@@ -1162,6 +1168,12 @@ func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) {
 			if len(ns) == 0 {
 				delete(c.nsIndex, key.Namespace)
 			}
+
+			nsAll, ok := c.nsIndex[""]
+			if ok {
+				delete(nsAll, key)
+			}
+
 			// remove ownership references from children with inferred references
 			if existing.isInferredParentOf != nil {
 				for k, v := range ns {
@@ -1178,7 +1190,7 @@ func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) {
 }
 
 func (c *clusterCache) updateChildrenByParentMap(res *Resource) {
-	if res == nil {
+	if res == nil || !isClusterResourceChildrenEnabled() {
 		return
 	}
 	childKey := res.ResourceKey()
@@ -1207,6 +1219,29 @@ func (c *clusterCache) updateChildrenByParentMap(res *Resource) {
 		}
 		c.childrenByParent[parentKey] = childRefs
 	}
+}
+
+func (c *clusterCache) removeFromChildrenByParentMap(key kube.ResourceKey) {
+	if !isClusterResourceChildrenEnabled() {
+		return
+	}
+
+	delete(c.childrenByParent, key)
+
+	for k, childRefs := range c.childrenByParent {
+		for i, childRef := range childRefs {
+			childRefKey := kube.NewResourceKey(childRef.Group, childRef.Kind, childRef.Namespace, childRef.Name)
+			if childRefKey == key {
+				childRefs[i] = childRefs[len(childRefs)-1]
+				c.childrenByParent[k] = childRefs[:len(childRefs)-1]
+			}
+		}
+	}
+}
+
+func isClusterResourceChildrenEnabled() bool {
+	val := os.Getenv(enableClusterResourceChildrenEnv)
+	return strings.ToLower(val) == "true"
 }
 
 var (
