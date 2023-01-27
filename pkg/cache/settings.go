@@ -170,3 +170,11 @@ func SetRespectRBAC(respectRBAC int) UpdateSettingsFunc {
 		}
 	}
 }
+
+// SetClusterResourcedNamespacedChildren enables/disables the option to show
+// namespaced resources owned by cluster scoped resources.
+func SetClusterResourcedNamespacedChildren(showNamespacedChildren bool) UpdateSettingsFunc {
+	return func(cache *clusterCache) {
+		cache.showClusterResourceChildren = showNamespacedChildren
+	}
+}
