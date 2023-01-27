@@ -3,7 +3,6 @@ package cache
 import (
 	"context"
 	"fmt"
-	"os"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -58,11 +57,6 @@ const (
 	// Limit is required to avoid memory spikes during cache initialization.
 	// The default limit of 50 is chosen based on experiments.
 	defaultListSemaphoreWeight = 50
-
-	// Set ENABLE_CLUSTER_RESOURCE_CHILDREN to true to show namespace scoped
-	// resources owned by cluster scoped resources. By default, this feature is
-	// disabled due to performance implications.
-	enableClusterResourceChildrenEnv = "ENABLE_CLUSTER_RESOURCE_CHILDREN"
 )
 
 const (
@@ -215,6 +209,11 @@ type clusterCache struct {
 	nsIndex   map[string]map[kube.ResourceKey]*Resource
 	// childrenByParent maps a parent ref to the list of child refs
 	childrenByParent map[kube.ResourceKey][]kube.ResourceKey
+
+	// Set showClusterResourceChildren to true to show namespace scoped
+	// resources owned by cluster scoped resources. By default, this feature is
+	// disabled due to performance implications.
+	showClusterResourceChildren bool
 
 	kubectl          kube.Kubectl
 	log              logr.Logger
@@ -982,7 +981,7 @@ func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(resour
 	defer c.lock.RUnlock()
 	if res, ok := c.resources[key]; ok {
 		nsNodes := c.nsIndex[key.Namespace]
-		if key.Namespace == "" && isClusterResourceChildrenEnabled() {
+		if key.Namespace == "" && c.showClusterResourceChildren {
 			childRefs := c.childrenByParent[key]
 			for _, childRef := range childRefs {
 				if c.resources[childRef] != nil {
@@ -1190,7 +1189,7 @@ func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) {
 }
 
 func (c *clusterCache) updateChildrenByParentMap(res *Resource) {
-	if res == nil || !isClusterResourceChildrenEnabled() {
+	if res == nil || !c.showClusterResourceChildren {
 		return
 	}
 	childKey := res.ResourceKey()
@@ -1222,7 +1221,7 @@ func (c *clusterCache) updateChildrenByParentMap(res *Resource) {
 }
 
 func (c *clusterCache) removeFromChildrenByParentMap(key kube.ResourceKey) {
-	if !isClusterResourceChildrenEnabled() {
+	if !c.showClusterResourceChildren {
 		return
 	}
 
@@ -1237,11 +1236,6 @@ func (c *clusterCache) removeFromChildrenByParentMap(key kube.ResourceKey) {
 			}
 		}
 	}
-}
-
-func isClusterResourceChildrenEnabled() bool {
-	val := os.Getenv(enableClusterResourceChildrenEnv)
-	return strings.ToLower(val) == "true"
 }
 
 var (
