@@ -20,8 +20,16 @@ func mightHaveInferredOwner(r *Resource) bool {
 
 func (c *clusterCache) resolveResourceReferences(un *unstructured.Unstructured) ([]metav1.OwnerReference, func(kube.ResourceKey) bool) {
 	var isInferredParentOf func(_ kube.ResourceKey) bool
-	ownerRefs := un.GetOwnerReferences()
+	allOwnerRefs := un.GetOwnerReferences()
 	gvk := un.GroupVersionKind()
+
+	// TODO: Put this behind a gate
+	ownerRefs := []metav1.OwnerReference{}
+	for _, ownerRef := range allOwnerRefs {
+		if ownerRef.Controller != nil && *ownerRef.Controller {
+			ownerRefs = append(ownerRefs, ownerRef)
+		}
+	}
 
 	switch {
 	// Special case for endpoint. Remove after https://github.com/kubernetes/kubernetes/issues/28483 is fixed
