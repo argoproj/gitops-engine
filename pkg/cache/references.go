@@ -10,6 +10,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 
+	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
+	syncresource "github.com/argoproj/gitops-engine/pkg/sync/resource"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 )
 
@@ -20,15 +22,17 @@ func mightHaveInferredOwner(r *Resource) bool {
 
 func (c *clusterCache) resolveResourceReferences(un *unstructured.Unstructured) ([]metav1.OwnerReference, func(kube.ResourceKey) bool) {
 	var isInferredParentOf func(_ kube.ResourceKey) bool
-	allOwnerRefs := un.GetOwnerReferences()
+	ownerRefs := un.GetOwnerReferences()
 	gvk := un.GroupVersionKind()
 
-	// TODO: Put this behind a gate
-	ownerRefs := []metav1.OwnerReference{}
-	for _, ownerRef := range allOwnerRefs {
-		if ownerRef.Controller != nil && *ownerRef.Controller {
-			ownerRefs = append(ownerRefs, ownerRef)
+	if syncresource.HasAnnotationOption(un, synccommon.AnnotationSyncOptions, synccommon.SyncOptionControllerReferencesOnly) {
+		controllerOwnerRefs := []metav1.OwnerReference{}
+		for _, ownerRef := range un.GetOwnerReferences() {
+			if ownerRef.Controller != nil && *ownerRef.Controller {
+				controllerOwnerRefs = append(controllerOwnerRefs, ownerRef)
+			}
 		}
+		return controllerOwnerRefs, isInferredParentOf
 	}
 
 	switch {
