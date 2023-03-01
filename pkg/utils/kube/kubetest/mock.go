@@ -2,7 +2,6 @@ package kubetest
 
 import (
 	"context"
-	"sync"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -29,10 +28,6 @@ type MockKubectlCmd struct {
 	Version       string
 	DynamicClient dynamic.Interface
 
-	lastCommandPerResource map[kube.ResourceKey]string
-
-	recordLock sync.RWMutex
-
 	convertToVersionFunc *func(obj *unstructured.Unstructured, group, version string) (*unstructured.Unstructured, error)
 	getResourceFunc      *func(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string) (*unstructured.Unstructured, error)
 }
@@ -47,24 +42,6 @@ func (k *MockKubectlCmd) WithConvertToVersionFunc(convertToVersionFunc func(*uns
 func (k *MockKubectlCmd) WithGetResourceFunc(getResourcefunc func(context.Context, *rest.Config, schema.GroupVersionKind, string, string) (*unstructured.Unstructured, error)) *MockKubectlCmd {
 	k.getResourceFunc = &getResourcefunc
 	return k
-}
-
-/*func (k *MockKubectlCmd) GetLastResourceCommand(key kube.ResourceKey) string {
-	k.recordLock.Lock()
-	defer k.recordLock.Unlock()
-	if k.lastCommandPerResource == nil {
-		return ""
-	}
-	return k.lastCommandPerResource[key]
-}*/
-
-func (k *MockKubectlCmd) SetLastResourceCommand(key kube.ResourceKey, cmd string) {
-	k.recordLock.Lock()
-	if k.lastCommandPerResource == nil {
-		k.lastCommandPerResource = map[kube.ResourceKey]string{}
-	}
-	k.lastCommandPerResource[key] = cmd
-	k.recordLock.Unlock()
 }
 
 func (k *MockKubectlCmd) NewDynamicClient(config *rest.Config) (dynamic.Interface, error) {
@@ -95,22 +72,8 @@ func (k *MockKubectlCmd) DeleteResource(ctx context.Context, config *rest.Config
 	return command.Err
 }
 
-/*func (k *MockKubectlCmd) CreateResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, validate bool) (string, error) {
-	k.SetLastResourceCommand(kube.GetResourceKey(obj), "create")
-	command, ok := k.Commands[obj.GetName()]
-	if !ok {
-		return "", nil
-	}
-	return command.Output, command.Err
-}*/
-
 func (k *MockKubectlCmd) CreateResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string, obj *unstructured.Unstructured, subresources ...string) (*unstructured.Unstructured, error) {
-	k.SetLastResourceCommand(kube.GetResourceKey(obj), "create")
-	command, ok := k.Commands[obj.GetName()]
-	if !ok {
-		return nil, nil
-	}
-	return obj, command.Err
+	return obj, nil
 }
 
 // ConvertToVersion converts an unstructured object into the specified group/version
