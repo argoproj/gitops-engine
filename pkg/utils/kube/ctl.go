@@ -229,7 +229,7 @@ func (k *KubectlCmd) CreateResource(ctx context.Context, config *rest.Config, gv
 	}
 	resource := gvk.GroupVersion().WithResource(apiResource.Name)
 	resourceIf := ToResourceInterface(dynamicIf, apiResource, resource, namespace)
-	return resourceIf.Create(ctx, obj, metav1.CreateOptions{k}, subresources...)
+	return resourceIf.Create(ctx, obj, metav1.CreateOptions{}, subresources...)
 }
 
 // PatchResource patches resource

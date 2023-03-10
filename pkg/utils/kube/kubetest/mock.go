@@ -74,10 +74,6 @@ func (k *MockKubectlCmd) DeleteResource(ctx context.Context, config *rest.Config
 }
 
 func (k *MockKubectlCmd) CreateResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string, obj *unstructured.Unstructured, subresources ...string) (*unstructured.Unstructured, error) {
-	span := k.Tracer.StartSpan("CreateResource")
-	span.SetBaggageItem("kind", gvk.Kind)
-	span.SetBaggageItem("name", name)
-	defer span.Finish()
 	dynamicIf, err := dynamic.NewForConfig(config)
 	if err != nil {
 		return nil, err
@@ -86,12 +82,12 @@ func (k *MockKubectlCmd) CreateResource(ctx context.Context, config *rest.Config
 	if err != nil {
 		return nil, err
 	}
-	apiResource, err := ServerResourceForGroupVersionKind(disco, gvk, "create")
+	apiResource, err := kube.ServerResourceForGroupVersionKind(disco, gvk, "create")
 	if err != nil {
 		return nil, err
 	}
 	resource := gvk.GroupVersion().WithResource(apiResource.Name)
-	resourceIf := ToResourceInterface(dynamicIf, apiResource, resource, namespace)
+	resourceIf := kube.ToResourceInterface(dynamicIf, apiResource, resource, namespace)
 	return resourceIf.Create(ctx, obj, metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}}, subresources...)
 }
 
