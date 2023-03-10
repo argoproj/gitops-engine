@@ -92,7 +92,7 @@ func (k *MockKubectlCmd) CreateResource(ctx context.Context, config *rest.Config
 	}
 	resource := gvk.GroupVersion().WithResource(apiResource.Name)
 	resourceIf := ToResourceInterface(dynamicIf, apiResource, resource, namespace)
-	return resourceIf.Create(ctx, obj, metav1.CreateOptions{DryRun: ["server"]}, subresources...)
+	return resourceIf.Create(ctx, obj, metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}}, subresources...)
 }
 
 // ConvertToVersion converts an unstructured object into the specified group/version
