@@ -9,7 +9,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/managedfields"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubectl/pkg/util/openapi"
@@ -74,21 +73,7 @@ func (k *MockKubectlCmd) DeleteResource(ctx context.Context, config *rest.Config
 }
 
 func (k *MockKubectlCmd) CreateResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string, obj *unstructured.Unstructured, subresources ...string) (*unstructured.Unstructured, error) {
-	dynamicIf, err := dynamic.NewForConfig(config)
-	if err != nil {
-		return nil, err
-	}
-	disco, err := discovery.NewDiscoveryClientForConfig(config)
-	if err != nil {
-		return nil, err
-	}
-	apiResource, err := kube.ServerResourceForGroupVersionKind(disco, gvk, "create")
-	if err != nil {
-		return nil, err
-	}
-	resource := gvk.GroupVersion().WithResource(apiResource.Name)
-	resourceIf := kube.ToResourceInterface(dynamicIf, apiResource, resource, namespace)
-	return resourceIf.Create(ctx, obj, metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}}, subresources...)
+	return nil, nil
 }
 
 // ConvertToVersion converts an unstructured object into the specified group/version
