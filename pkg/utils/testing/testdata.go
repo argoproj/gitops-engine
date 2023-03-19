@@ -12,6 +12,11 @@ func HelmHook(obj *unstructured.Unstructured, hookType string) *unstructured.Uns
 	return Annotate(obj, "helm.sh/hook", hookType)
 }
 
+func Name(obj *unstructured.Unstructured, name string) *unstructured.Unstructured {
+	obj.SetName(name)
+	return obj
+}
+
 func Annotate(obj *unstructured.Unstructured, key, val string) *unstructured.Unstructured {
 	annotations := obj.GetAnnotations()
 	if annotations == nil {

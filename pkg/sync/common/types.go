@@ -12,6 +12,13 @@ const (
 	AnnotationSyncOptions = "argocd.argoproj.io/sync-options"
 	// AnnotationSyncWave indicates which wave of the sync the resource or hook should be in
 	AnnotationSyncWave = "argocd.argoproj.io/sync-wave"
+	// AnnotationSyncDependencies is dependencies of this object
+	// The dependencies are specified as a comma-separated list of objects.
+	// The format of each object is <group>/<kind>/<namespace>/<name>
+	// The group and kind are optional. If not specified, they'll match any group or kind.
+	// The namespace is optional. If not specified, the namespace is assumed to be the same as the namespace of the object.
+	// The name is required.
+	AnnotationSyncDependencies = "argocd.argoproj.io/sync-dependencies"
 	// AnnotationKeyHook contains the hook type of a resource
 	AnnotationKeyHook = "argocd.argoproj.io/hook"
 	// AnnotationKeyHookDeletePolicy is the policy of deleting a hook

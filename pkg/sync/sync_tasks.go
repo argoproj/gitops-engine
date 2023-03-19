@@ -1,14 +1,11 @@
 package sync
 
 import (
-	"fmt"
+	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 	"sort"
 	"strings"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-
 	"github.com/argoproj/gitops-engine/pkg/sync/common"
-	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 )
 
 // kindOrder represents the correct order of Kubernetes resources within a manifest
@@ -77,28 +74,57 @@ func (s syncTasks) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
 
-// order is
-// 1. phase
-// 2. wave
-// 3. kind
-// 4. name
+// Less returns true if task i should be sorted before task j
+// The order is:
+// 1. Namespaces
+// 2. CRDs
+// 3. Sync phase
+// 4. Wave
+// 5. Kind
+// 6. Name
 func (s syncTasks) Less(i, j int) bool {
 
-	tA := s[i]
-	tB := s[j]
+	l := s[i]
+	r := s[j]
 
-	d := syncPhaseOrder[tA.phase] - syncPhaseOrder[tB.phase]
+	a := l.obj()
+	b := r.obj()
+
+	// namespaces must come before objects that depend on them
+	if a.GetKind() == kube.NamespaceKind && a.GroupVersionKind().Group == "" && a.GetName() == b.GetNamespace() {
+		return true
+	}
+
+	// crds must come before objects that depend on them
+	if isCRDOfGroupKind(b.GroupVersionKind().Group, b.GetKind(), a) {
+		return true
+	}
+
+	// Order by dependency.
+	// We tolerate cycles in the dependency graph, but we will not detect them.
+	// We also tolerate missing dependencies, but we will not detect them.
+	deps := r.dependencies()
+	for len(deps) > 0 {
+		dep := s.taskFor(deps[0])
+		deps = deps[1:]
+		if dep == nil {
+			continue
+		}
+		if dep == l {
+			return true
+		}
+		deps = append(deps, dep.dependencies()...)
+	}
+
+	d := syncPhaseOrder[l.phase] - syncPhaseOrder[r.phase]
 	if d != 0 {
 		return d < 0
 	}
 
-	d = tA.wave() - tB.wave()
+	d = l.wave() - r.wave()
 	if d != 0 {
 		return d < 0
 	}
-
-	a := tA.obj()
-	b := tB.obj()
 
 	// we take advantage of the fact that if the kind is not in the kindOrder map,
 	// then it will return the default int value of zero, which is the highest value
@@ -112,69 +138,6 @@ func (s syncTasks) Less(i, j int) bool {
 
 func (s syncTasks) Sort() {
 	sort.Sort(s)
-	// make sure namespaces are created before resources referencing namespaces
-	s.adjustDeps(func(obj *unstructured.Unstructured) (string, bool) {
-		return obj.GetName(), obj.GetKind() == kube.NamespaceKind && obj.GroupVersionKind().Group == ""
-	}, func(obj *unstructured.Unstructured) (string, bool) {
-		return obj.GetNamespace(), obj.GetNamespace() != ""
-	})
-	// make sure CRDs are created before CRs
-	s.adjustDeps(func(obj *unstructured.Unstructured) (string, bool) {
-		if kube.IsCRD(obj) {
-			crdGroup, ok, err := unstructured.NestedString(obj.Object, "spec", "group")
-			if err != nil || !ok {
-				return "", false
-			}
-			crdKind, ok, err := unstructured.NestedString(obj.Object, "spec", "names", "kind")
-			if err != nil || !ok {
-				return "", false
-			}
-			return fmt.Sprintf("%s/%s", crdGroup, crdKind), true
-		}
-		return "", false
-	}, func(obj *unstructured.Unstructured) (string, bool) {
-		gk := obj.GroupVersionKind()
-		return fmt.Sprintf("%s/%s", gk.Group, gk.Kind), true
-	})
-}
-
-// adjust order of tasks and bubble up tasks which are dependencies of other tasks
-// (e.g. namespace sync should happen before resources that resides in that namespace)
-func (s syncTasks) adjustDeps(isDep func(obj *unstructured.Unstructured) (string, bool), doesRefDep func(obj *unstructured.Unstructured) (string, bool)) {
-	// store dependency key and first occurrence of resource referencing the dependency
-	firstIndexByDepKey := map[string]int{}
-
-	for i, t := range s {
-		if t.targetObj == nil {
-			continue
-		}
-
-		if depKey, ok := isDep(t.targetObj); ok {
-			// if tasks is a dependency then insert if before first task that reference it
-			if index, ok := firstIndexByDepKey[depKey]; ok {
-				// wave and sync phase of dependency resource must be same as wave and phase of resource that depend on it
-				wave := s[index].wave()
-				t.waveOverride = &wave
-				t.phase = s[index].phase
-
-				for j := i; j > index; j-- {
-					s[j] = s[j-1]
-				}
-				s[index] = t
-				// increase previously collected indexes by 1
-				for ns, firstIndex := range firstIndexByDepKey {
-					if firstIndex >= index {
-						firstIndexByDepKey[ns] = firstIndex + 1
-					}
-				}
-			}
-		} else if depKey, ok := doesRefDep(t.targetObj); ok {
-			// if task is referencing the dependency then store first index of it
-			if _, ok := firstIndexByDepKey[depKey]; !ok {
-				firstIndexByDepKey[depKey] = i
-			}
-		}
-	}
 }
 
 func (s syncTasks) Filter(predicate func(task *syncTask) bool) (tasks syncTasks) {
@@ -244,6 +207,14 @@ func (s syncTasks) String() string {
 	return "[" + strings.Join(values, ", ") + "]"
 }
 
+func (s syncTasks) names() []string {
+	var values []string
+	for _, task := range s {
+		values = append(values, task.name())
+	}
+	return values
+}
+
 func (s syncTasks) phase() common.SyncPhase {
 	if len(s) > 0 {
 		return s[0].phase
@@ -273,5 +244,13 @@ func (s syncTasks) lastWave() int {
 }
 
 func (s syncTasks) multiStep() bool {
-	return s.wave() != s.lastWave() || s.phase() != s.lastPhase()
+	return s.wave() != s.lastWave() || s.phase() != s.lastPhase() || s.Any(func(task *syncTask) bool {
+		return len(task.dependencies()) > 0
+	})
+}
+
+func (s syncTasks) taskFor(dep taskDependency) *syncTask {
+	return s.Find(func(task *syncTask) bool {
+		return dep.match(task.obj())
+	})
 }

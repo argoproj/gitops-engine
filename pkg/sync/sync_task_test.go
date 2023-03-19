@@ -74,3 +74,38 @@ func Test_syncTask_wave(t *testing.T) {
 	assert.Equal(t, 0, (&syncTask{targetObj: NewPod()}).wave())
 	assert.Equal(t, 1, (&syncTask{targetObj: Annotate(NewPod(), "argocd.argoproj.io/sync-wave", "1")}).wave())
 }
+
+func Test_syncTask_dependencies(t1 *testing.T) {
+	tests := []struct {
+		name string
+		task syncTask
+		want []taskDependency
+	}{
+		{"Empty", syncTask{targetObj: Unstructured(`{"kind": "Pod"}`)}, []taskDependency{}},
+		{
+			"Name",
+			syncTask{targetObj: Annotate(NewPod(), common.AnnotationSyncDependencies, "foo")},
+			[]taskDependency{{Name: "foo"}},
+		},
+		{
+			"Namespace",
+			syncTask{targetObj: Annotate(NewPod(), common.AnnotationSyncDependencies, "foo/")},
+			[]taskDependency{{Namespace: "foo"}},
+		},
+		{
+			"Kind",
+			syncTask{targetObj: Annotate(NewPod(), common.AnnotationSyncDependencies, "Foo//")},
+			[]taskDependency{{Kind: "Foo"}},
+		},
+		{
+			"Group",
+			syncTask{targetObj: Annotate(NewPod(), common.AnnotationSyncDependencies, "foo///")},
+			[]taskDependency{{Group: "foo"}},
+		},
+	}
+	for _, tt := range tests {
+		t1.Run(tt.name, func(t1 *testing.T) {
+			assert.ElementsMatch(t1, tt.want, tt.task.dependencies(), "dependencies()")
+		})
+	}
+}

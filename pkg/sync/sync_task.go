@@ -2,6 +2,7 @@ package sync
 
 import (
 	"fmt"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -23,7 +24,6 @@ type syncTask struct {
 	syncStatus     common.ResultCode
 	operationState common.OperationPhase
 	message        string
-	waveOverride   *int
 }
 
 func ternary(val bool, a, b string) string {
@@ -57,10 +57,33 @@ func (t *syncTask) obj() *unstructured.Unstructured {
 	return obj(t.targetObj, t.liveObj)
 }
 
-func (t *syncTask) wave() int {
-	if t.waveOverride != nil {
-		return *t.waveOverride
+// Returns the dependencies of the task.
+func (t *syncTask) dependencies() []taskDependency {
+	var out []taskDependency
+	for _, s := range strings.Split(t.obj().GetAnnotations()[common.AnnotationSyncDependencies], ",") {
+		if s == "" {
+			continue
+		}
+		parts := strings.Split(s, "/")
+		switch len(parts) {
+		case 1:
+			name := parts[0]
+			out = append(out, taskDependency{Name: name})
+		case 2:
+			namespace, name := parts[0], parts[1]
+			out = append(out, taskDependency{Namespace: namespace, Name: name})
+		case 3:
+			kind, namespace, name := parts[0], parts[1], parts[2]
+			out = append(out, taskDependency{Kind: kind, Namespace: namespace, Name: name})
+		case 4:
+			group, kind, namespace, name := parts[0], parts[1], parts[2], parts[3]
+			out = append(out, taskDependency{Kind: kind, Group: group, Namespace: namespace, Name: name})
+		}
 	}
+	return out
+}
+
+func (t *syncTask) wave() int {
 	return syncwaves.Wave(t.obj())
 }
 

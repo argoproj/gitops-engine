@@ -417,14 +417,10 @@ func TestSyncTasksSort_NamespaceAndObjectInNamespace(t *testing.T) {
 		},
 	}
 
-	unsorted := syncTasks{hook1, hook2, namespace1, namespace2}
+	unsorted := syncTasks{hook1, namespace1, hook2, namespace2}
 	unsorted.Sort()
 
 	assert.Equal(t, syncTasks{namespace1, hook1, namespace2, hook2}, unsorted)
-	assert.Equal(t, 0, namespace1.wave())
-	assert.Equal(t, common.SyncPhase(common.SyncPhasePreSync), namespace1.phase)
-	assert.Equal(t, 0, namespace2.wave())
-	assert.Equal(t, common.SyncPhase(common.SyncPhasePreSync), namespace2.phase)
 }
 
 func TestSyncTasksSort_CRDAndCR(t *testing.T) {
@@ -455,6 +451,39 @@ func TestSyncTasksSort_CRDAndCR(t *testing.T) {
 	unsorted.Sort()
 
 	assert.Equal(t, syncTasks{crd, cr}, unsorted)
+}
+
+func Test_syncTasks_dependencies(t *testing.T) {
+	t.Run("Default", func(t *testing.T) {
+		a := Annotate(Name(NewPod(), "a"), common.AnnotationSyncDependencies, "b")
+		b := Annotate(Name(NewPod(), "b"), common.AnnotationSyncDependencies, "c")
+		c := Annotate(Name(NewPod(), "c"), common.AnnotationSyncDependencies, "")
+		tasks := syncTasks{
+			{targetObj: a},
+			{targetObj: b},
+			{targetObj: c},
+		}
+		tasks.Sort()
+		assert.Equal(t, []string{"c", "b", "a"}, tasks.names())
+	})
+	t.Run("Cycle", func(t *testing.T) {
+		a := Annotate(Name(NewPod(), "a"), common.AnnotationSyncDependencies, "b")
+		b := Annotate(Name(NewPod(), "b"), common.AnnotationSyncDependencies, "c")
+		c := Annotate(Name(NewPod(), "c"), common.AnnotationSyncDependencies, "a")
+		tasks := syncTasks{
+			{targetObj: a},
+			{targetObj: b},
+			{targetObj: c},
+		}
+		tasks.Sort()
+	})
+	t.Run("Missing", func(t *testing.T) {
+		a := Annotate(Name(NewPod(), "a"), common.AnnotationSyncDependencies, "b")
+		tasks := syncTasks{
+			{targetObj: a},
+		}
+		tasks.Sort()
+	})
 }
 
 func Test_syncTasks_multiStep(t *testing.T) {
