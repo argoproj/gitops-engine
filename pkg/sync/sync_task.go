@@ -2,10 +2,9 @@ package sync
 
 import (
 	"fmt"
-	"strings"
-
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"strings"
 
 	"github.com/argoproj/gitops-engine/pkg/sync/common"
 	"github.com/argoproj/gitops-engine/pkg/sync/hook"
@@ -57,6 +56,10 @@ func (t *syncTask) obj() *unstructured.Unstructured {
 	return obj(t.targetObj, t.liveObj)
 }
 
+func (t *syncTask) wave() int {
+	return syncwaves.Wave(t.obj())
+}
+
 // Returns the dependencies of the task.
 func (t *syncTask) dependencies() []taskDependency {
 	var out []taskDependency
@@ -81,10 +84,6 @@ func (t *syncTask) dependencies() []taskDependency {
 		}
 	}
 	return out
-}
-
-func (t *syncTask) wave() int {
-	return syncwaves.Wave(t.obj())
 }
 
 func (t *syncTask) isHook() bool {

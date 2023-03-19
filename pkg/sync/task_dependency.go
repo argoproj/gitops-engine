@@ -12,6 +12,7 @@ type taskDependency struct {
 	Group     string
 }
 
+// match returns true if the given object matches the dependency
 func (d taskDependency) match(obj *unstructured.Unstructured) bool {
 	return (obj.GetKind() == d.Kind || d.Kind == "") &&
 		(strings.HasPrefix(obj.GetAPIVersion(), d.Group+"/") || d.Group == "") &&

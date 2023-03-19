@@ -207,6 +207,7 @@ func (s syncTasks) String() string {
 	return "[" + strings.Join(values, ", ") + "]"
 }
 
+// names returns the names of the tasks
 func (s syncTasks) names() []string {
 	var values []string
 	for _, task := range s {
