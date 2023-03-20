@@ -503,16 +503,29 @@ func (sc *syncContext) Sync() {
 	// if it is the last phase/wave and the only remaining tasks are non-hooks, then we are successful
 	// EVEN if those objects subsequently degraded
 	// This handles the common case where neither hooks or waves are used and a sync equates to simply an (asynchronous) kubectl apply of manifests, which succeeds immediately.
-	tasks, blockedTasks := tasks.Split(func(t *syncTask) bool {
+	tasks, waitingTasks := tasks.Split(func(t *syncTask) bool {
 		for _, dep := range t.dependencies() {
-			if !completedTasks.Any(func(t *syncTask) bool { return dep.match(t.obj()) }) {
-				sc.log.WithValues("task", t, "dependency", dep).V(1).Info("Task has unmet dependency")
+			if !completedTasks.All(func(t *syncTask) bool { return dep.match(t.obj()) }) {
+				t.message = fmt.Sprintf("waiting for dependency %s to complete", dep)
 				return false
 			}
 		}
-		return t.phase == phase && wave == t.wave()
+		if t.phase != phase {
+			t.message = fmt.Sprintf("waiting for phase %s to complete", t.phase)
+			return false
+		}
+		if t.wave() != wave {
+			t.message = fmt.Sprintf("waiting for sync was %d to complete", t.wave())
+			return false
+		}
+		return true
 	})
-	sc.log.WithValues("phase", phase, "wave", wave, "tasks", tasks, "blockedTasks", blockedTasks, "syncFailTasks", syncFailTasks).V(1).Info("Filtering tasks in correct phase and wave")
+	sc.log.WithValues("phase", phase, "wave", wave, "tasks", tasks, "waitingTasks", waitingTasks, "syncFailTasks", syncFailTasks).V(1).Info("Filtering tasks in correct phase and wave")
+
+	// set the message for all waiting tasks, so that the user can understand why nothing is happening
+	for _, task := range waitingTasks {
+		sc.setResourceResult(task, "", "", task.message)
+	}
 
 	sc.setOperationPhase(common.OperationRunning, "one or more tasks are running")
 
@@ -535,7 +548,7 @@ func (sc *syncContext) Sync() {
 		sc.deleteHooks(hooksPendingDeletionFailed)
 		sc.setOperationFailed(syncFailTasks, syncFailedTasks, "one or more objects failed to apply")
 	case successful:
-		if blockedTasks.Len() == 0 {
+		if waitingTasks.Len() == 0 {
 			// delete all completed hooks which have appropriate delete policy
 			sc.deleteHooks(hooksPendingDeletionSuccessful)
 			sc.setOperationPhase(common.OperationSucceeded, "successfully synced (all tasks run)")
