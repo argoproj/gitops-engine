@@ -1132,7 +1132,6 @@ func TestSyncFailureHookWithFailedSync(t *testing.T) {
 }
 
 func TestBeforeHookCreation(t *testing.T) {
-	t.SkipNow()
 	syncCtx := newTestSyncCtx(nil)
 	hook := Annotate(Annotate(NewPod(), synccommon.AnnotationKeyHook, "Sync"), synccommon.AnnotationKeyHookDeletePolicy, "BeforeHookCreation")
 	hook.SetNamespace(FakeArgoCDNamespace)
