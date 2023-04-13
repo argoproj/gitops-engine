@@ -33,7 +33,7 @@ type Kubectl interface {
 	ConvertToVersion(obj *unstructured.Unstructured, group, version string) (*unstructured.Unstructured, error)
 	DeleteResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string, deleteOptions metav1.DeleteOptions) error
 	GetResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string) (*unstructured.Unstructured, error)
-	CreateResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string, obj *unstructured.Unstructured, subresources ...string) (*unstructured.Unstructured, error)
+	CreateResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string, obj *unstructured.Unstructured, createOptions metav1.CreateOptions, subresources ...string) (*unstructured.Unstructured, error)
 	PatchResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string, patchType types.PatchType, patchBytes []byte, subresources ...string) (*unstructured.Unstructured, error)
 	GetAPIResources(config *rest.Config, preferred bool, resourceFilter ResourceFilter) ([]APIResourceInfo, error)
 	GetServerVersion(config *rest.Config) (string, error)
@@ -210,7 +210,7 @@ func (k *KubectlCmd) GetResource(ctx context.Context, config *rest.Config, gvk s
 }
 
 // CreateResource creates resource
-func (k *KubectlCmd) CreateResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string, obj *unstructured.Unstructured, subresources ...string) (*unstructured.Unstructured, error) {
+func (k *KubectlCmd) CreateResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string, obj *unstructured.Unstructured, createOptions metav1.CreateOptions, subresources ...string) (*unstructured.Unstructured, error) {
 	span := k.Tracer.StartSpan("CreateResource")
 	span.SetBaggageItem("kind", gvk.Kind)
 	span.SetBaggageItem("name", name)
@@ -229,7 +229,7 @@ func (k *KubectlCmd) CreateResource(ctx context.Context, config *rest.Config, gv
 	}
 	resource := gvk.GroupVersion().WithResource(apiResource.Name)
 	resourceIf := ToResourceInterface(dynamicIf, apiResource, resource, namespace)
-	return resourceIf.Create(ctx, obj, metav1.CreateOptions{}, subresources...)
+	return resourceIf.Create(ctx, obj, createOptions, subresources...)
 }
 
 // PatchResource patches resource

@@ -72,7 +72,7 @@ func (k *MockKubectlCmd) DeleteResource(ctx context.Context, config *rest.Config
 	return command.Err
 }
 
-func (k *MockKubectlCmd) CreateResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string, obj *unstructured.Unstructured, subresources ...string) (*unstructured.Unstructured, error) {
+func (k *MockKubectlCmd) CreateResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string, obj *unstructured.Unstructured, createOptions metav1.CreateOptions, subresources ...string) (*unstructured.Unstructured, error) {
 	return nil, nil
 }
 
