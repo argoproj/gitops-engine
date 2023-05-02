@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"golang.org/x/sync/semaphore"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,6 +23,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
+	authType1 "k8s.io/client-go/kubernetes/typed/authorization/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/pager"
@@ -208,6 +211,8 @@ type clusterCache struct {
 	eventHandlers               map[uint64]OnEventHandler
 	openAPISchema               openapi.Resources
 	gvkParser                   *managedfields.GvkParser
+
+	respectRBAC bool
 }
 
 type clusterCacheSync struct {
@@ -462,6 +467,10 @@ func (c *clusterCache) startMissingWatches() error {
 	if err != nil {
 		return err
 	}
+	clientset, err := kubernetes.NewForConfig(c.config)
+	if err != nil {
+		return err
+	}
 	namespacedResources := make(map[schema.GroupKind]bool)
 	for i := range apis {
 		api := apis[i]
@@ -470,10 +479,14 @@ func (c *clusterCache) startMissingWatches() error {
 			ctx, cancel := context.WithCancel(context.Background())
 			c.apisMeta[api.GroupKind] = &apiMeta{namespaced: api.Meta.Namespaced, watchCancel: cancel}
 
-			err = c.processApi(client, api, func(resClient dynamic.ResourceInterface, ns string) error {
+			keepResource, err := c.processApi(ctx, clientset.AuthorizationV1().SelfSubjectAccessReviews(), client, api, func(resClient dynamic.ResourceInterface, ns string) error {
 				go c.watchEvents(ctx, api, resClient, ns, "")
 				return nil
 			})
+			if !keepResource {
+				delete(c.apisMeta, api.GroupKind)
+				delete(namespacedResources, api.GroupKind)
+			}
 			if err != nil {
 				return err
 			}
@@ -683,23 +696,58 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 	})
 }
 
-func (c *clusterCache) processApi(client dynamic.Interface, api kube.APIResourceInfo, callback func(resClient dynamic.ResourceInterface, ns string) error) error {
+// processApi checks if resource can be accessed using current rbac (when respectRBAC is enabled) if no returns false else tries to execute the callback
+func (c *clusterCache) processApi(ctx context.Context, reviewInterface authType1.SelfSubjectAccessReviewInterface, client dynamic.Interface, api kube.APIResourceInfo, callback func(resClient dynamic.ResourceInterface, ns string) error) (keep bool, err error) {
 	resClient := client.Resource(api.GroupVersionResource)
+	sar := &authorizationv1.SelfSubjectAccessReview{
+		Spec: authorizationv1.SelfSubjectAccessReviewSpec{
+			ResourceAttributes: &authorizationv1.ResourceAttributes{
+				Namespace: "*",
+				Verb:      "list",
+				Resource:  api.GroupVersionResource.Resource,
+			},
+		},
+	}
+	var (
+		resp *authorizationv1.SelfSubjectAccessReview
+	)
 	switch {
 	// if manage whole cluster or resource is cluster level and cluster resources enabled
 	case len(c.namespaces) == 0 || !api.Meta.Namespaced && c.clusterResources:
-		return callback(resClient, "")
+		if c.respectRBAC {
+			resp, err = reviewInterface.Create(ctx, sar, metav1.CreateOptions{})
+			if err != nil {
+				return true, err
+			}
+		}
+		if !c.respectRBAC || (resp != nil && resp.Status.Allowed) {
+			return true, callback(resClient, "")
+		}
+		// unsupported, remove from watch list
+		return false, nil
 	// if manage some namespaces and resource is namespaced
 	case len(c.namespaces) != 0 && api.Meta.Namespaced:
 		for _, ns := range c.namespaces {
-			err := callback(resClient.Namespace(ns), ns)
-			if err != nil {
-				return err
+			if c.respectRBAC {
+				sar.Spec.ResourceAttributes.Namespace = ns
+				resp, err = reviewInterface.Create(ctx, sar, metav1.CreateOptions{})
+				if err != nil {
+					return true, err
+				}
+			}
+			if !c.respectRBAC || (resp != nil && resp.Status.Allowed) {
+				err := callback(resClient, "")
+				if err != nil {
+					return true, err
+				}
+			} else {
+				// unsupported, remove from watch list
+				return false, nil
 			}
 		}
 	}
 
-	return nil
+	return true, nil
 }
 
 func (c *clusterCache) sync() error {
@@ -748,6 +796,10 @@ func (c *clusterCache) sync() error {
 	if err != nil {
 		return err
 	}
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return err
+	}
 	lock := sync.Mutex{}
 	err = kube.RunAllAsync(len(apis), func(i int) error {
 		api := apis[i]
@@ -759,7 +811,7 @@ func (c *clusterCache) sync() error {
 		c.namespacedResources[api.GroupKind] = api.Meta.Namespaced
 		lock.Unlock()
 
-		return c.processApi(client, api, func(resClient dynamic.ResourceInterface, ns string) error {
+		keepResource, err := c.processApi(ctx, clientset.AuthorizationV1().SelfSubjectAccessReviews(), client, api, func(resClient dynamic.ResourceInterface, ns string) error {
 			resourceVersion, err := c.listResources(ctx, resClient, func(listPager *pager.ListPager) error {
 				return listPager.EachListItem(context.Background(), metav1.ListOptions{}, func(obj runtime.Object) error {
 					if un, ok := obj.(*unstructured.Unstructured); !ok {
@@ -780,6 +832,13 @@ func (c *clusterCache) sync() error {
 
 			return nil
 		})
+		if !keepResource {
+			lock.Lock()
+			delete(c.apisMeta, api.GroupKind)
+			delete(c.namespacedResources, api.GroupKind)
+			lock.Unlock()
+		}
+		return err
 	})
 
 	if err != nil {
