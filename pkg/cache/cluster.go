@@ -193,6 +193,9 @@ type clusterCache struct {
 	lock      sync.RWMutex
 	resources map[kube.ResourceKey]*Resource
 	nsIndex   map[string]map[kube.ResourceKey]*Resource
+	// syncErrorTimes records when the last error occurred attempting to sync a certain GK. Storing this info allows us
+	// to resync only the GKs with errors and only after a retry timeout.
+	syncErrorTimes map[schema.GroupKind]time.Time
 
 	kubectl          kube.Kubectl
 	log              logr.Logger
@@ -425,20 +428,23 @@ func (c *clusterCache) Invalidate(opts ...UpdateSettingsFunc) {
 }
 
 // clusterCacheSync's lock should be held before calling this method
-func (syncStatus *clusterCacheSync) synced(clusterRetryTimeout time.Duration) bool {
+func (syncStatus *clusterCacheSync) synced(clusterRetryTimeout time.Duration) syncType {
 	syncTime := syncStatus.syncTime
 
 	if syncTime == nil {
-		return false
+		return syncTypeFull
 	}
-	if syncStatus.syncError != nil {
-		return time.Now().Before(syncTime.Add(clusterRetryTimeout))
+	if time.Now().After(syncTime.Add(syncStatus.resyncTimeout)) {
+		if syncStatus.resyncTimeout == 0 {
+			// cluster resync timeout has been disabled
+			return syncTypeNone
+		}
+		return syncTypeFull
 	}
-	if syncStatus.resyncTimeout == 0 {
-		// cluster resync timeout has been disabled
-		return true
+	if syncStatus.syncError != nil && time.Now().Before(syncTime.Add(clusterRetryTimeout)) {
+		return syncTypePartial
 	}
-	return time.Now().Before(syncTime.Add(syncStatus.resyncTimeout))
+	return syncTypeNone
 }
 
 func (c *clusterCache) stopWatching(gk schema.GroupKind, ns string) {
@@ -702,7 +708,15 @@ func (c *clusterCache) processApi(client dynamic.Interface, api kube.APIResource
 	return nil
 }
 
-func (c *clusterCache) sync() error {
+type syncType string
+
+const (
+	syncTypeNone    = "none"
+	syncTypeFull    = "full"
+	syncTypePartial = "partial"
+)
+
+func (c *clusterCache) sync(st syncType) error {
 	c.log.Info("Start syncing cluster")
 
 	for i := range c.apisMeta {
@@ -710,6 +724,9 @@ func (c *clusterCache) sync() error {
 	}
 	c.apisMeta = make(map[schema.GroupKind]*apiMeta)
 	c.resources = make(map[kube.ResourceKey]*Resource)
+	if st == syncTypeFull {
+		c.syncErrorTimes = make(map[schema.GroupKind]time.Time)
+	}
 	c.namespacedResources = make(map[schema.GroupKind]bool)
 	config := c.config
 	version, err := c.kubectl.GetServerVersion(config)
@@ -749,6 +766,7 @@ func (c *clusterCache) sync() error {
 		return err
 	}
 	lock := sync.Mutex{}
+	now := time.Now()
 	err = kube.RunAllAsync(len(apis), func(i int) error {
 		api := apis[i]
 
@@ -757,6 +775,14 @@ func (c *clusterCache) sync() error {
 		info := &apiMeta{namespaced: api.Meta.Namespaced, watchCancel: cancel}
 		c.apisMeta[api.GroupKind] = info
 		c.namespacedResources[api.GroupKind] = api.Meta.Namespaced
+		if st == syncTypePartial {
+			if et, ok := c.syncErrorTimes[api.GroupKind]; !ok || !now.After(et.Add(c.clusterSyncRetryTimeout)) {
+				lock.Unlock()
+				// Either this GK had no error on the last sync, or it did have an error, but it wasn't long enough ago
+				// for us to start a new sync. Skip this GK.
+				return nil
+			}
+		}
 		lock.Unlock()
 
 		return c.processApi(client, api, func(resClient dynamic.ResourceInterface, ns string) error {
@@ -773,7 +799,20 @@ func (c *clusterCache) sync() error {
 				})
 			})
 			if err != nil {
+				lock.Lock()
+				c.syncErrorTimes[api.GroupKind] = now
+				lock.Unlock()
 				return fmt.Errorf("failed to load initial state of resource %s: %v", api.GroupKind.String(), err)
+			}
+
+			if st == syncTypePartial {
+				lock.Lock()
+				if _, ok := c.syncErrorTimes[api.GroupKind]; ok {
+					// We managed to successfully sync the resource. Clear the error time so we don't retry until the
+					// next full sync.
+					delete(c.syncErrorTimes, api.GroupKind)
+				}
+				lock.Unlock()
 			}
 
 			go c.watchEvents(ctx, api, resClient, ns, resourceVersion)
@@ -796,7 +835,8 @@ func (c *clusterCache) EnsureSynced() error {
 
 	// first check if cluster is synced *without acquiring the full clusterCache lock*
 	syncStatus.lock.Lock()
-	if syncStatus.synced(c.clusterSyncRetryTimeout) {
+	st := syncStatus.synced(c.clusterSyncRetryTimeout)
+	if st == syncTypeNone {
 		syncError := syncStatus.syncError
 		syncStatus.lock.Unlock()
 		return syncError
@@ -810,10 +850,11 @@ func (c *clusterCache) EnsureSynced() error {
 
 	// before doing any work, check once again now that we have the lock, to see if it got
 	// synced between the first check and now
-	if syncStatus.synced(c.clusterSyncRetryTimeout) {
+	st = syncStatus.synced(c.clusterSyncRetryTimeout)
+	if st == syncTypeNone {
 		return syncStatus.syncError
 	}
-	err := c.sync()
+	err := c.sync(st)
 	syncTime := time.Now()
 	syncStatus.syncTime = &syncTime
 	syncStatus.syncError = err
