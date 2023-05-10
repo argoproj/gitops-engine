@@ -11,9 +11,9 @@ import (
 
 	"github.com/go-logr/logr"
 	"golang.org/x/sync/semaphore"
-	authorizationv1 "k8s.io/api/authorization/v1"
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	k8sErrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -23,8 +23,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/kubernetes"
-	authType1 "k8s.io/client-go/kubernetes/typed/authorization/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/pager"
@@ -467,10 +465,6 @@ func (c *clusterCache) startMissingWatches() error {
 	if err != nil {
 		return err
 	}
-	clientset, err := kubernetes.NewForConfig(c.config)
-	if err != nil {
-		return err
-	}
 	namespacedResources := make(map[schema.GroupKind]bool)
 	for i := range apis {
 		api := apis[i]
@@ -479,14 +473,16 @@ func (c *clusterCache) startMissingWatches() error {
 			ctx, cancel := context.WithCancel(context.Background())
 			c.apisMeta[api.GroupKind] = &apiMeta{namespaced: api.Meta.Namespaced, watchCancel: cancel}
 
-			keepResource, err := c.processApi(ctx, clientset.AuthorizationV1().SelfSubjectAccessReviews(), client, api, func(resClient dynamic.ResourceInterface, ns string) error {
-				go c.watchEvents(ctx, api, resClient, ns, "")
+			err := c.processApi(client, api, func(resClient dynamic.ResourceInterface, ns string) error {
+				resourceVersion, err := c.loadInitialState(ctx, api, resClient, ns)
+				if err != nil && c.respectRBAC && (k8sErrors.IsForbidden(err) || k8sErrors.IsUnauthorized(err)) {
+					delete(c.apisMeta, api.GroupKind)
+					delete(namespacedResources, api.GroupKind)
+					return nil
+				}
+				go c.watchEvents(ctx, api, resClient, ns, resourceVersion)
 				return nil
 			})
-			if !keepResource {
-				delete(c.apisMeta, api.GroupKind)
-				delete(namespacedResources, api.GroupKind)
-			}
 			if err != nil {
 				return err
 			}
@@ -543,6 +539,29 @@ func (c *clusterCache) listResources(ctx context.Context, resClient dynamic.Reso
 	return resourceVersion, callback(listPager)
 }
 
+func (c *clusterCache) loadInitialState(ctx context.Context, api kube.APIResourceInfo, resClient dynamic.ResourceInterface, ns string) (string, error) {
+	return c.listResources(ctx, resClient, func(listPager *pager.ListPager) error {
+		var items []*Resource
+		err := listPager.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
+			if un, ok := obj.(*unstructured.Unstructured); !ok {
+				return fmt.Errorf("object %s/%s has an unexpected type", un.GroupVersionKind().String(), un.GetName())
+			} else {
+				items = append(items, c.newResource(un))
+			}
+			return nil
+		})
+
+		if err != nil {
+			return fmt.Errorf("failed to load initial state of resource %s: %w", api.GroupKind.String(), err)
+		}
+
+		return runSynced(&c.lock, func() error {
+			c.replaceResourceCache(api.GroupKind, items, ns)
+			return nil
+		})
+	})
+}
+
 func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo, resClient dynamic.ResourceInterface, ns string, resourceVersion string) {
 	kube.RetryUntilSucceed(ctx, watchResourcesRetryTimeout, fmt.Sprintf("watch %s on %s", api.GroupKind, c.config.Host), c.log, func() (err error) {
 		defer func() {
@@ -553,27 +572,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 
 		// load API initial state if no resource version provided
 		if resourceVersion == "" {
-			resourceVersion, err = c.listResources(ctx, resClient, func(listPager *pager.ListPager) error {
-				var items []*Resource
-				err := listPager.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
-					if un, ok := obj.(*unstructured.Unstructured); !ok {
-						return fmt.Errorf("object %s/%s has an unexpected type", un.GroupVersionKind().String(), un.GetName())
-					} else {
-						items = append(items, c.newResource(un))
-					}
-					return nil
-				})
-
-				if err != nil {
-					return fmt.Errorf("failed to load initial state of resource %s: %v", api.GroupKind.String(), err)
-				}
-
-				return runSynced(&c.lock, func() error {
-					c.replaceResourceCache(api.GroupKind, items, ns)
-					return nil
-				})
-			})
-
+			resourceVersion, err = c.loadInitialState(ctx, api, resClient, ns)
 			if err != nil {
 				return err
 			}
@@ -696,58 +695,23 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 	})
 }
 
-// processApi checks if resource can be accessed using current rbac (when respectRBAC is enabled) if no returns false else tries to execute the callback
-func (c *clusterCache) processApi(ctx context.Context, reviewInterface authType1.SelfSubjectAccessReviewInterface, client dynamic.Interface, api kube.APIResourceInfo, callback func(resClient dynamic.ResourceInterface, ns string) error) (keep bool, err error) {
+func (c *clusterCache) processApi(client dynamic.Interface, api kube.APIResourceInfo, callback func(resClient dynamic.ResourceInterface, ns string) error) error {
 	resClient := client.Resource(api.GroupVersionResource)
-	sar := &authorizationv1.SelfSubjectAccessReview{
-		Spec: authorizationv1.SelfSubjectAccessReviewSpec{
-			ResourceAttributes: &authorizationv1.ResourceAttributes{
-				Namespace: "*",
-				Verb:      "list",
-				Resource:  api.GroupVersionResource.Resource,
-			},
-		},
-	}
-	var (
-		resp *authorizationv1.SelfSubjectAccessReview
-	)
 	switch {
 	// if manage whole cluster or resource is cluster level and cluster resources enabled
 	case len(c.namespaces) == 0 || !api.Meta.Namespaced && c.clusterResources:
-		if c.respectRBAC {
-			resp, err = reviewInterface.Create(ctx, sar, metav1.CreateOptions{})
-			if err != nil {
-				return true, err
-			}
-		}
-		if !c.respectRBAC || (resp != nil && resp.Status.Allowed) {
-			return true, callback(resClient, "")
-		}
-		// unsupported, remove from watch list
-		return false, nil
+		return callback(resClient, "")
 	// if manage some namespaces and resource is namespaced
 	case len(c.namespaces) != 0 && api.Meta.Namespaced:
 		for _, ns := range c.namespaces {
-			if c.respectRBAC {
-				sar.Spec.ResourceAttributes.Namespace = ns
-				resp, err = reviewInterface.Create(ctx, sar, metav1.CreateOptions{})
-				if err != nil {
-					return true, err
-				}
-			}
-			if !c.respectRBAC || (resp != nil && resp.Status.Allowed) {
-				err := callback(resClient, "")
-				if err != nil {
-					return true, err
-				}
-			} else {
-				// unsupported, remove from watch list
-				return false, nil
+			err := callback(resClient.Namespace(ns), ns)
+			if err != nil {
+				return err
 			}
 		}
 	}
 
-	return true, nil
+	return nil
 }
 
 func (c *clusterCache) sync() error {
@@ -796,10 +760,6 @@ func (c *clusterCache) sync() error {
 	if err != nil {
 		return err
 	}
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return err
-	}
 	lock := sync.Mutex{}
 	err = kube.RunAllAsync(len(apis), func(i int) error {
 		api := apis[i]
@@ -811,7 +771,7 @@ func (c *clusterCache) sync() error {
 		c.namespacedResources[api.GroupKind] = api.Meta.Namespaced
 		lock.Unlock()
 
-		keepResource, err := c.processApi(ctx, clientset.AuthorizationV1().SelfSubjectAccessReviews(), client, api, func(resClient dynamic.ResourceInterface, ns string) error {
+		return c.processApi(client, api, func(resClient dynamic.ResourceInterface, ns string) error {
 			resourceVersion, err := c.listResources(ctx, resClient, func(listPager *pager.ListPager) error {
 				return listPager.EachListItem(context.Background(), metav1.ListOptions{}, func(obj runtime.Object) error {
 					if un, ok := obj.(*unstructured.Unstructured); !ok {
@@ -825,20 +785,20 @@ func (c *clusterCache) sync() error {
 				})
 			})
 			if err != nil {
-				return fmt.Errorf("failed to load initial state of resource %s: %v", api.GroupKind.String(), err)
+				if c.respectRBAC && (k8sErrors.IsForbidden(err) || k8sErrors.IsUnauthorized(err)) {
+					lock.Lock()
+					delete(c.apisMeta, api.GroupKind)
+					delete(c.namespacedResources, api.GroupKind)
+					lock.Unlock()
+					return nil
+				}
+				return fmt.Errorf("failed to load initial state of resource %s: %w", api.GroupKind.String(), err)
 			}
 
 			go c.watchEvents(ctx, api, resClient, ns, resourceVersion)
 
 			return nil
 		})
-		if !keepResource {
-			lock.Lock()
-			delete(c.apisMeta, api.GroupKind)
-			delete(c.namespacedResources, api.GroupKind)
-			lock.Unlock()
-		}
-		return err
 	})
 
 	if err != nil {
