@@ -717,6 +717,9 @@ const (
 )
 
 func (c *clusterCache) shouldSyncGK(st syncType, gk schema.GroupKind) bool {
+	if st == syncTypeFull {
+		return true
+	}
 	if st == syncTypePartial {
 		if et, ok := c.syncErrorTimes[gk]; !ok || !time.Now().After(et.Add(c.clusterSyncRetryTimeout)) {
 			// Either this GK had no error on the last sync, or it did have an error, but it wasn't long enough ago
