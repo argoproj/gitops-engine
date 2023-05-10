@@ -716,6 +716,17 @@ const (
 	syncTypePartial = "partial"
 )
 
+func (c *clusterCache) shouldSyncGK(st syncType, gk schema.GroupKind) bool {
+	if st == syncTypePartial {
+		if et, ok := c.syncErrorTimes[gk]; !ok || !time.Now().After(et.Add(c.clusterSyncRetryTimeout)) {
+			// Either this GK had no error on the last sync, or it did have an error, but it wasn't long enough ago
+			// for us to start a new sync. Skip this GK.
+			return true
+		}
+	}
+	return false
+}
+
 func (c *clusterCache) sync(st syncType) error {
 	c.log.Info("Start syncing cluster")
 
@@ -775,13 +786,9 @@ func (c *clusterCache) sync(st syncType) error {
 		info := &apiMeta{namespaced: api.Meta.Namespaced, watchCancel: cancel}
 		c.apisMeta[api.GroupKind] = info
 		c.namespacedResources[api.GroupKind] = api.Meta.Namespaced
-		if st == syncTypePartial {
-			if et, ok := c.syncErrorTimes[api.GroupKind]; !ok || !now.After(et.Add(c.clusterSyncRetryTimeout)) {
-				lock.Unlock()
-				// Either this GK had no error on the last sync, or it did have an error, but it wasn't long enough ago
-				// for us to start a new sync. Skip this GK.
-				return nil
-			}
+		if !c.shouldSyncGK(st, api.GroupKind) {
+			lock.Unlock()
+			return nil
 		}
 		lock.Unlock()
 
