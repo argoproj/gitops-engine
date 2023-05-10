@@ -195,7 +195,7 @@ type clusterCache struct {
 	nsIndex   map[string]map[kube.ResourceKey]*Resource
 	// syncErrorTimes records when the last error occurred attempting to sync a certain GK. Storing this info allows us
 	// to resync only the GKs with errors and only after a retry timeout.
-	syncErrorTimes map[schema.GroupKind]time.Time
+	syncErrorTimes map[schema.GroupKind]*time.Time
 
 	kubectl          kube.Kubectl
 	log              logr.Logger
@@ -721,11 +721,24 @@ func (c *clusterCache) shouldSyncGK(st syncType, gk schema.GroupKind) bool {
 		return true
 	}
 	if st == syncTypePartial {
-		if et, ok := c.syncErrorTimes[gk]; !ok || !time.Now().After(et.Add(c.clusterSyncRetryTimeout)) {
-			// Either this GK had no error on the last sync, or it did have an error, but it wasn't long enough ago
-			// for us to start a new sync. Skip this GK.
+		errorTime, ok := c.syncErrorTimes[gk]
+		if ok {
+			if errorTime == nil {
+				// The last attempted sync had no error, no need to retry.
+				return false
+			}
+			// There was an error on the last attempted sync of this gk.
+			if time.Now().After(errorTime.Add(c.clusterSyncRetryTimeout)) {
+				// Retry timeout has passed, so we should retry.
+				return true
+			}
+			// There was an error, but the retry timeout has not passed, so we should not retry.
+			return false
+		} else {
+			// We didn't try to fetch this GK on the last sync, so we should try to fetch it now.
 			return true
 		}
+		// There was no error on the last attempted sync of this gk, so we should not retry.
 	}
 	return false
 }
@@ -739,7 +752,7 @@ func (c *clusterCache) sync(st syncType) error {
 		}
 		c.apisMeta = make(map[schema.GroupKind]*apiMeta)
 		c.resources = make(map[kube.ResourceKey]*Resource)
-		c.syncErrorTimes = make(map[schema.GroupKind]time.Time)
+		c.syncErrorTimes = make(map[schema.GroupKind]*time.Time)
 		c.namespacedResources = make(map[schema.GroupKind]bool)
 	}
 	config := c.config
@@ -810,10 +823,15 @@ func (c *clusterCache) sync(st syncType) error {
 			})
 			if err != nil {
 				lock.Lock()
-				c.syncErrorTimes[api.GroupKind] = now
+				c.syncErrorTimes[api.GroupKind] = &now
 				lock.Unlock()
 				return fmt.Errorf("failed to load initial state of resource %s: %v", api.GroupKind.String(), err)
 			}
+
+			lock.Lock()
+			// Record that the gk was fetched, but that there was no error.
+			c.syncErrorTimes[api.GroupKind] = nil
+			lock.Unlock()
 
 			if st == syncTypePartial {
 				lock.Lock()
