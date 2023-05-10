@@ -719,15 +719,15 @@ const (
 func (c *clusterCache) sync(st syncType) error {
 	c.log.Info("Start syncing cluster")
 
-	for i := range c.apisMeta {
-		c.apisMeta[i].watchCancel()
-	}
-	c.apisMeta = make(map[schema.GroupKind]*apiMeta)
-	c.resources = make(map[kube.ResourceKey]*Resource)
 	if st == syncTypeFull {
+		for i := range c.apisMeta {
+			c.apisMeta[i].watchCancel()
+		}
+		c.apisMeta = make(map[schema.GroupKind]*apiMeta)
+		c.resources = make(map[kube.ResourceKey]*Resource)
 		c.syncErrorTimes = make(map[schema.GroupKind]time.Time)
+		c.namespacedResources = make(map[schema.GroupKind]bool)
 	}
-	c.namespacedResources = make(map[schema.GroupKind]bool)
 	config := c.config
 	version, err := c.kubectl.GetServerVersion(config)
 
