@@ -561,12 +561,9 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 				return err
 			}
 
-			if err := runSynced(&c.lock, func() error {
-				c.replaceResourceCache(api.GroupKind, items, ns)
-				return nil
-			}); err != nil {
-				return err
-			}
+			c.lock.Lock()
+			c.replaceResourceCache(api.GroupKind, items, ns)
+			c.lock.Unlock()
 		}
 
 		w, err := watchutil.NewRetryWatcher(resourceVersion, &cache.ListWatch{
