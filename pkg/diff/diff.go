@@ -6,6 +6,7 @@ package diff
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/managedfields"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/kubernetes/scheme"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
 	"sigs.k8s.io/structured-merge-diff/v4/merge"
 	"sigs.k8s.io/structured-merge-diff/v4/typed"
@@ -83,6 +85,14 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 		Normalize(live, opts...)
 	}
 
+	if o.serverSideDiff {
+		r, err := ServerSideDiff(config, live, o.manager, o.kubeApplier, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("error calculating server side diff: %w", err)
+		}
+		return r, nil
+	}
+
 	// TODO The two variables bellow are necessary because there is a cyclic
 	// dependency with the kube package that blocks the usage of constants
 	// from common package. common package needs to be refactored and exclude
@@ -118,6 +128,47 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 		}
 	}
 	return TwoWayDiff(config, live)
+}
+
+func ServerSideDiff(config, live *unstructured.Unstructured, manager string, kubeApplier KubeApplier, opts ...Option) (*DiffResult, error) {
+	if live != nil && config != nil {
+		return serverSideDiff(config, live, manager, kubeApplier, opts...)
+	}
+	return handleResourceCreateOrDeleteDiff(config, live)
+}
+
+func serverSideDiff(config, live *unstructured.Unstructured, manager string, kubeApplier KubeApplier, opts ...Option) (*DiffResult, error) {
+	predictedLiveStr, err := kubeApplier.ApplyResource(context.Background(), config, cmdutil.DryRunServer, false, false, true, manager)
+	if err != nil {
+		return nil, fmt.Errorf("error running server side apply in dryrun mode: %w", err)
+	}
+	predictedLive, err := jsonStrToUnstructured(predictedLiveStr)
+	if err != nil {
+		return nil, fmt.Errorf("error converting json string to unstructured: %w", err)
+	}
+
+	Normalize(predictedLive, opts...)
+
+	predictedLiveBytes, err := json.Marshal(predictedLive)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling predicted live resource: %w", err)
+	}
+
+	unstructured.RemoveNestedField(live.Object, "metadata", "managedFields")
+	liveBytes, err := json.Marshal(live)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling live resource: %w", err)
+	}
+	return buildDiffResult(predictedLiveBytes, liveBytes), nil
+}
+
+func jsonStrToUnstructured(jsonString string) (*unstructured.Unstructured, error) {
+	res := make(map[string]interface{})
+	err := json.Unmarshal([]byte(jsonString), &res)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshal error: %s", err)
+	}
+	return &unstructured.Unstructured{Object: res}, nil
 }
 
 // StructuredMergeDiff will calculate the diff using the structured-merge-diff

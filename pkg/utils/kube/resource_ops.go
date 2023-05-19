@@ -292,9 +292,16 @@ func (k *kubectlResourceOperations) newApplyOptions(ioStreams genericclioptions.
 				return nil, err
 			}
 		case cmdutil.DryRunServer:
-			err = o.PrintFlags.Complete("%s (server dry run)")
-			if err != nil {
-				return nil, err
+			// TODO (SSD): This logic should be refactored. PrintFlags should be
+			// configurable by the caller.
+			if serverSideApply {
+				o.PrintFlags.JSONYamlPrintFlags.ShowManagedFields = false
+				return o.PrintFlags.JSONYamlPrintFlags.ToPrinter("json")
+			} else {
+				err = o.PrintFlags.Complete("%s (server dry run)")
+				if err != nil {
+					return nil, err
+				}
 			}
 		}
 		return o.PrintFlags.ToPrinter()
@@ -310,6 +317,10 @@ func (k *kubectlResourceOperations) newApplyOptions(ioStreams genericclioptions.
 		o.ForceConflicts = true
 	}
 	return o, nil
+}
+
+func toPointer(str string) *string {
+	return &str
 }
 
 func (k *kubectlResourceOperations) newCreateOptions(config *rest.Config, ioStreams genericclioptions.IOStreams, fileName string, dryRunStrategy cmdutil.DryRunStrategy) (*create.CreateOptions, error) {

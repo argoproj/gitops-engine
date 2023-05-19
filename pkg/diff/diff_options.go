@@ -1,9 +1,13 @@
 package diff
 
 import (
+	"context"
+
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/managedfields"
 	"k8s.io/klog/v2/klogr"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 )
 
 type Option func(*options)
@@ -17,6 +21,8 @@ type options struct {
 	structuredMergeDiff   bool
 	gvkParser             *managedfields.GvkParser
 	manager               string
+	serverSideDiff        bool
+	kubeApplier           KubeApplier
 }
 
 func applyOptions(opts []Option) options {
@@ -29,6 +35,10 @@ func applyOptions(opts []Option) options {
 		opt(&o)
 	}
 	return o
+}
+
+type KubeApplier interface {
+	ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string) (string, error)
 }
 
 func IgnoreAggregatedRoles(ignore bool) Option {
@@ -64,5 +74,17 @@ func WithGVKParser(parser *managedfields.GvkParser) Option {
 func WithManager(manager string) Option {
 	return func(o *options) {
 		o.manager = manager
+	}
+}
+
+func WithServerSideDiff(ssd bool) Option {
+	return func(o *options) {
+		o.serverSideDiff = ssd
+	}
+}
+
+func WithKubeApplier(ka KubeApplier) Option {
+	return func(o *options) {
+		o.kubeApplier = ka
 	}
 }
