@@ -31,6 +31,8 @@ const (
 	SyncOptionServerSideApply = "ServerSideApply=true"
 	// Sync option that disables resource deletion
 	SyncOptionDisableDeletion = "Delete=false"
+	// Sync option that means only controller owner references are respected
+	SyncOptionControllerReferencesOnly = "ControllerReferencesOnly=true"
 )
 
 type PermissionValidator func(un *unstructured.Unstructured, res *metav1.APIResource) error
