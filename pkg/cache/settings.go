@@ -160,8 +160,13 @@ func SetRetryOptions(maxRetries int32, useBackoff bool, retryFunc ListRetryFunc)
 }
 
 // SetRespectRBAC allows to set whether to respect the controller rbac in list/watches
-func SetRespectRBAC(respectRBA bool) UpdateSettingsFunc {
+func SetRespectRBAC(respectRBAC int) UpdateSettingsFunc {
 	return func(cache *clusterCache) {
-		cache.respectRBAC = respectRBA
+		// if invalid value is provided disable respect rbac
+		if respectRBAC < RespectRbacDisabled || respectRBAC > RespectRbacStrict {
+			cache.respectRBAC = RespectRbacDisabled
+		} else {
+			cache.respectRBAC = respectRBAC
+		}
 	}
 }

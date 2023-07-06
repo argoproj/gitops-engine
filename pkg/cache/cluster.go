@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"golang.org/x/sync/semaphore"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	k8sErrors "k8s.io/apimachinery/pkg/api/errors"
@@ -23,6 +24,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
+	authType1 "k8s.io/client-go/kubernetes/typed/authorization/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/pager"
@@ -54,6 +57,15 @@ const (
 	// Limit is required to avoid memory spikes during cache initialization.
 	// The default limit of 50 is chosen based on experiments.
 	defaultListSemaphoreWeight = 50
+)
+
+const (
+	// RespectRbacDisabled default value for respectRbac
+	RespectRbacDisabled = iota
+	// RespectRbacNormal checks only api response for forbidden/unauthorized errors
+	RespectRbacNormal
+	// RespectRbacStrict checks both api response for forbidden/unauthorized errors and SelfSubjectAccessReview
+	RespectRbacStrict
 )
 
 type apiMeta struct {
@@ -210,7 +222,7 @@ type clusterCache struct {
 	openAPISchema               openapi.Resources
 	gvkParser                   *managedfields.GvkParser
 
-	respectRBAC bool
+	respectRBAC int
 }
 
 type clusterCacheSync struct {
@@ -465,6 +477,10 @@ func (c *clusterCache) startMissingWatches() error {
 	if err != nil {
 		return err
 	}
+	clientset, err := kubernetes.NewForConfig(c.config)
+	if err != nil {
+		return err
+	}
 	namespacedResources := make(map[schema.GroupKind]bool)
 	for i := range apis {
 		api := apis[i]
@@ -475,10 +491,21 @@ func (c *clusterCache) startMissingWatches() error {
 
 			err := c.processApi(client, api, func(resClient dynamic.ResourceInterface, ns string) error {
 				resourceVersion, err := c.loadInitialState(ctx, api, resClient, ns)
-				if err != nil && c.respectRBAC && (k8sErrors.IsForbidden(err) || k8sErrors.IsUnauthorized(err)) {
-					delete(c.apisMeta, api.GroupKind)
-					delete(namespacedResources, api.GroupKind)
-					return nil
+				if err != nil && c.respectRBAC != RespectRbacDisabled && (k8sErrors.IsForbidden(err) || k8sErrors.IsUnauthorized(err)) {
+					keep := false
+					if c.respectRBAC == RespectRbacStrict {
+						k, permErr := c.checkPermission(ctx, clientset.AuthorizationV1().SelfSubjectAccessReviews(), api)
+						if permErr != nil {
+							return fmt.Errorf("failed to check permissions for resource %s: %w, original error=%v", api.GroupKind.String(), permErr, err.Error())
+						}
+						keep = k
+					}
+					// if we are not allowed to list the resource, remove it from the watch list
+					if !keep {
+						delete(c.apisMeta, api.GroupKind)
+						delete(namespacedResources, api.GroupKind)
+						return nil
+					}
 				}
 				go c.watchEvents(ctx, api, resClient, ns, resourceVersion)
 				return nil
@@ -573,6 +600,9 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 		// load API initial state if no resource version provided
 		if resourceVersion == "" {
 			resourceVersion, err = c.loadInitialState(ctx, api, resClient, ns)
+			if err != nil {
+				return err
+			}
 		}
 
 		w, err := watchutil.NewRetryWatcher(resourceVersion, &cache.ListWatch{
@@ -711,6 +741,50 @@ func (c *clusterCache) processApi(client dynamic.Interface, api kube.APIResource
 	return nil
 }
 
+// checkPermission runs a self subject access review to check if the controller has permissions to list the resource
+func (c *clusterCache) checkPermission(ctx context.Context, reviewInterface authType1.SelfSubjectAccessReviewInterface, api kube.APIResourceInfo) (keep bool, err error) {
+	sar := &authorizationv1.SelfSubjectAccessReview{
+		Spec: authorizationv1.SelfSubjectAccessReviewSpec{
+			ResourceAttributes: &authorizationv1.ResourceAttributes{
+				Namespace: "*",
+				Verb:      "list", // uses list verb to check for permissions
+				Resource:  api.GroupVersionResource.Resource,
+			},
+		},
+	}
+
+	switch {
+	// if manage whole cluster or resource is cluster level and cluster resources enabled
+	case len(c.namespaces) == 0 || !api.Meta.Namespaced && c.clusterResources:
+		resp, err := reviewInterface.Create(ctx, sar, metav1.CreateOptions{})
+		if err != nil {
+			return true, err
+		}
+		if resp != nil && resp.Status.Allowed {
+			return true, nil
+		}
+		// unsupported, remove from watch list
+		return false, nil
+	// if manage some namespaces and resource is namespaced
+	case len(c.namespaces) != 0 && api.Meta.Namespaced:
+		for _, ns := range c.namespaces {
+			sar.Spec.ResourceAttributes.Namespace = ns
+			resp, err := reviewInterface.Create(ctx, sar, metav1.CreateOptions{})
+			if err != nil {
+				return true, err
+			}
+			if resp != nil && resp.Status.Allowed {
+				return true, nil
+			}
+			// unsupported, remove from watch list
+			return false, nil
+		}
+	}
+	// checkPermission follows the same logic of determining namespace/cluster resource as the processApi function
+	// so if neither of the cases match it means the controller will not watch for it so it is safe to return true.
+	return true, nil
+}
+
 func (c *clusterCache) sync() error {
 	c.log.Info("Start syncing cluster")
 
@@ -757,6 +831,10 @@ func (c *clusterCache) sync() error {
 	if err != nil {
 		return err
 	}
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return err
+	}
 	lock := sync.Mutex{}
 	err = kube.RunAllAsync(len(apis), func(i int) error {
 		api := apis[i]
@@ -782,12 +860,23 @@ func (c *clusterCache) sync() error {
 				})
 			})
 			if err != nil {
-				if c.respectRBAC && (k8sErrors.IsForbidden(err) || k8sErrors.IsUnauthorized(err)) {
-					lock.Lock()
-					delete(c.apisMeta, api.GroupKind)
-					delete(c.namespacedResources, api.GroupKind)
-					lock.Unlock()
-					return nil
+				if c.respectRBAC != RespectRbacDisabled && (k8sErrors.IsForbidden(err) || k8sErrors.IsUnauthorized(err)) {
+					keep := false
+					if c.respectRBAC == RespectRbacStrict {
+						k, permErr := c.checkPermission(ctx, clientset.AuthorizationV1().SelfSubjectAccessReviews(), api)
+						if permErr != nil {
+							return fmt.Errorf("failed to check permissions for resource %s: %w, original error=%v", api.GroupKind.String(), permErr, err.Error())
+						}
+						keep = k
+					}
+					// if we are not allowed to list the resource, remove it from the watch list
+					if !keep {
+						lock.Lock()
+						delete(c.apisMeta, api.GroupKind)
+						delete(c.namespacedResources, api.GroupKind)
+						lock.Unlock()
+						return nil
+					}
 				}
 				return fmt.Errorf("failed to load initial state of resource %s: %w", api.GroupKind.String(), err)
 			}
