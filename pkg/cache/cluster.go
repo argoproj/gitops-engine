@@ -573,9 +573,6 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 		// load API initial state if no resource version provided
 		if resourceVersion == "" {
 			resourceVersion, err = c.loadInitialState(ctx, api, resClient, ns)
-			if err != nil {
-				return err
-			}
 		}
 
 		w, err := watchutil.NewRetryWatcher(resourceVersion, &cache.ListWatch{
