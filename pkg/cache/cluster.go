@@ -491,7 +491,7 @@ func (c *clusterCache) startMissingWatches() error {
 
 			err := c.processApi(client, api, func(resClient dynamic.ResourceInterface, ns string) error {
 				resourceVersion, err := c.loadInitialState(ctx, api, resClient, ns)
-				if err != nil && c.respectRBAC != RespectRbacDisabled && (k8sErrors.IsForbidden(err) || k8sErrors.IsUnauthorized(err)) {
+				if err != nil && c.isRestrictedResource(err) {
 					keep := false
 					if c.respectRBAC == RespectRbacStrict {
 						k, permErr := c.checkPermission(ctx, clientset.AuthorizationV1().SelfSubjectAccessReviews(), api)
@@ -726,7 +726,7 @@ func (c *clusterCache) processApi(client dynamic.Interface, api kube.APIResource
 	resClient := client.Resource(api.GroupVersionResource)
 	switch {
 	// if manage whole cluster or resource is cluster level and cluster resources enabled
-	case len(c.namespaces) == 0 || !api.Meta.Namespaced && c.clusterResources:
+	case len(c.namespaces) == 0 || (!api.Meta.Namespaced && c.clusterResources):
 		return callback(resClient, "")
 	// if manage some namespaces and resource is namespaced
 	case len(c.namespaces) != 0 && api.Meta.Namespaced:
@@ -739,6 +739,11 @@ func (c *clusterCache) processApi(client dynamic.Interface, api kube.APIResource
 	}
 
 	return nil
+}
+
+// isRestrictedResource checks if the kube api call is unauthorized or forbidden
+func (c *clusterCache) isRestrictedResource(err error) bool {
+	return c.respectRBAC != RespectRbacDisabled && (k8sErrors.IsForbidden(err) || k8sErrors.IsUnauthorized(err))
 }
 
 // checkPermission runs a self subject access review to check if the controller has permissions to list the resource
@@ -755,10 +760,10 @@ func (c *clusterCache) checkPermission(ctx context.Context, reviewInterface auth
 
 	switch {
 	// if manage whole cluster or resource is cluster level and cluster resources enabled
-	case len(c.namespaces) == 0 || !api.Meta.Namespaced && c.clusterResources:
+	case len(c.namespaces) == 0 || (!api.Meta.Namespaced && c.clusterResources):
 		resp, err := reviewInterface.Create(ctx, sar, metav1.CreateOptions{})
 		if err != nil {
-			return true, err
+			return false, err
 		}
 		if resp != nil && resp.Status.Allowed {
 			return true, nil
@@ -771,7 +776,7 @@ func (c *clusterCache) checkPermission(ctx context.Context, reviewInterface auth
 			sar.Spec.ResourceAttributes.Namespace = ns
 			resp, err := reviewInterface.Create(ctx, sar, metav1.CreateOptions{})
 			if err != nil {
-				return true, err
+				return false, err
 			}
 			if resp != nil && resp.Status.Allowed {
 				return true, nil
@@ -861,7 +866,7 @@ func (c *clusterCache) sync() error {
 				})
 			})
 			if err != nil {
-				if c.respectRBAC != RespectRbacDisabled && (k8sErrors.IsForbidden(err) || k8sErrors.IsUnauthorized(err)) {
+				if c.isRestrictedResource(err) {
 					keep := false
 					if c.respectRBAC == RespectRbacStrict {
 						k, permErr := c.checkPermission(ctx, clientset.AuthorizationV1().SelfSubjectAccessReviews(), api)
