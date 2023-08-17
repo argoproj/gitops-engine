@@ -1,6 +1,8 @@
 package scheme
 
 import (
+	// TODO: change to this below?
+	// "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 
 	_ "k8s.io/kubernetes/pkg/apis/admission/install"

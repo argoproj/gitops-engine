@@ -798,18 +798,20 @@ func withReplaceAndServerSideApplyAnnotations(un *unstructured.Unstructured) *un
 
 func TestSync_ServerSideApply(t *testing.T) {
 	testCases := []struct {
-		name            string
-		target          *unstructured.Unstructured
-		live            *unstructured.Unstructured
-		commandUsed     string
-		serverSideApply bool
-		manager         string
+		name             string
+		target           *unstructured.Unstructured
+		live             *unstructured.Unstructured
+		commandUsed      string
+		serverSideApply  bool
+		manager          string
+		expectedManagers []string
 	}{
-		{"NoAnnotation", NewPod(), NewPod(), "apply", false, "managerA"},
-		{"ServerSideApplyAnnotationIsSet", withServerSideApplyAnnotation(NewPod()), NewPod(), "apply", true, "managerB"},
-		{"ServerSideApplyAndReplaceAnnotationsAreSet", withReplaceAndServerSideApplyAnnotations(NewPod()), NewPod(), "replace", false, ""},
-		{"ServerSideApplyAndReplaceAnnotationsAreSetNamespace", withReplaceAndServerSideApplyAnnotations(NewNamespace()), NewNamespace(), "update", false, ""},
-		{"LiveObjectMissing", withReplaceAnnotation(NewPod()), nil, "create", false, ""},
+		{"NoAnnotation", NewPod(), NewPod(), "apply", false, "managerA", []string{"managerA", "managerA"}},
+		{"ServerSideApplyAnnotationIsSet", withServerSideApplyAnnotation(NewPod()), NewPod(), "apply", true, "managerB", []string{"managerB", "managerB"}},
+		{"ServerSideApplyAndReplaceAnnotationsAreSet", withReplaceAndServerSideApplyAnnotations(NewPod()), NewPod(), "replace", false, "", nil},
+		{"ServerSideApplyAndReplaceAnnotationsAreSetNamespace", withReplaceAndServerSideApplyAnnotations(NewNamespace()), NewNamespace(), "update", false, "", nil},
+		{"LiveObjectMissing", withReplaceAnnotation(NewPod()), nil, "create", false, "", nil},
+		{"ServerSideApplyWithExistingLiveNonSSAdNamespace", withServerSideApplyAnnotation(NewNamespace()), NewNamespace(), "apply", true, "managerA", []string{"argocd-controller-tmp", "managerA", "argocd-controller-tmp", "managerA"}},
 	}
 
 	for _, tc := range testCases {
@@ -834,6 +836,7 @@ func TestSync_ServerSideApply(t *testing.T) {
 			resourceOps, _ := syncCtx.resourceOps.(*kubetest.MockResourceOps)
 			assert.Equal(t, tc.commandUsed, resourceOps.GetLastResourceCommand(kube.GetResourceKey(tc.target)))
 			assert.Equal(t, tc.serverSideApply, resourceOps.GetLastServerSideApply())
+			assert.Equal(t, tc.expectedManagers, resourceOps.ServerSideApplyManagerCommands[kube.GetResourceKey(tc.target)])
 			assert.Equal(t, tc.manager, resourceOps.GetLastServerSideApplyManager())
 		})
 	}
