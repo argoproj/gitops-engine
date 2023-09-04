@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -781,21 +780,11 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	    endWave := uniquePruneWaves[n-1-i]
 	
 	    for _, task := range pruneTasks[startWave] {
-			annotations := task.liveObj.GetAnnotations()
-			if annotations == nil {
-				annotations = make(map[string]string)
-			}
-			annotations[common.AnnotationSyncWave] = strconv.Itoa(endWave)
-			task.liveObj.SetAnnotations(annotations)
+			task.waveOverride = &endWave
 	    }
 	
 	    for _, task := range pruneTasks[endWave] {
-			annotations := task.liveObj.GetAnnotations()
-			if annotations == nil {
-				annotations = make(map[string]string)
-			}
-			annotations[common.AnnotationSyncWave] = strconv.Itoa(startWave)
-			task.liveObj.SetAnnotations(annotations)
+			task.waveOverride = &startWave
 	    }
 	}
 
@@ -814,12 +803,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	for _, task := range tasks {
 		if task.isPrune() &&
 			(sc.pruneLast || resourceutil.HasAnnotationOption(task.liveObj, common.AnnotationSyncOptions, common.SyncOptionPruneLast)) {
-			annotations := task.liveObj.GetAnnotations()
-			if annotations == nil {
-				annotations = make(map[string]string)
-			}
-			annotations[common.AnnotationSyncWave] = strconv.Itoa(syncPhaseLastWave)
-			task.liveObj.SetAnnotations(annotations)
+			task.waveOverride = &syncPhaseLastWave
 		}
 	}
 

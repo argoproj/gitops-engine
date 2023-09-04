@@ -1931,30 +1931,47 @@ func TestWaitForCleanUpBeforeNextWave(t *testing.T) {
 	pod1.SetName("pod-1")
 	pod2 := NewPod()
 	pod2.SetName("pod-2")
+	pod3 := NewPod()
+	pod3.SetName("pod-3")
 
 	pod1.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "1"})
 	pod2.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "2"})
+	pod3.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "3"})
 
 	syncCtx := newTestSyncCtx(nil)
 	syncCtx.prune = true
 
-	// prune order : pod2 -> pod1
+	// prune order : pod3 -> pod2 -> pod1
 	syncCtx.resources = groupResources(ReconciliationResult{
-		Target: []*unstructured.Unstructured{nil, nil},
-		Live:   []*unstructured.Unstructured{pod1, pod2},
+		Target: []*unstructured.Unstructured{nil, nil, nil},
+		Live:   []*unstructured.Unstructured{pod1, pod2, pod3},
 	})
 
 	var phase common.OperationPhase
 	var msg string
 	var result []common.ResourceSyncResult
 
-	// 1st sync should prune only pod2
+	// 1st sync should prune only pod3
 	syncCtx.Sync()
 	phase, _, result = syncCtx.GetState()
 	assert.Equal(t, synccommon.OperationRunning, phase)
 	assert.Equal(t, 1, len(result))
-	assert.Equal(t, "pod-2", result[0].ResourceKey.Name)
+	assert.Equal(t, "pod-3", result[0].ResourceKey.Name)
 	assert.Equal(t, synccommon.ResultCodePruned, result[0].Status)
+
+	// simulate successful delete of pod3
+	syncCtx.resources = groupResources(ReconciliationResult{
+		Target: []*unstructured.Unstructured{nil, nil, },
+		Live:   []*unstructured.Unstructured{pod1, pod2, },
+	})
+
+	// next sync should prune only pod2
+	syncCtx.Sync()
+	phase, _, result = syncCtx.GetState()
+	assert.Equal(t, synccommon.OperationRunning, phase)
+	assert.Equal(t, 2, len(result))
+	assert.Equal(t, "pod-2", result[1].ResourceKey.Name)
+	assert.Equal(t, synccommon.ResultCodePruned, result[1].Status)
 
 	// add delete timestamp on pod2 to simulate pending delete
 	pod2.SetDeletionTimestamp(&metav1.Time{Time: time.Now()})
@@ -1965,11 +1982,9 @@ func TestWaitForCleanUpBeforeNextWave(t *testing.T) {
 	phase, msg, result = syncCtx.GetState()
 	assert.Equal(t, synccommon.OperationRunning, phase)
 	assert.Equal(t, "waiting for deletion of /Pod/pod-2", msg)
-	assert.Equal(t, 1, len(result))
+	assert.Equal(t, 2, len(result))
 
 	// simulate successful delete of pod2
-	pod2.SetDeletionTimestamp(nil)
-	pod2 = nil
 	syncCtx.resources = groupResources(ReconciliationResult{
 		Target: []*unstructured.Unstructured{nil, },
 		Live:   []*unstructured.Unstructured{pod1, },
@@ -1980,10 +1995,12 @@ func TestWaitForCleanUpBeforeNextWave(t *testing.T) {
 	syncCtx.Sync()
 	phase, _, result = syncCtx.GetState()
 	assert.Equal(t, synccommon.OperationSucceeded, phase)
-	assert.Equal(t, 2, len(result))
-	assert.Equal(t, "pod-2", result[0].ResourceKey.Name)
-	assert.Equal(t, "pod-1", result[1].ResourceKey.Name)
+	assert.Equal(t, 3, len(result))
+	assert.Equal(t, "pod-3", result[0].ResourceKey.Name)
+	assert.Equal(t, "pod-2", result[1].ResourceKey.Name)
+	assert.Equal(t, "pod-1", result[2].ResourceKey.Name)
 	assert.Equal(t, synccommon.ResultCodePruned, result[0].Status)
 	assert.Equal(t, synccommon.ResultCodePruned, result[1].Status)
+	assert.Equal(t, synccommon.ResultCodePruned, result[2].Status)
 
 }
