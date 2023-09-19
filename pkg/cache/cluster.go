@@ -709,7 +709,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 							if !ok {
 								return err
 							}
-							c.log.Info("warning loading openapi schema: %s", e)
+							c.log.Info(fmt.Sprintf("warning loading openapi schema: %s", e.Error()))
 						}
 						if gvkParser != nil {
 							c.gvkParser = gvkParser
@@ -823,7 +823,7 @@ func (c *clusterCache) sync() error {
 		if !ok {
 			return err
 		}
-		c.log.Info("warning loading openapi schema: %s", e.Error())
+		c.log.Info(fmt.Sprintf("warning loading openapi schema: %s", e.Error()))
 	}
 
 	if gvkParser != nil {
