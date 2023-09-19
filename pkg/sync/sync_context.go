@@ -943,7 +943,7 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 			nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: kube.NamespaceKind}, ObjectMeta: metav1.ObjectMeta{Name: t.liveObj.GetName(), Annotations: t.liveObj.GetAnnotations(), Labels: t.liveObj.GetLabels(), Namespace: t.liveObj.GetNamespace()}}
 			liveCopy, err := kube.ToUnstructured(nsSpec)
 			if err != nil {
-				return common.ResultCodeSyncFailed, err.Error()
+				return common.ResultCodeSyncFailed, "failed to convert namespace spec to unstructured: " + err.Error()
 			}
 
 			_, err = sc.resourceOps.ApplyResource(context.TODO(), liveCopy, dryRunStrategy, force, validate, serverSideApply, "argocd-controller-tmp")
