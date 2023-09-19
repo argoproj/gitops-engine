@@ -948,7 +948,7 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 
 			_, err = sc.resourceOps.ApplyResource(context.TODO(), liveCopy, dryRunStrategy, force, validate, serverSideApply, "argocd-controller-tmp")
 			if err != nil {
-				return common.ResultCodeSyncFailed, err.Error()
+				return common.ResultCodeSyncFailed, "failed to apply existing namespace with temp field manager: " + err.Error()
 			}
 		}
 		message, err = sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager)
