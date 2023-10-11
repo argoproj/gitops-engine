@@ -384,7 +384,7 @@ func (sc *syncContext) setRunningPhase(tasks []*syncTask, isPendingDeletion bool
 	}
 }
 
-// sync has performs the actual apply or hook based sync
+// sync performs the actual apply or hook based sync
 func (sc *syncContext) Sync() {
 	sc.log.WithValues("skipHooks", sc.skipHooks, "started", sc.started()).Info("Syncing")
 	tasks, ok := sc.getSyncTasks()
@@ -398,7 +398,7 @@ func (sc *syncContext) Sync() {
 	} else {
 		// Perform a `kubectl apply --dry-run` against all the manifests. This will detect most (but
 		// not all) validation issues with the user's manifests (e.g. will detect syntax issues, but
-		// will not not detect if they are mutating immutable fields). If anything fails, we will refuse
+		// will not detect if they are mutating immutable fields). If anything fails, we will refuse
 		// to perform the sync. we only wish to do this once per operation, performing additional dry-runs
 		// is harmless, but redundant. The indicator we use to detect if we have already performed
 		// the dry-run for this operation, is if the resource or hook list is empty.
@@ -538,7 +538,13 @@ func (sc *syncContext) Sync() {
 			sc.setRunningPhase(remainingTasks, false)
 		}
 	case warning:
-		sc.setOperationPhase(common.OperationWarning, "synced with warning")
+		if remainingTasks.Len() == 0 {
+			// delete all completed hooks which have appropriate delete policy
+			sc.deleteHooks(hooksPendingDeletionSuccessful)
+			sc.setOperationPhase(common.OperationWarning, "synced with warning")
+		} else {
+			sc.setRunningPhase(remainingTasks, false)
+		}
 	default:
 		sc.setRunningPhase(tasks.Filter(func(task *syncTask) bool {
 			return task.deleteOnPhaseCompletion()
@@ -1204,6 +1210,8 @@ func (sc *syncContext) processCreateTasks(state runState, tasks syncTasks, dryRu
 			}
 			if result == common.ResultCodeSyncedWithWarning {
 				state = warning
+				phase := operationPhases[result]
+				sc.setResourceResult(t, result, phase, message)
 			}
 			if !dryRun || sc.dryRun || result == common.ResultCodeSyncFailed {
 				phase := operationPhases[result]
