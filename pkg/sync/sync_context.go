@@ -292,6 +292,9 @@ const (
 
 // getOperationPhase returns a hook status from an _live_ unstructured object
 func (sc *syncContext) getOperationPhase(hook *unstructured.Unstructured) (common.OperationPhase, string, error) {
+	if hook == nil {
+		return common.OperationRunning, "Pending creation", nil
+	}
 	phase := common.OperationSucceeded
 	message := fmt.Sprintf("%s created", hook.GetName())
 
@@ -415,10 +418,7 @@ func (sc *syncContext) Sync() {
 	}
 
 	// update status of any tasks that are running, note that this must exclude pruning tasks
-	for _, task := range tasks.Filter(func(t *syncTask) bool {
-		// just occasionally, you can be running yet not have a live resource
-		return t.running() && t.liveObj != nil
-	}) {
+	for _, task := range tasks.Filter(func(t *syncTask) bool { return t.running() }) {
 		if task.isHook() {
 			// update the hook's result
 			operationState, message, err := sc.getOperationPhase(task.liveObj)
@@ -427,7 +427,8 @@ func (sc *syncContext) Sync() {
 			} else {
 				sc.setResourceResult(task, "", operationState, message)
 			}
-		} else {
+		} else if task.liveObj != nil {
+			// just occasionally, you can be running yet not have a live resource
 			// this must be calculated on the live object
 			healthStatus, err := health.GetResourceHealth(task.liveObj, sc.healthOverride)
 			if err == nil {
@@ -447,14 +448,11 @@ func (sc *syncContext) Sync() {
 		}
 	}
 
-	// if (a) we are multi-step and we have any running tasks,
-	// or (b) there are any running hooks,
-	// then wait...
-	multiStep := tasks.multiStep()
-	runningTasks := tasks.Filter(func(t *syncTask) bool { return (multiStep || t.isHook()) && t.running() })
-	if runningTasks.Len() > 0 {
+	// runningTasks are resources which we have already created/applied. This includes running hooks
+	runningTasks := tasks.Filter(func(t *syncTask) bool { return t.running() })
+	if tasks.hasMoreSteps() {
+		// if we have more steps, update progress of the operation
 		sc.setRunningPhase(runningTasks, false)
-		return
 	}
 
 	// collect all completed hooks which have appropriate delete policy
@@ -478,40 +476,47 @@ func (sc *syncContext) Sync() {
 		return
 	}
 
-	sc.log.WithValues("tasks", tasks).V(1).Info("Filtering out non-pending tasks")
 	// remove tasks that are completed, we can assume that there are no running tasks
 	tasks = tasks.Filter(func(t *syncTask) bool { return t.pending() })
-
 	if sc.applyOutOfSyncOnly {
 		tasks = sc.filterOutOfSyncTasks(tasks)
 	}
 
-	// If no sync tasks were generated (e.g., in case all application manifests have been removed),
-	// the sync operation is successful.
-	if len(tasks) == 0 {
+	// If no more pending or running tasks the sync operation is successful.
+	if tasks.Len() == 0 && runningTasks.Len() == 0 {
 		// delete all completed hooks which have appropriate delete policy
 		sc.deleteHooks(hooksPendingDeletionSuccessful)
 		sc.setOperationPhase(common.OperationSucceeded, "successfully synced (no more tasks)")
 		return
 	}
 
-	// remove any tasks not in this wave
-	phase := tasks.phase()
-	wave := tasks.wave()
-	finalWave := phase == tasks.lastPhase() && wave == tasks.lastWave()
-
-	// if it is the last phase/wave and the only remaining tasks are non-hooks, the we are successful
-	// EVEN if those objects subsequently degraded
-	// This handles the common case where neither hooks or waves are used and a sync equates to simply an (asynchronous) kubectl apply of manifests, which succeeds immediately.
-	remainingTasks := tasks.Filter(func(t *syncTask) bool { return t.phase != phase || wave != t.wave() || t.isHook() })
-
-	sc.log.WithValues("phase", phase, "wave", wave, "tasks", tasks, "syncFailTasks", syncFailTasks).V(1).Info("Filtering tasks in correct phase and wave")
-	tasks = tasks.Filter(func(t *syncTask) bool { return t.phase == phase && t.wave() == wave })
-
+	// If we get here, we are about to perform our wet-run of tasks in current phase/wave.
+	var phase common.SyncPhase
+	var wave int
+	var finalWave bool
+	if runningTasks.Len() > 0 {
+		phase = runningTasks.phase()
+		wave = runningTasks.wave()
+		finalWave = !runningTasks.hasMoreSteps()
+	} else {
+		phase = tasks.phase()
+		wave = tasks.wave()
+		finalWave = !tasks.hasMoreSteps()
+	}
 	sc.setOperationPhase(common.OperationRunning, "one or more tasks are running")
 
-	sc.log.WithValues("tasks", tasks).V(1).Info("Wet-run")
-	runState := sc.runTasks(tasks, false)
+	// remainingTasks are any pending tasks that will occur in the future (after current phase/wave),
+	// or they might be hook tasks in the current phase/wave. We will use this to decide whether
+	// to mark this sync operation as successful.
+	remainingTasks := tasks.Filter(func(t *syncTask) bool { return t.phase != phase || wave != t.wave() || t.isHook() })
+
+	// We are ready to perform our wet run. The wet-run should include both:
+	// * our pending tasks for the current wave/phase
+	// * as well as our running hooks (which might be pending deletion/creation)
+	tasks = tasks.Filter(func(t *syncTask) bool { return t.phase == phase && t.wave() == wave })
+	runningHooks := runningTasks.Filter(func(t *syncTask) bool { return t.isHook() })
+	sc.log.WithValues("phase", phase, "wave", wave, "tasks", tasks, "runningHooks", runningHooks).V(1).Info("Wet-run")
+	runState := sc.runTasks(append(tasks, runningHooks...), false)
 
 	if sc.syncWaveHook != nil && runState != failed {
 		err := sc.syncWaveHook(phase, wave, finalWave)
@@ -529,6 +534,9 @@ func (sc *syncContext) Sync() {
 		sc.deleteHooks(hooksPendingDeletionFailed)
 		sc.setOperationFailed(syncFailTasks, syncFailedTasks, "one or more objects failed to apply")
 	case successful:
+		// if it is the last phase/wave and the only remaining tasks are non-hooks, then we are successful
+		// EVEN if those objects subsequently degraded
+		// This handles the common case where neither hooks or waves are used and a sync equates to simply an (asynchronous) kubectl apply of manifests, which succeeds immediately.
 		if remainingTasks.Len() == 0 {
 			// delete all completed hooks which have appropriate delete policy
 			sc.deleteHooks(hooksPendingDeletionSuccessful)

@@ -272,6 +272,7 @@ func (s syncTasks) lastWave() int {
 	return 0
 }
 
-func (s syncTasks) multiStep() bool {
+// hasMoreSteps returns if there is going to be a later wave or sync phase from the current one
+func (s syncTasks) hasMoreSteps() bool {
 	return s.wave() != s.lastWave() || s.phase() != s.lastPhase()
 }
