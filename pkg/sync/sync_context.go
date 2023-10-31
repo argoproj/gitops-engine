@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"k8s.io/cli-runtime/pkg/resource"
 	"sort"
 	"strconv"
 	"strings"
@@ -951,7 +950,7 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 	// it fails inside apply.go , o.DryRunVerifier.HasSupport(info.Mapping.GroupVersionKind) line
 	// so we retry with DryRunClient that works for all cases, but cause issues with hooks
 	// Details: https://github.com/argoproj/argo-cd/issues/16177
-	if dryRunStrategy == cmdutil.DryRunServer && err != nil && resource.IsParamUnsupportedError(err) {
+	if dryRunStrategy == cmdutil.DryRunServer && err != nil {
 		message, err = applyFn(cmdutil.DryRunClient)
 	}
 
