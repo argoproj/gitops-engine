@@ -115,7 +115,7 @@ The manifests generation is out of scope and should be implemented by the Engine
 
 ### Engine API
 
-> `Sync<Term>` is a place holder to a real name. The name is still under discussion
+> `Sync<Term>` is a placeholder to a real name. The name is still under discussion
 
 The engine API includes three main parts:
 - `Engine` golang interface
