@@ -98,7 +98,7 @@ type OnEventHandler func(event watch.EventType, un *unstructured.Unstructured)
 type OnPopulateResourceInfoHandler func(un *unstructured.Unstructured, isRoot bool) (info interface{}, cacheManifest bool)
 
 // OnResourceUpdatedHandler handlers resource update event
-type OnResourceUpdatedHandler func(newRes *Resource, oldRes *Resource, namespaceResources map[kube.ResourceKey]*Resource)
+type OnResourceUpdatedHandler func(newRes *Resource, oldRes *Resource, resources map[kube.ResourceKey]*Resource)
 type Unsubscribe func()
 
 type ClusterCache interface {
@@ -405,6 +405,7 @@ func (c *clusterCache) newResource(un *unstructured.Unstructured) *Resource {
 }
 
 func (c *clusterCache) setNode(n *Resource) {
+	c.updateChildrenByParentMap(n)
 	key := n.ResourceKey()
 	c.resources[key] = n
 	ns, ok := c.nsIndex[key.Namespace]
@@ -983,11 +984,13 @@ func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(resour
 		nsNodes := c.nsIndex[key.Namespace]
 		if key.Namespace == "" && c.showClusterResourceChildren {
 			childRefs := c.childrenByParent[key]
+			childResources := map[kube.ResourceKey]*Resource{}
 			for _, childRef := range childRefs {
 				if c.resources[childRef] != nil {
-					nsNodes[childRef] = c.resources[childRef]
+					childResources[childRef] = c.resources[childRef]
 				}
 			}
+			nsNodes = mergeResourceMaps(nsNodes, childResources)
 		}
 		if !action(res, nsNodes) {
 			return
@@ -1149,11 +1152,23 @@ func (c *clusterCache) processEvent(event watch.EventType, un *unstructured.Unst
 }
 
 func (c *clusterCache) onNodeUpdated(oldRes *Resource, newRes *Resource) {
-	c.updateChildrenByParentMap(newRes)
 	c.setNode(newRes)
 	for _, h := range c.getResourceUpdatedHandlers() {
-		h(newRes, oldRes, c.nsIndex[newRes.Ref.Namespace])
+		h(newRes, oldRes, getNSResourcesWithClusterReources(c, newRes.Ref.Namespace))
 	}
+}
+
+// Returns all resources in a particular namespace. It also includes cluster scoped resources
+// if showClusterResourceChildren is enabled
+func getNSResourcesWithClusterReources(c *clusterCache, ns string) map[kube.ResourceKey]*Resource {
+	resources := c.nsIndex[ns]
+	if c.showClusterResourceChildren {
+		// We include cluster scoped resources because a namespace scoped resource could be owned
+		// either by a cluster scoped or a namespace scoped parent.
+		resources = mergeResourceMaps(resources, c.nsIndex[""])
+	}
+
+	return resources
 }
 
 func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) {
@@ -1168,11 +1183,6 @@ func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) {
 				delete(c.nsIndex, key.Namespace)
 			}
 
-			nsAll, ok := c.nsIndex[""]
-			if ok {
-				delete(nsAll, key)
-			}
-
 			// remove ownership references from children with inferred references
 			if existing.isInferredParentOf != nil {
 				for k, v := range ns {
@@ -1183,9 +1193,22 @@ func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) {
 			}
 		}
 		for _, h := range c.getResourceUpdatedHandlers() {
-			h(nil, existing, ns)
+			h(nil, existing, getNSResourcesWithClusterReources(c, key.Namespace))
 		}
 	}
+}
+
+func mergeResourceMaps(a, b map[kube.ResourceKey]*Resource) map[kube.ResourceKey]*Resource {
+	mergedMap := map[kube.ResourceKey]*Resource{}
+	for k, v := range a {
+		mergedMap[k] = v
+	}
+
+	for k, v := range b {
+		mergedMap[k] = v
+	}
+
+	return mergedMap
 }
 
 func (c *clusterCache) updateChildrenByParentMap(res *Resource) {

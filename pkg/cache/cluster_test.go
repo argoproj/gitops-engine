@@ -1213,6 +1213,43 @@ func TestIterateHierachy(t *testing.T) {
 	})
 }
 
+func TestMergeResourceMaps(t *testing.T) {
+	mapA := map[kube.ResourceKey]*Resource{
+		kube.GetResourceKey(kube.MustToUnstructured(testPod())): {
+			ResourceVersion: "resource-a",
+		},
+		kube.GetResourceKey(kube.MustToUnstructured(testClusterRole())): {
+			ResourceVersion: "resource-b",
+		},
+	}
+	mapB := map[kube.ResourceKey]*Resource{
+		kube.GetResourceKey(kube.MustToUnstructured(testDeploy())): {
+			ResourceVersion: "resource-c",
+		},
+	}
+
+	mergedMap := mergeResourceMaps(mapA, mapB)
+	assert.Equal(t, len(mapA)+len(mapB), len(mergedMap))
+
+	containsKeysAndValues := func(t *testing.T, testMap map[kube.ResourceKey]*Resource) {
+		t.Helper()
+		for k, expectedVal := range testMap {
+			val, ok := mergedMap[k]
+			assert.True(t, ok, "expected key to be present in map", k)
+			assert.Equal(t, expectedVal, val)
+		}
+	}
+
+	containsKeysAndValues(t, mapA)
+	containsKeysAndValues(t, mapB)
+
+	// update the merged map and verify that the original map doesn't change
+	testKey := kube.GetResourceKey(kube.MustToUnstructured(testPod()))
+	expectedVal := mapA[testKey]
+	mergedMap[testKey] = nil
+	assert.Equal(t, expectedVal, mapA[testKey])
+}
+
 func testSA() *corev1.ServiceAccount {
 	return &corev1.ServiceAccount{
 		TypeMeta: metav1.TypeMeta{
