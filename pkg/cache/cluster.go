@@ -991,6 +991,7 @@ func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(resour
 					childResources[childRef] = c.resources[childRef]
 				}
 			}
+			// Merge the maps into a different copy to avoid updating the original nsIndex map
 			nsNodes = mergeResourceMaps(nsNodes, childResources)
 		}
 		if !action(res, nsNodes) {
@@ -1199,6 +1200,8 @@ func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) {
 	}
 }
 
+// mergeResourceMaps merges the given maps into a different copy in order to avoid updates
+// to the original maps
 func mergeResourceMaps(a, b map[kube.ResourceKey]*Resource) map[kube.ResourceKey]*Resource {
 	mergedMap := map[kube.ResourceKey]*Resource{}
 	for k, v := range a {
@@ -1255,6 +1258,7 @@ func (c *clusterCache) removeFromChildrenByParentMap(key kube.ResourceKey) {
 		for i, childRef := range childRefs {
 			childRefKey := kube.NewResourceKey(childRef.Group, childRef.Kind, childRef.Namespace, childRef.Name)
 			if childRefKey == key {
+				// remove the childRef that matches the deleted resource
 				childRefs[i] = childRefs[len(childRefs)-1]
 				c.childrenByParent[k] = childRefs[:len(childRefs)-1]
 			}
