@@ -319,10 +319,6 @@ func (k *kubectlResourceOperations) newApplyOptions(ioStreams genericclioptions.
 	return o, nil
 }
 
-func toPointer(str string) *string {
-	return &str
-}
-
 func (k *kubectlResourceOperations) newCreateOptions(config *rest.Config, ioStreams genericclioptions.IOStreams, fileName string, dryRunStrategy cmdutil.DryRunStrategy) (*create.CreateOptions, error) {
 	o := create.NewCreateOptions(ioStreams)
 
