@@ -865,15 +865,9 @@ func NormalizeSecret(un *unstructured.Unstructured) error {
 		return nil
 	}
 	if stringData, found, err := unstructured.NestedMap(un.Object, "stringData"); found && err == nil {
-		for k, v := range stringData {
-			switch v := v.(type) {
-			case int64:
-				stringData[k] = toString(v)
-			}
-		}
-		err := unstructured.SetNestedField(un.Object, stringData, "stringData")
+		err := stringifyNestedIntKeys(un, stringData)
 		if err != nil {
-			return fmt.Errorf("unstructured.SetNestedField error: %s", err)
+			return err
 		}
 	}
 	var secret corev1.Secret
@@ -1132,4 +1126,19 @@ func remarshal(obj *unstructured.Unstructured, o options) *unstructured.Unstruct
 	// Remove all default values specified by custom formatter (e.g. creationTimestamp)
 	unstrBody = jsonutil.RemoveMapFields(obj.Object, unstrBody)
 	return &unstructured.Unstructured{Object: unstrBody}
+}
+
+func stringifyNestedIntKeys(un *unstructured.Unstructured, stringData map[string]interface{}) error {
+	for k, v := range stringData {
+		switch v := v.(type) {
+		case int64:
+			stringData[k] = toString(v)
+		}
+	}
+	err := unstructured.SetNestedField(un.Object, stringData, "stringData")
+	if err != nil {
+		return fmt.Errorf("unstructured.SetNestedField error: %s", err)
+	} else {
+		return nil
+	}
 }
