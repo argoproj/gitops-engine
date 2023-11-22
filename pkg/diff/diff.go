@@ -823,9 +823,9 @@ func DiffArray(configArray, liveArray []*unstructured.Unstructured, opts ...Opti
 	return &diffResultList, nil
 }
 
-func Normalize(un *unstructured.Unstructured, opts ...Option) {
+func Normalize(un *unstructured.Unstructured, opts ...Option) (error) {
 	if un == nil {
-		return
+		return nil
 	}
 	o := applyOptions(opts)
 
@@ -835,9 +835,9 @@ func Normalize(un *unstructured.Unstructured, opts ...Option) {
 
 	gvk := un.GroupVersionKind()
 	if gvk.Group == "" && gvk.Kind == "Secret" {
-		err := NormalizeSecret(obj)
+		err := NormalizeSecret(un)
 		if err != nil {
-		  return nil, nil, err
+		  return err
 		}
 	} else if gvk.Group == "rbac.authorization.k8s.io" && (gvk.Kind == "ClusterRole" || gvk.Kind == "Role") {
 		normalizeRole(un, o)
@@ -849,6 +849,8 @@ func Normalize(un *unstructured.Unstructured, opts ...Option) {
 	if err != nil {
 		o.log.Error(err, fmt.Sprintf("Failed to normalize %s/%s/%s", un.GroupVersionKind(), un.GetNamespace(), un.GetName()))
 	}
+
+	return nil
 }
 
 // NormalizeSecret mutates the supplied object and encodes stringData to data, and converts nils to
