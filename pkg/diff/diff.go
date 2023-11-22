@@ -823,7 +823,7 @@ func DiffArray(configArray, liveArray []*unstructured.Unstructured, opts ...Opti
 	return &diffResultList, nil
 }
 
-func Normalize(un *unstructured.Unstructured, opts ...Option) (error) {
+func Normalize(un *unstructured.Unstructured, opts ...Option) error {
 	if un == nil {
 		return nil
 	}
@@ -837,7 +837,7 @@ func Normalize(un *unstructured.Unstructured, opts ...Option) (error) {
 	if gvk.Group == "" && gvk.Kind == "Secret" {
 		err := NormalizeSecret(un)
 		if err != nil {
-		  return err
+			return err
 		}
 	} else if gvk.Group == "rbac.authorization.k8s.io" && (gvk.Kind == "ClusterRole" || gvk.Kind == "Role") {
 		normalizeRole(un, o)
@@ -854,9 +854,9 @@ func Normalize(un *unstructured.Unstructured, opts ...Option) (error) {
 }
 
 // NormalizeSecret mutates the supplied object and encodes stringData to data, and converts nils to
-// empty strings. Invalid secrets return appropriate errors. If the object is not a secret, or is 
+// empty strings. Invalid secrets return appropriate errors. If the object is not a secret, or is
 // an invalid secret, then returns the same object.
-func NormalizeSecret(un *unstructured.Unstructured) (error) {
+func NormalizeSecret(un *unstructured.Unstructured) error {
 	if un == nil {
 		return nil
 	}
@@ -865,16 +865,16 @@ func NormalizeSecret(un *unstructured.Unstructured) (error) {
 		return nil
 	}
 	if stringData, found, err := unstructured.NestedMap(un.Object, "stringData"); found && err == nil {
-	  for k, v := range stringData {
-	    switch v := v.(type) {
-	    case int64:
-	      stringData[k] = toString(v)
-	    }
-	  }
-	  err := unstructured.SetNestedField(un.Object, stringData, "stringData")
-	  if err != nil {
-	    return fmt.Errorf("unstructured.SetNestedField error: %s", err)
-	  }
+		for k, v := range stringData {
+			switch v := v.(type) {
+			case int64:
+				stringData[k] = toString(v)
+			}
+		}
+		err := unstructured.SetNestedField(un.Object, stringData, "stringData")
+		if err != nil {
+			return fmt.Errorf("unstructured.SetNestedField error: %s", err)
+		}
 	}
 	var secret corev1.Secret
 	err := runtime.DefaultUnstructuredConverter.FromUnstructured(un.Object, &secret)
@@ -1021,7 +1021,7 @@ func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstru
 		}
 		err := NormalizeSecret(obj)
 		if err != nil {
-		  return nil, nil, err
+			return nil, nil, err
 		}
 		if data, found, err := unstructured.NestedMap(obj.Object, "data"); found && err == nil {
 			for k := range data {
