@@ -76,11 +76,17 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 	o := applyOptions(opts)
 	if config != nil {
 		config = remarshal(config, o)
-		Normalize(config, opts...)
+		err := Normalize(config, opts...)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if live != nil {
 		live = remarshal(live, o)
-		Normalize(live, opts...)
+		err := Normalize(live, opts...)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// TODO The two variables bellow are necessary because there is a cyclic
@@ -109,7 +115,10 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 		o.log.V(1).Info(fmt.Sprintf("Failed to get last applied configuration: %v", err))
 	} else {
 		if orig != nil && config != nil {
-			Normalize(orig, opts...)
+			err := Normalize(orig, opts...)
+			if err != nil {
+				return nil, err
+			}
 			dr, err := ThreeWayDiff(orig, config, live)
 			if err == nil {
 				return dr, nil
