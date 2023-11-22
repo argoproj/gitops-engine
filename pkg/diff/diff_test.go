@@ -1073,7 +1073,7 @@ func getLiveSecretJsonBytes() []byte {
     },
     "data": {
         "namespace": "ZGVmYXVsdA==",
-        "token": "ZGVmYXVsdAcb=="
+        "token": "ZGVmYXVsdA=="
     }
 }`)
 }
