@@ -835,7 +835,10 @@ func Normalize(un *unstructured.Unstructured, opts ...Option) {
 
 	gvk := un.GroupVersionKind()
 	if gvk.Group == "" && gvk.Kind == "Secret" {
-		NormalizeSecret(un, opts...)
+		err := NormalizeSecret(obj)
+		if err != nil {
+		  return nil, nil, err
+		}
 	} else if gvk.Group == "rbac.authorization.k8s.io" && (gvk.Kind == "ClusterRole" || gvk.Kind == "Role") {
 		normalizeRole(un, o)
 	} else if gvk.Group == "" && gvk.Kind == "Endpoints" {
@@ -849,33 +852,32 @@ func Normalize(un *unstructured.Unstructured, opts ...Option) {
 }
 
 // NormalizeSecret mutates the supplied object and encodes stringData to data, and converts nils to
-// empty strings. If the object is not a secret, or is an invalid secret, then returns the same object.
-func NormalizeSecret(un *unstructured.Unstructured, opts ...Option) {
+// empty strings. Invalid secrets return appropriate errors. If the object is not a secret, or is 
+// an invalid secret, then returns the same object.
+func NormalizeSecret(un *unstructured.Unstructured) (error) {
 	if un == nil {
-		return
+		return nil
 	}
 	gvk := un.GroupVersionKind()
 	if gvk.Group != "" || gvk.Kind != "Secret" {
-		return
+		return nil
 	}
-	o := applyOptions(opts)
-  if stringData, found, err := unstructured.NestedMap(un.Object, "stringData"); found && err == nil {
-    for k, v := range stringData {
-      switch v := v.(type) {
-      case int64:
-        stringData[k] = toString(v)
-      }
-    }
-    err := unstructured.SetNestedField(un.Object, stringData, "stringData")
-    if err != nil {
-      return
-    }
-  }
+	if stringData, found, err := unstructured.NestedMap(un.Object, "stringData"); found && err == nil {
+	  for k, v := range stringData {
+	    switch v := v.(type) {
+	    case int64:
+	      stringData[k] = toString(v)
+	    }
+	  }
+	  err := unstructured.SetNestedField(un.Object, stringData, "stringData")
+	  if err != nil {
+	    return fmt.Errorf("unstructured.SetNestedField error: %s", err)
+	  }
+	}
 	var secret corev1.Secret
 	err := runtime.DefaultUnstructuredConverter.FromUnstructured(un.Object, &secret)
 	if err != nil {
-		o.log.Error(err, "Failed to convert from unstructured into Secret")
-		return
+		return fmt.Errorf("Failed to convert from unstructured into Secret: %s", err)
 	}
 	// We normalize nils to empty string to handle: https://github.com/argoproj/argo-cd/issues/943
 	for k, v := range secret.Data {
@@ -894,16 +896,16 @@ func NormalizeSecret(un *unstructured.Unstructured, opts ...Option) {
 	}
 	newObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&secret)
 	if err != nil {
-		o.log.Error(err, "object unable to convert from secret")
-		return
+		return fmt.Errorf("Object unable to convert from Secret: %s", err)
 	}
 	if secret.Data != nil {
 		err = unstructured.SetNestedField(un.Object, newObj["data"], "data")
 		if err != nil {
-			o.log.Error(err, "failed to set secret.data")
-			return
+			return fmt.Errorf("Failed to set Secret data: %s", err)
 		}
 	}
+
+	return nil
 }
 
 // normalizeEndpoint normalizes endpoint meaning that EndpointSubsets are sorted lexicographically
@@ -1015,7 +1017,10 @@ func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstru
 		if obj == nil {
 			continue
 		}
-		NormalizeSecret(obj)
+		err := NormalizeSecret(obj)
+		if err != nil {
+		  return nil, nil, err
+		}
 		if data, found, err := unstructured.NestedMap(obj.Object, "data"); found && err == nil {
 			for k := range data {
 				keys[k] = true
