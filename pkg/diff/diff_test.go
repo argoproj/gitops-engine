@@ -983,6 +983,24 @@ var (
 	replacement3 = strings.Repeat("+", 16)
 )
 
+
+func TestHideSecretStringDataInvalidValues(t *testing.T) {
+	var err error
+	var configUn unstructured.Unstructured
+	err = yaml.Unmarshal([]byte(secretInvalidConfig), &configUn)
+	require.NoError(t, err)
+
+	var liveUn unstructured.Unstructured
+	err = yaml.Unmarshal([]byte(secretInvalidLive), &liveUn)
+	require.NoError(t, err)
+
+	target, live, err := HideSecretData(&configUn, &liveUn)
+	require.NoError(t, err)
+
+	assert.Equal(t, map[string]interface{}{"foo": replacement1}, secretData(target))
+	assert.Equal(t, map[string]interface{}{"foo": replacement2}, secretData(live))
+}
+
 func TestHideSecretDataSameKeysDifferentValues(t *testing.T) {
 	target, live, err := HideSecretData(
 		createSecret(map[string]string{"key1": "test", "key2": "test"}),

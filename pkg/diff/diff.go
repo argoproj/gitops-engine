@@ -859,6 +859,18 @@ func NormalizeSecret(un *unstructured.Unstructured, opts ...Option) {
 		return
 	}
 	o := applyOptions(opts)
+  if stringData, found, err := unstructured.NestedMap(un.Object, "stringData"); found && err == nil {
+    for k, v := range stringData {
+      switch v := v.(type) {
+      case int64:
+        stringData[k] = toString(v)
+      }
+    }
+    err := unstructured.SetNestedField(un.Object, stringData, "stringData")
+    if err != nil {
+      return
+    }
+  }
 	var secret corev1.Secret
 	err := runtime.DefaultUnstructuredConverter.FromUnstructured(un.Object, &secret)
 	if err != nil {
