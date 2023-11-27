@@ -660,6 +660,9 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 					return fmt.Errorf("Failed to convert to *unstructured.Unstructured: %v", event.Object)
 				}
 
+				// skipCRD will be set to true if the resource is a CRD but the change is not important
+				skipCRD := true
+
 				if kube.IsCRD(obj) {
 					resourceKey := kube.GetResourceKey(obj)
 					crd := v1.CustomResourceDefinition{}
@@ -673,14 +676,22 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 					if err != nil {
 						c.log.Error(err, "Failed to extract CRD resources")
 					}
+
+					// remove useless stuff before we diff
+					cachedCRD.ResourceVersion = "0"
+					crd.ResourceVersion = "0"
+					cachedCRD.ManagedFields = []metav1.ManagedFieldsEntry{}
+					crd.ManagedFields = []metav1.ManagedFieldsEntry{}
 					// fmt.Printf("got watchEvents for %s (%s/%s): %v \n", resourceKey, c.resources[resourceKey].ResourceVersion, crd.ResourceVersion, obj)
 					if diff := cmp.Diff(cachedCRD, crd); diff != "" {
 						fmt.Printf("watchEvents mismatch for CRD %s (-want +got):\n%s\n", resourceKey, diff)
+						// the CRD is really different, process it
+						skipCRD = false
 					}
 
 				}
 				c.processEvent(event.Type, obj)
-				if kube.IsCRD(obj) {
+				if kube.IsCRD(obj) && !skipCRD {
 					var resources []kube.APIResourceInfo
 					crd := v1.CustomResourceDefinition{}
 					err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &crd)
