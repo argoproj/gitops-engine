@@ -2,11 +2,15 @@ package kube
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"strings"
 
 	"github.com/go-logr/logr"
+	openapi_v2 "github.com/google/gnostic/openapiv2"
 	"golang.org/x/sync/errgroup"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -30,6 +34,8 @@ type OnKubectlRunFunc func(command string) (CleanupFunc, error)
 type Kubectl interface {
 	ManageResources(config *rest.Config, openAPISchema openapi.Resources) (ResourceOperations, func(), error)
 	LoadOpenAPISchema(config *rest.Config) (openapi.Resources, *managedfields.GvkParser, error)
+	LoadOpenAPISchemaWithClient(disco *discovery.DiscoveryClient) (openapi.Resources, *managedfields.GvkParser, error)
+	GetOpenAPISchemaHash(disco *discovery.DiscoveryClient) (string, error)
 	ConvertToVersion(obj *unstructured.Unstructured, group, version string) (*unstructured.Unstructured, error)
 	DeleteResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string, deleteOptions metav1.DeleteOptions) error
 	GetResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string) (*unstructured.Unstructured, error)
@@ -142,7 +148,17 @@ func (k *KubectlCmd) LoadOpenAPISchema(config *rest.Config) (openapi.Resources, 
 	if err != nil {
 		return nil, nil, err
 	}
+	return k.LoadOpenAPISchemaWithClient(disco)
+}
 
+// LoadOpenAPISchemaWithClient will load all existing resource schemas from the cluster
+// and return:
+// - openapi.Resources: used for getting the proto.Schema from a GVK
+// - managedfields.GvkParser: used for building a ParseableType to be used in
+// structured-merge-diffs
+//
+// This function accepts a discovery client, which lets the caller use a cached client if they want.
+func (k *KubectlCmd) LoadOpenAPISchemaWithClient(disco *discovery.DiscoveryClient) (openapi.Resources, *managedfields.GvkParser, error) {
 	oapiGetter := openapi.NewOpenAPIGetter(disco)
 	oapiResources, err := openapi.NewOpenAPIParser(oapiGetter).Parse()
 	if err != nil {
@@ -156,6 +172,31 @@ func (k *KubectlCmd) LoadOpenAPISchema(config *rest.Config) (openapi.Resources, 
 		return oapiResources, nil, NewCreateGVKParserError(err)
 	}
 	return oapiResources, gvkParser, nil
+}
+
+// GetOpenAPISchemaHash gets an FNV64a hash of the current OpenAPI schema for the given discovery client.
+// Using the given discovery client allows the caller to use a cached client and avoid duplicate calls to the OpenAPI
+// schema API.
+func (k *KubectlCmd) GetOpenAPISchemaHash(disco *discovery.DiscoveryClient) (string, error) {
+	oapiGetter := openapi.NewOpenAPIGetter(disco)
+	oapiSchema, err := oapiGetter.OpenAPISchema()
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch Open API schema: %w", err)
+	}
+	return getOpenAPISchemaHash(oapiSchema)
+}
+
+func getOpenAPISchemaHash(document *openapi_v2.Document) (string, error) {
+	raw, err := json.Marshal(document.ToRawInfo())
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal OpenAPI schema to JSON for hashing: %w", err)
+	}
+	hash := fnv.New64a()
+	_, err = hash.Write(raw)
+	if err != nil {
+		return "", fmt.Errorf("failed to write OpenAPI schema JSON to hash: %w", err)
+	}
+	return base64.URLEncoding.EncodeToString(hash.Sum(nil)), nil
 }
 
 func newGVKParser(oapiGetter *openapi.CachedOpenAPIGetter) (*managedfields.GvkParser, error) {

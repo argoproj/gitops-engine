@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/managedfields"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	authType1 "k8s.io/client-go/kubernetes/typed/authorization/v1"
@@ -219,6 +220,7 @@ type clusterCache struct {
 	populateResourceInfoHandler OnPopulateResourceInfoHandler
 	resourceUpdatedHandlers     map[uint64]OnResourceUpdatedHandler
 	eventHandlers               map[uint64]OnEventHandler
+	openAPISchemaHash           string
 	openAPISchema               openapi.Resources
 	gvkParser                   *managedfields.GvkParser
 
@@ -704,7 +706,22 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 						}
 					}
 					err = runSynced(&c.lock, func() error {
-						openAPISchema, gvkParser, err := c.kubectl.LoadOpenAPISchema(c.config)
+						disco, err := discovery.NewDiscoveryClientForConfig(c.config)
+						if err != nil {
+							return fmt.Errorf("failed to get discovery client: %w", err)
+						}
+						hash, err := c.kubectl.GetOpenAPISchemaHash(disco)
+						if err != nil {
+							return fmt.Errorf("failed to get OpenAPI schema hash: %w", err)
+						}
+						if hash == c.openAPISchemaHash {
+							// There's been no change to the OpenAPI schema. Skip further processing.
+							c.log.Info("Skipping unchanged OpenAPI schema processing")
+							return nil
+						}
+						c.openAPISchemaHash = hash
+						c.log.Info("Loading new OpenAPI schema")
+						openAPISchema, gvkParser, err := c.kubectl.LoadOpenAPISchemaWithClient(disco)
 						if err != nil {
 							e, ok := err.(*kube.CreateGVKParserError)
 							if !ok {
@@ -818,7 +835,11 @@ func (c *clusterCache) sync() error {
 	}
 	c.apiResources = apiResources
 
-	openAPISchema, gvkParser, err := c.kubectl.LoadOpenAPISchema(config)
+	disco, err := discovery.NewDiscoveryClientForConfig(c.config)
+	if err != nil {
+		return fmt.Errorf("failed to load discovery client while syncing cluster: %w", err)
+	}
+	openAPISchema, gvkParser, err := c.kubectl.LoadOpenAPISchemaWithClient(disco)
 	if err != nil {
 		e, ok := err.(*kube.CreateGVKParserError)
 		if !ok {
@@ -831,6 +852,11 @@ func (c *clusterCache) sync() error {
 		c.gvkParser = gvkParser
 	}
 
+	hash, err := c.kubectl.GetOpenAPISchemaHash(disco)
+	if err != nil {
+		return fmt.Errorf("failed to get OpenAPI schema hash while syncing cluster: %w", err)
+	}
+	c.openAPISchemaHash = hash
 	c.openAPISchema = openAPISchema
 
 	apis, err := c.kubectl.GetAPIResources(c.config, true, c.settings.ResourcesFilter)

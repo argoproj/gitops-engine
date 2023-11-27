@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/managedfields"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubectl/pkg/util/openapi"
@@ -91,6 +92,14 @@ func (k *MockKubectlCmd) GetServerVersion(config *rest.Config) (string, error) {
 
 func (k *MockKubectlCmd) LoadOpenAPISchema(config *rest.Config) (openapi.Resources, *managedfields.GvkParser, error) {
 	return nil, nil, nil
+}
+
+func (k *MockKubectlCmd) LoadOpenAPISchemaWithClient(disco *discovery.DiscoveryClient) (openapi.Resources, *managedfields.GvkParser, error) {
+	return nil, nil, nil
+}
+
+func (k *MockKubectlCmd) GetOpenAPISchemaHash(disco *discovery.DiscoveryClient) (string, error) {
+	return "", nil
 }
 
 func (k *MockKubectlCmd) SetOnKubectlRun(onKubectlRun kube.OnKubectlRunFunc) {
