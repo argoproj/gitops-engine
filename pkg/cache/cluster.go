@@ -668,7 +668,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 						c.log.Error(err, "Failed to extract CRD resources")
 					}
 					// fmt.Printf("got watchEvents for %s (%s/%s): %v \n", resourceKey, c.resources[resourceKey].ResourceVersion, crd.ResourceVersion, obj)
-					if diff := cmp.Diff(c.resources[resourceKey], crd); diff != "" {
+					if diff := cmp.Diff(c.resources[resourceKey].Resource, crd); diff != "" {
 						fmt.Printf("watchEvents mismatch for CRD %s (-want +got):\n%s\n", resourceKey, diff)
 					}
 
