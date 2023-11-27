@@ -684,7 +684,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 					crd.ManagedFields = []metav1.ManagedFieldsEntry{}
 					// fmt.Printf("got watchEvents for %s (%s/%s): %v \n", resourceKey, c.resources[resourceKey].ResourceVersion, crd.ResourceVersion, obj)
 					if diff := cmp.Diff(cachedCRD, crd); diff != "" {
-						fmt.Printf("watchEvents mismatch for CRD %s (-want +got):\n%s\n", resourceKey, diff)
+						fmt.Printf("watchEvents mismatch for CRD after cleanup %s (-want +got):\n%s\n", resourceKey, diff)
 						// the CRD is really different, process it
 						skipCRD = false
 					}
@@ -692,6 +692,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 				}
 				c.processEvent(event.Type, obj)
 				if kube.IsCRD(obj) && !skipCRD {
+					fmt.Printf("processing CRD event\n")
 					var resources []kube.APIResourceInfo
 					crd := v1.CustomResourceDefinition{}
 					err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &crd)
