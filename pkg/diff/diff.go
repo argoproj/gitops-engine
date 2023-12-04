@@ -138,7 +138,7 @@ func ServerSideDiff(config, live *unstructured.Unstructured, manager string, kub
 }
 
 func serverSideDiff(config, live *unstructured.Unstructured, manager string, kubeApplier KubeApplier, opts ...Option) (*DiffResult, error) {
-	predictedLiveStr, err := kubeApplier.ApplyResource(context.Background(), config, cmdutil.DryRunServer, false, false, true, manager)
+	predictedLiveStr, err := kubeApplier.ApplyResource(context.Background(), config, cmdutil.DryRunServer, false, false, true, manager, true)
 	if err != nil {
 		return nil, fmt.Errorf("error running server side apply in dryrun mode: %w", err)
 	}

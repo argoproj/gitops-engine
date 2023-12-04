@@ -38,7 +38,7 @@ func applyOptions(opts []Option) options {
 }
 
 type KubeApplier interface {
-	ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string) (string, error)
+	ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string, serverSideDiff bool) (string, error)
 }
 
 func IgnoreAggregatedRoles(ignore bool) Option {
