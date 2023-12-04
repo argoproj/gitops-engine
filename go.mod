@@ -7,7 +7,7 @@ require (
 	github.com/evanphx/json-patch v4.12.0+incompatible
 	github.com/go-logr/logr v1.2.4
 	github.com/golang/mock v1.6.0
-	github.com/google/gnostic v0.5.7-v3refs
+	github.com/google/gnostic v0.6.8
 	github.com/spf13/cobra v1.7.0
 	github.com/stretchr/testify v1.8.2
 	golang.org/x/sync v0.2.0
