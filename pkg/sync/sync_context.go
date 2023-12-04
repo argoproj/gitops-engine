@@ -889,7 +889,7 @@ func (sc *syncContext) setOperationPhase(phase common.OperationPhase, message st
 
 // ensureCRDReady waits until specified CRD is ready (established condition is true).
 func (sc *syncContext) ensureCRDReady(name string) error {
-	return wait.PollImmediate(time.Duration(100)*time.Millisecond, crdReadinessTimeout, func() (bool, error) {
+	return wait.PollUntilContextTimeout(context.Background(), time.Duration(100)*time.Millisecond, crdReadinessTimeout, true, func(_ context.Context) (bool, error) {
 		crd, err := sc.extensionsclientset.ApiextensionsV1().CustomResourceDefinitions().Get(context.TODO(), name, metav1.GetOptions{})
 		if err != nil {
 			return false, err
