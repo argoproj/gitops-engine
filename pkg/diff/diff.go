@@ -199,6 +199,12 @@ func removeWebhookMutation(predictedLive, config, live *unstructured.Unstructure
 	webhookAdded := comparison.Added.Difference(configSet)
 	typedPreditedLive = typedPreditedLive.RemoveItems(webhookAdded)
 
+	typedConfig := typed.AsTypedUnvalidated(configValue, typedLive.Schema(), typedLive.TypeRef())
+	typedPreditedLive, err = typedPreditedLive.Merge(typedConfig)
+	if err != nil {
+		return nil, fmt.Errorf("error merging typedPreditedLive with typedConfig: %s", err)
+	}
+
 	plu := typedPreditedLive.AsValue().Unstructured()
 	pl, ok := plu.(map[string]interface{})
 	if !ok {
