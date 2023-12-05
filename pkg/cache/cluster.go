@@ -89,6 +89,8 @@ type ClusterInfo struct {
 	SyncError error
 	// APIResources holds list of API resources supported by the cluster
 	APIResources []kube.APIResourceInfo
+	// ConnectionStatus indicates the status of the connection with the cluster.
+	ConnectionStatus ConnectionStatus
 }
 
 // OnEventHandler is a function that handles Kubernetes event
@@ -170,6 +172,7 @@ func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCa
 		listRetryLimit:          1,
 		listRetryUseBackoff:     false,
 		listRetryFunc:           ListRetryFuncNever,
+		connectionStatus:        ConnectionStatusUnknown,
 	}
 	for i := range opts {
 		opts[i](cache)
@@ -177,8 +180,20 @@ func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCa
 	return cache
 }
 
+// ConnectionStatus indicates the status of the connection with the cluster.
+type ConnectionStatus string
+
+const (
+	ConnectionStatusSuccessful ConnectionStatus = "Successful"
+	ConnectionStatusFailed     ConnectionStatus = "Failed"
+	ConnectionStatusUnknown    ConnectionStatus = "Unknown"
+)
+
 type clusterCache struct {
 	syncStatus clusterCacheSync
+
+	// connectionStatus indicates the status of the connection with the cluster.
+	connectionStatus ConnectionStatus
 
 	apisMeta      map[schema.GroupKind]*apiMeta
 	serverVersion string
@@ -616,6 +631,25 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 				if errors.IsNotFound(err) {
 					c.stopWatching(api.GroupKind, ns)
 				}
+				var connectionUpdated bool
+				if err != nil {
+					if c.connectionStatus != ConnectionStatusFailed {
+						c.log.Info("unable to access cluster", "cluster", c.config.Host, "reason", err.Error())
+						c.connectionStatus = ConnectionStatusFailed
+						connectionUpdated = true
+					}
+				} else if c.connectionStatus != ConnectionStatusSuccessful {
+					c.connectionStatus = ConnectionStatusSuccessful
+					connectionUpdated = true
+				}
+
+				if connectionUpdated {
+					c.Invalidate()
+					if err := c.EnsureSynced(); err != nil {
+						return nil, err
+					}
+				}
+
 				return res, err
 			},
 		})
@@ -810,8 +844,14 @@ func (c *clusterCache) sync() error {
 	version, err := c.kubectl.GetServerVersion(config)
 
 	if err != nil {
+		if c.connectionStatus != ConnectionStatusFailed {
+			c.log.Info("unable to access cluster", "cluster", c.config.Host, "reason", err.Error())
+			c.connectionStatus = ConnectionStatusFailed
+		}
 		return err
 	}
+
+	c.connectionStatus = ConnectionStatusSuccessful
 	c.serverVersion = version
 	apiResources, err := c.kubectl.GetAPIResources(config, false, NewNoopSettings())
 	if err != nil {
@@ -1186,6 +1226,7 @@ func (c *clusterCache) GetClusterInfo() ClusterInfo {
 		LastCacheSyncTime: c.syncStatus.syncTime,
 		SyncError:         c.syncStatus.syncError,
 		APIResources:      c.apiResources,
+		ConnectionStatus:  c.connectionStatus,
 	}
 }
 
