@@ -86,7 +86,7 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 	}
 
 	if o.serverSideDiff {
-		r, err := ServerSideDiff(config, live, o.manager, o.kubeApplier, opts...)
+		r, err := ServerSideDiff(config, live, opts...)
 		if err != nil {
 			return nil, fmt.Errorf("error calculating server side diff: %w", err)
 		}
@@ -130,21 +130,32 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 	return TwoWayDiff(config, live)
 }
 
-func ServerSideDiff(config, live *unstructured.Unstructured, manager string, kubeApplier KubeApplier, opts ...Option) (*DiffResult, error) {
+func ServerSideDiff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult, error) {
 	if live != nil && config != nil {
-		return serverSideDiff(config, live, manager, kubeApplier, opts...)
+		return serverSideDiff(config, live, opts...)
 	}
 	return handleResourceCreateOrDeleteDiff(config, live)
 }
 
-func serverSideDiff(config, live *unstructured.Unstructured, manager string, kubeApplier KubeApplier, opts ...Option) (*DiffResult, error) {
-	predictedLiveStr, err := kubeApplier.ApplyResource(context.Background(), config, cmdutil.DryRunServer, false, false, true, manager, true)
+func serverSideDiff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult, error) {
+	o := applyOptions(opts)
+	if o.kubeApplier == nil {
+		return nil, fmt.Errorf("serverSideDiff error: kubeApplier is null")
+	}
+	predictedLiveStr, err := o.kubeApplier.ApplyResource(context.Background(), config, cmdutil.DryRunServer, false, false, true, o.manager, true)
 	if err != nil {
 		return nil, fmt.Errorf("error running server side apply in dryrun mode: %w", err)
 	}
 	predictedLive, err := jsonStrToUnstructured(predictedLiveStr)
 	if err != nil {
 		return nil, fmt.Errorf("error converting json string to unstructured: %w", err)
+	}
+
+	if o.ignoreMutationWebhook {
+		predictedLive, err = removeWebhookMutation(predictedLive, config, live, o.gvkParser, o.manager)
+		if err != nil {
+			return nil, fmt.Errorf("error removing webhook mutations: %w", err)
+		}
 	}
 
 	Normalize(predictedLive, opts...)
@@ -161,6 +172,40 @@ func serverSideDiff(config, live *unstructured.Unstructured, manager string, kub
 		return nil, fmt.Errorf("error marshaling live resource: %w", err)
 	}
 	return buildDiffResult(predictedLiveBytes, liveBytes), nil
+}
+
+func removeWebhookMutation(predictedLive, config, live *unstructured.Unstructured, gvkParser *managedfields.GvkParser, manager string) (*unstructured.Unstructured, error) {
+	gvk := predictedLive.GetObjectKind().GroupVersionKind()
+	pt := gvkParser.Type(gvk)
+	typedPreditedLive, err := pt.FromUnstructured(predictedLive.Object)
+	if err != nil {
+		return nil, fmt.Errorf("error creating typedPreditedLive: %s", err)
+	}
+	typedConfig, err := pt.FromUnstructured(config.Object)
+	if err != nil {
+		return nil, fmt.Errorf("error creating typedConfig: %s", err)
+	}
+	typedLive, err := pt.FromUnstructured(live.Object)
+	if err != nil {
+		return nil, fmt.Errorf("error creating typedLive: %s", err)
+	}
+
+	comparison, err := typedPreditedLive.Compare(typedLive)
+	if err != nil {
+		return nil, fmt.Errorf("error comparing typedPreditedLive with typedLive: %s", err)
+	}
+
+	configfs, _ := typedConfig.ToFieldSet()
+
+	webhookAdded := comparison.Added.Difference(configfs)
+	typedPreditedLive = typedPreditedLive.RemoveItems(webhookAdded)
+
+	plu := typedPreditedLive.AsValue().Unstructured()
+	pl, ok := plu.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("error converting live typedValue: expected map got %T", plu)
+	}
+	return &unstructured.Unstructured{Object: pl}, nil
 }
 
 func jsonStrToUnstructured(jsonString string) (*unstructured.Unstructured, error) {

@@ -23,11 +23,13 @@ type options struct {
 	manager               string
 	serverSideDiff        bool
 	kubeApplier           KubeApplier
+	ignoreMutationWebhook bool
 }
 
 func applyOptions(opts []Option) options {
 	o := options{
 		ignoreAggregatedRoles: false,
+		ignoreMutationWebhook: true,
 		normalizer:            GetNoopNormalizer(),
 		log:                   klogr.New(),
 	}
@@ -80,6 +82,12 @@ func WithManager(manager string) Option {
 func WithServerSideDiff(ssd bool) Option {
 	return func(o *options) {
 		o.serverSideDiff = ssd
+	}
+}
+
+func WithIgnoreMutationWebhook(mw bool) Option {
+	return func(o *options) {
+		o.ignoreMutationWebhook = mw
 	}
 }
 
