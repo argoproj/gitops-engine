@@ -148,6 +148,7 @@ func serverSideDiff(config, live *unstructured.Unstructured, manager string, kub
 	}
 
 	Normalize(predictedLive, opts...)
+	unstructured.RemoveNestedField(predictedLive.Object, "metadata", "managedFields")
 
 	predictedLiveBytes, err := json.Marshal(predictedLive)
 	if err != nil {
