@@ -188,7 +188,7 @@ func removeWebhookMutation(predictedLive, config, live *unstructured.Unstructure
 		return nil, fmt.Errorf("error creating typedLive: %s", err)
 	}
 
-	comparison, err := typedPreditedLive.Compare(typedLive)
+	comparison, err := typedLive.Compare(typedPreditedLive)
 	if err != nil {
 		return nil, fmt.Errorf("error comparing typedPreditedLive with typedLive: %s", err)
 	}
