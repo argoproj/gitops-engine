@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
 	"sigs.k8s.io/structured-merge-diff/v4/merge"
 	"sigs.k8s.io/structured-merge-diff/v4/typed"
+	"sigs.k8s.io/structured-merge-diff/v4/value"
 
 	"github.com/argoproj/gitops-engine/internal/kubernetes_vendor/pkg/api/v1/endpoints"
 	"github.com/argoproj/gitops-engine/pkg/diff/internal/fieldmanager"
@@ -181,10 +182,7 @@ func removeWebhookMutation(predictedLive, config, live *unstructured.Unstructure
 	if err != nil {
 		return nil, fmt.Errorf("error creating typedPreditedLive: %s", err)
 	}
-	typedConfig, err := pt.FromUnstructured(config.Object)
-	if err != nil {
-		return nil, fmt.Errorf("error creating typedConfig: %s", err)
-	}
+
 	typedLive, err := pt.FromUnstructured(live.Object)
 	if err != nil {
 		return nil, fmt.Errorf("error creating typedLive: %s", err)
@@ -195,9 +193,10 @@ func removeWebhookMutation(predictedLive, config, live *unstructured.Unstructure
 		return nil, fmt.Errorf("error comparing typedPreditedLive with typedLive: %s", err)
 	}
 
-	configfs, _ := typedConfig.ToFieldSet()
+	configValue := value.NewValueInterface(config.Object)
+	configSet := fieldpath.SetFromValue(configValue)
 
-	webhookAdded := comparison.Added.Difference(configfs)
+	webhookAdded := comparison.Added.Difference(configSet)
 	typedPreditedLive = typedPreditedLive.RemoveItems(webhookAdded)
 
 	plu := typedPreditedLive.AsValue().Unstructured()
