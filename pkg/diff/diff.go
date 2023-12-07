@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"strings"
 
 	jsonpatch "github.com/evanphx/json-patch"
 	corev1 "k8s.io/api/core/v1"
@@ -26,7 +25,6 @@ import (
 	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
 	"sigs.k8s.io/structured-merge-diff/v4/merge"
 	"sigs.k8s.io/structured-merge-diff/v4/typed"
-	"sigs.k8s.io/structured-merge-diff/v4/value"
 
 	"github.com/argoproj/gitops-engine/internal/kubernetes_vendor/pkg/api/v1/endpoints"
 	"github.com/argoproj/gitops-engine/pkg/diff/internal/fieldmanager"
@@ -90,9 +88,6 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 	if o.serverSideDiff {
 		r, err := ServerSideDiff(config, live, opts...)
 		if err != nil {
-			if _, ok := err.(WebhookConflictErrors); ok {
-				return r, err
-			}
 			return nil, fmt.Errorf("error calculating server side diff: %w", err)
 		}
 		return r, nil
@@ -156,15 +151,10 @@ func serverSideDiff(config, live *unstructured.Unstructured, opts ...Option) (*D
 		return nil, fmt.Errorf("error converting json string to unstructured: %w", err)
 	}
 
-	var webhookConflictErros error
 	if o.ignoreMutationWebhook {
-		predictedLive, err = removeWebhookMutation(predictedLive, config, live, o.gvkParser, o.manager)
+		predictedLive, err = removeWebhookMutation(predictedLive, live, o.gvkParser, o.manager)
 		if err != nil {
-			if e, ok := err.(WebhookConflictErrors); ok {
-				webhookConflictErros = e
-			} else {
-				return nil, fmt.Errorf("error removing webhook mutations: %w", err)
-			}
+			return nil, fmt.Errorf("error removing non config mutations: %w", err)
 		}
 	}
 
@@ -181,15 +171,14 @@ func serverSideDiff(config, live *unstructured.Unstructured, opts ...Option) (*D
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling live resource: %w", err)
 	}
-	return buildDiffResult(predictedLiveBytes, liveBytes), webhookConflictErros
+	return buildDiffResult(predictedLiveBytes, liveBytes), nil
 }
 
-// removeWebhookMutation will compare the predictedLive with live and config to
-// identify changes in the predictedLive state done by mutation webhooks. Changes
-// that are not part of the desired state (config) are reverted with the state
-// from live. Changes on fields defined in the desired state are considered as
-// conflict and a WebhookConflictErrors is also returned in this case.
-func removeWebhookMutation(predictedLive, config, live *unstructured.Unstructured, gvkParser *managedfields.GvkParser, manager string) (*unstructured.Unstructured, error) {
+// removeWebhookMutation will compare the predictedLive with live to identify
+// changes done by mutation webhooks. Webhook mutations are identified by finding
+// changes in predictedLive fields not associated with any manager. All fields
+// under this condition will be reverted with their state from live.
+func removeWebhookMutation(predictedLive, live *unstructured.Unstructured, gvkParser *managedfields.GvkParser, manager string) (*unstructured.Unstructured, error) {
 	gvk := predictedLive.GetObjectKind().GroupVersionKind()
 	pt := gvkParser.Type(gvk)
 	typedPreditedLive, err := pt.FromUnstructured(predictedLive.Object)
@@ -207,54 +196,40 @@ func removeWebhookMutation(predictedLive, config, live *unstructured.Unstructure
 		return nil, fmt.Errorf("error comparing typedPreditedLive with typedLive: %s", err)
 	}
 
-	configValue := value.NewValueInterface(config.Object)
-	configSet := fieldpath.SetFromValue(configValue)
-
-	if comparison.Added != nil {
-		// check if the added fields are not part of the desired state
-		webhookAdded := comparison.Added.Difference(configSet)
-		if !webhookAdded.Empty() {
-			// if not part of desired state, added fields are removed from the
-			// predictedLive
-			typedPreditedLive = typedPreditedLive.RemoveItems(webhookAdded)
+	for _, mfEntry := range predictedLive.GetManagedFields() {
+		mfs := &fieldpath.Set{}
+		err := mfs.FromJSON(bytes.NewReader(mfEntry.FieldsV1.Raw))
+		if err != nil {
+			return nil, fmt.Errorf("error building managedFields set: %s", err)
+		}
+		if comparison.Added != nil && !comparison.Added.Empty() {
+			comparison.Added = comparison.Added.Difference(mfs)
+		}
+		if comparison.Modified != nil && !comparison.Modified.Empty() {
+			comparison.Modified = comparison.Modified.Difference(mfs)
+		}
+		if comparison.Removed != nil && !comparison.Removed.Empty() {
+			comparison.Removed = comparison.Removed.Difference(mfs)
 		}
 	}
 
-	errs := []error{}
-	if comparison.Modified != nil {
-		// check if the modified fields are not part of the desired state
-		webhookModified := comparison.Modified.Difference(configSet)
-		if !webhookModified.Empty() {
-			// if not part of desired state, modified fields are reverted with
-			// the current state from live
-			liveModValues := typedLive.ExtractItems(webhookModified)
-			typedPreditedLive, err = typedPreditedLive.Merge(liveModValues)
-			if err != nil {
-				return nil, fmt.Errorf("error merging webhookModified in predictedLive: %s", err)
-			}
+	if comparison.Added != nil && !comparison.Added.Empty() {
+		typedPreditedLive = typedPreditedLive.RemoveItems(comparison.Added)
+	}
 
-			// check if the modified fields are part of the desired state
-			webhookModifiedWithConflict := comparison.Modified.Intersection(configSet)
-			if !webhookModifiedWithConflict.Empty() {
-				errs = append(errs, fmt.Errorf("%s with name %s has fields modified", predictedLive.GetKind(), predictedLive.GetName()))
-			}
+	if comparison.Modified != nil && !comparison.Modified.Empty() {
+		liveModValues := typedLive.ExtractItems(comparison.Modified)
+		typedPreditedLive, err = typedPreditedLive.Merge(liveModValues)
+		if err != nil {
+			return nil, fmt.Errorf("error merging liveModValues in typedPreditedLive: %s", err)
 		}
 	}
 
-	if comparison.Removed != nil {
-		// check if the removed fields are not part of the desired state
-		webhookRemoved := comparison.Removed.Difference(configSet)
-		if !webhookRemoved.Empty() {
-			// if not part of desired state, removed fields are added back with
-			// the current state from live
-			liveRmValues := typedLive.ExtractItems(webhookRemoved)
-			typedPreditedLive.Merge(liveRmValues)
-
-			// check if the removed fields are part of the desired state
-			webhookRemovedWithConflict := comparison.Removed.Intersection(configSet)
-			if !webhookRemovedWithConflict.Empty() {
-				errs = append(errs, fmt.Errorf("%s with name %s has fields removed", predictedLive.GetKind(), predictedLive.GetName()))
-			}
+	if comparison.Removed != nil && !comparison.Removed.Empty() {
+		liveRmValues := typedLive.ExtractItems(comparison.Removed)
+		typedPreditedLive, err = typedPreditedLive.Merge(liveRmValues)
+		if err != nil {
+			return nil, fmt.Errorf("error merging liveRmValues in typedPreditedLive: %s", err)
 		}
 	}
 
@@ -263,24 +238,7 @@ func removeWebhookMutation(predictedLive, config, live *unstructured.Unstructure
 	if !ok {
 		return nil, fmt.Errorf("error converting live typedValue: expected map got %T", plu)
 	}
-	var errors error
-	if len(errs) > 0 {
-		errors = WebhookConflictErrors{errors: errs}
-	}
-	return &unstructured.Unstructured{Object: pl}, errors
-}
-
-type WebhookConflictErrors struct {
-	errors []error
-}
-
-func (e WebhookConflictErrors) Error() string {
-	var sb strings.Builder
-	sb.WriteString("Webhook mutations found in the desired state")
-	for _, err := range e.errors {
-		sb.WriteString(fmt.Sprintf(": %s", err.Error()))
-	}
-	return sb.String()
+	return &unstructured.Unstructured{Object: pl}, nil
 }
 
 func jsonStrToUnstructured(jsonString string) (*unstructured.Unstructured, error) {
