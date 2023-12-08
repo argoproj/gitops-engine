@@ -203,7 +203,7 @@ func serverSideDiff(config, live *unstructured.Unstructured, opts ...Option) (*D
 // will be returned.
 func removeWebhookMutation(predictedLive, live *unstructured.Unstructured, gvkParser *managedfields.GvkParser, manager string) (*unstructured.Unstructured, error) {
 	plManagedFields := predictedLive.GetManagedFields()
-	if plManagedFields == nil || len(plManagedFields) == 0 {
+	if len(plManagedFields) == 0 {
 		return nil, fmt.Errorf("predictedLive for resource %s/%s must have the managedFields", predictedLive.GetKind(), predictedLive.GetName())
 	}
 	gvk := predictedLive.GetObjectKind().GroupVersionKind()
