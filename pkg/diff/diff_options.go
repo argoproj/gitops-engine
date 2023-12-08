@@ -43,22 +43,30 @@ type KubeApplier interface {
 	ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string, serverSideDiff bool) (string, error)
 }
 
+// ServerSideDryRunner defines the contract to run a server-side apply in
+// dryrun mode.
 type ServerSideDryRunner interface {
-	ServerSideApplyDryRun(ctx context.Context, obj *unstructured.Unstructured, manager string) (string, error)
+	Run(ctx context.Context, obj *unstructured.Unstructured, manager string) (string, error)
 }
 
+// K8sServerSideDryRunner is the Kubernetes implementation of ServerSideDryRunner.
 type K8sServerSideDryRunner struct {
 	dryrunApplier KubeApplier
 }
 
+// NewK8sServerSideDryRunner will instantiate a new K8sServerSideDryRunner with
+// the given kubeApplier.
 func NewK8sServerSideDryRunner(kubeApplier KubeApplier) *K8sServerSideDryRunner {
 	return &K8sServerSideDryRunner{
 		dryrunApplier: kubeApplier,
 	}
 }
 
-func (kdr *K8sServerSideDryRunner) ServerSideApplyDryRun(ctx context.Context, obj *unstructured.Unstructured, manager string) (string, error) {
-	return kdr.dryrunApplier.ApplyResource(context.Background(), obj, cmdutil.DryRunServer, false, false, true, manager, true)
+// ServerSideApplyDryRun will invoke a kubernetes server-side apply with the given
+// obj and the given manager in dryrun mode. Will return the predicted live state
+// json as string.
+func (kdr *K8sServerSideDryRunner) Run(ctx context.Context, obj *unstructured.Unstructured, manager string) (string, error) {
+	return kdr.dryrunApplier.ApplyResource(ctx, obj, cmdutil.DryRunServer, false, false, true, manager, true)
 }
 
 func IgnoreAggregatedRoles(ignore bool) Option {

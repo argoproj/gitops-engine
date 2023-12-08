@@ -293,12 +293,18 @@ func (k *kubectlResourceOperations) newApplyOptions(ioStreams genericclioptions.
 			}
 		case cmdutil.DryRunServer:
 			if serverSideDiff {
+				// managedFields are required by server-side diff to identify
+				// changes made by mutation webhooks.
 				o.PrintFlags.JSONYamlPrintFlags.ShowManagedFields = true
-				return o.PrintFlags.JSONYamlPrintFlags.ToPrinter("json")
+				p, err := o.PrintFlags.JSONYamlPrintFlags.ToPrinter("json")
+				if err != nil {
+					return nil, fmt.Errorf("error configuring server-side diff printer: %w", err)
+				}
+				return p, nil
 			} else {
 				err = o.PrintFlags.Complete("%s (server dry run)")
 				if err != nil {
-					return nil, err
+					return nil, fmt.Errorf("error configuring server dryrun printer: %w", err)
 				}
 			}
 		}

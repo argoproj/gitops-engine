@@ -21,7 +21,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/managedfields"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/kubernetes/scheme"
-	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
 	"sigs.k8s.io/structured-merge-diff/v4/merge"
 	"sigs.k8s.io/structured-merge-diff/v4/typed"
@@ -136,9 +135,23 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 // no call will be made to kube-api and a simple diff will be returned.
 func ServerSideDiff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult, error) {
 	if live != nil && config != nil {
-		return serverSideDiff(config, live, opts...)
+		result, err := serverSideDiff(config, live, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("serverSideDiff error: %w", err)
+		}
+		return result, nil
 	}
-	return handleResourceCreateOrDeleteDiff(config, live)
+	// Currently, during resource creation a shallow diff (non ServerSide apply
+	// based) will be returned. The reasons are:
+	// - Saves 1 additional call to KubeAPI
+	// - Much lighter/faster diff
+	// - This is the existing behaviour users are already used to
+	// - No direct benefit to the user
+	result, err := handleResourceCreateOrDeleteDiff(config, live)
+	if err != nil {
+		return nil, fmt.Errorf("error handling resource creation or deletion: %w", err)
+	}
+	return result, nil
 }
 
 // ServerSideDiff will execute a k8s server-side apply in dry-run mode with the
@@ -147,10 +160,10 @@ func ServerSideDiff(config, live *unstructured.Unstructured, opts ...Option) (*D
 // This behaviour can be customized with Option.WithIgnoreMutationWebhook.
 func serverSideDiff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult, error) {
 	o := applyOptions(opts)
-	if o.kubeApplier == nil {
-		return nil, fmt.Errorf("serverSideDiff error: kubeApplier is null")
+	if o.serverSideDryRunner == nil {
+		return nil, fmt.Errorf("serverSideDryRunner is null")
 	}
-	predictedLiveStr, err := o.kubeApplier.ApplyResource(context.Background(), config, cmdutil.DryRunServer, false, false, true, o.manager, true)
+	predictedLiveStr, err := o.serverSideDryRunner.Run(context.Background(), config, o.manager)
 	if err != nil {
 		return nil, fmt.Errorf("error running server side apply in dryrun mode: %w", err)
 	}
