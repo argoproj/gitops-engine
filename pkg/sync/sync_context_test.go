@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"k8s.io/kubectl/pkg/cmd/util"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"testing"
+
+	"k8s.io/kubectl/pkg/cmd/util"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -855,6 +856,52 @@ func TestSync_ServerSideApply(t *testing.T) {
 			assert.Equal(t, tc.commandUsed, resourceOps.GetLastResourceCommand(kube.GetResourceKey(tc.target)))
 			assert.Equal(t, tc.serverSideApply, resourceOps.GetLastServerSideApply())
 			assert.Equal(t, tc.manager, resourceOps.GetLastServerSideApplyManager())
+		})
+	}
+}
+
+func withForceAnnotation(un *unstructured.Unstructured) *unstructured.Unstructured {
+	un.SetAnnotations(map[string]string{synccommon.AnnotationSyncOptions: synccommon.SyncOptionForce})
+	return un
+}
+
+func withForceAndReplaceAnnotations(un *unstructured.Unstructured) *unstructured.Unstructured {
+	un.SetAnnotations(map[string]string{synccommon.AnnotationSyncOptions: "Force=true,Replace=true"})
+	return un
+}
+
+func TestSync_Force(t *testing.T) {
+	testCases := []struct {
+		name        string
+		target      *unstructured.Unstructured
+		live        *unstructured.Unstructured
+		commandUsed string
+		force       bool
+	}{
+		{"NoAnnotation", NewPod(), NewPod(), "apply", false},
+		{"ForceApplyAnnotationIsSet", withForceAnnotation(NewPod()), NewPod(), "apply", true},
+		{"ForceReplaceAnnotationIsSet", withForceAndReplaceAnnotations(NewPod()), NewPod(), "replace", true},
+		{"LiveObjectMissing", withReplaceAnnotation(NewPod()), nil, "create", false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			syncCtx := newTestSyncCtx(nil)
+
+			tc.target.SetNamespace(FakeArgoCDNamespace)
+			if tc.live != nil {
+				tc.live.SetNamespace(FakeArgoCDNamespace)
+			}
+			syncCtx.resources = groupResources(ReconciliationResult{
+				Live:   []*unstructured.Unstructured{tc.live},
+				Target: []*unstructured.Unstructured{tc.target},
+			})
+
+			syncCtx.Sync()
+
+			resourceOps, _ := syncCtx.resourceOps.(*kubetest.MockResourceOps)
+			assert.Equal(t, tc.commandUsed, resourceOps.GetLastResourceCommand(kube.GetResourceKey(tc.target)))
+			assert.Equal(t, tc.force, resourceOps.GetLastForce())
 		})
 	}
 }
