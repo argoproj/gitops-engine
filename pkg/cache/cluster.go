@@ -132,8 +132,6 @@ type ClusterCache interface {
 	OnResourceUpdated(handler OnResourceUpdatedHandler) Unsubscribe
 	// OnEvent register event handler that is executed every time when new K8S event received
 	OnEvent(handler OnEventHandler) Unsubscribe
-
-	GetKubectl() kube.Kubectl
 }
 
 type WeightedSemaphore interface {
@@ -319,10 +317,6 @@ func (c *clusterCache) GetOpenAPISchema() openapi.Resources {
 // structured merge diffs.
 func (c *clusterCache) GetGVKParser() *managedfields.GvkParser {
 	return c.gvkParser
-}
-
-func (c *clusterCache) GetKubectl() kube.Kubectl {
-	return c.kubectl
 }
 
 func (c *clusterCache) appendAPIResource(info kube.APIResourceInfo) {
