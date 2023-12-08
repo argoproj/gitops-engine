@@ -22,7 +22,7 @@ type options struct {
 	gvkParser             *managedfields.GvkParser
 	manager               string
 	serverSideDiff        bool
-	kubeApplier           KubeApplier
+	serverSideDryRunner   ServerSideDryRunner
 	ignoreMutationWebhook bool
 }
 
@@ -41,6 +41,24 @@ func applyOptions(opts []Option) options {
 
 type KubeApplier interface {
 	ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string, serverSideDiff bool) (string, error)
+}
+
+type ServerSideDryRunner interface {
+	ServerSideApplyDryRun(ctx context.Context, obj *unstructured.Unstructured, manager string) (string, error)
+}
+
+type K8sServerSideDryRunner struct {
+	dryrunApplier KubeApplier
+}
+
+func NewK8sServerSideDryRunner(kubeApplier KubeApplier) *K8sServerSideDryRunner {
+	return &K8sServerSideDryRunner{
+		dryrunApplier: kubeApplier,
+	}
+}
+
+func (kdr *K8sServerSideDryRunner) ServerSideApplyDryRun(ctx context.Context, obj *unstructured.Unstructured, manager string) (string, error) {
+	return kdr.dryrunApplier.ApplyResource(context.Background(), obj, cmdutil.DryRunServer, false, false, true, manager, true)
 }
 
 func IgnoreAggregatedRoles(ignore bool) Option {
@@ -91,8 +109,8 @@ func WithIgnoreMutationWebhook(mw bool) Option {
 	}
 }
 
-func WithKubeApplier(ka KubeApplier) Option {
+func WithServerSideDryRunner(ssadr ServerSideDryRunner) Option {
 	return func(o *options) {
-		o.kubeApplier = ka
+		o.serverSideDryRunner = ssadr
 	}
 }

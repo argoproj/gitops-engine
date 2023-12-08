@@ -130,6 +130,10 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 	return TwoWayDiff(config, live)
 }
 
+// ServerSideDiff will execute a k8s server-side apply in dry-run mode with the
+// given config. The result will be compared with given live resource to determine
+// diff. If config or live are nil it means resource creation or deletion. In this
+// no call will be made to kube-api and a simple diff will be returned.
 func ServerSideDiff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult, error) {
 	if live != nil && config != nil {
 		return serverSideDiff(config, live, opts...)
@@ -137,6 +141,10 @@ func ServerSideDiff(config, live *unstructured.Unstructured, opts ...Option) (*D
 	return handleResourceCreateOrDeleteDiff(config, live)
 }
 
+// ServerSideDiff will execute a k8s server-side apply in dry-run mode with the
+// given config. The result will be compared with given live resource to determine
+// diff. Modifications done by mutation webhooks are removed from the diff by default.
+// This behaviour can be customized with Option.WithIgnoreMutationWebhook.
 func serverSideDiff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult, error) {
 	o := applyOptions(opts)
 	if o.kubeApplier == nil {
@@ -176,64 +184,81 @@ func serverSideDiff(config, live *unstructured.Unstructured, opts ...Option) (*D
 
 // removeWebhookMutation will compare the predictedLive with live to identify
 // changes done by mutation webhooks. Webhook mutations are identified by finding
-// changes in predictedLive fields not associated with any manager. All fields
-// under this condition will be reverted with their state from live.
+// changes in predictedLive fields not associated with any manager in the
+// managedFields. All fields under this condition will be reverted with their state
+// from live. If the given predictedLive does not have the managedFields, an error
+// will be returned.
 func removeWebhookMutation(predictedLive, live *unstructured.Unstructured, gvkParser *managedfields.GvkParser, manager string) (*unstructured.Unstructured, error) {
+	plManagedFields := predictedLive.GetManagedFields()
+	if plManagedFields == nil || len(plManagedFields) == 0 {
+		return nil, fmt.Errorf("predictedLive for resource %s/%s must have the managedFields", predictedLive.GetKind(), predictedLive.GetName())
+	}
 	gvk := predictedLive.GetObjectKind().GroupVersionKind()
 	pt := gvkParser.Type(gvk)
-	typedPreditedLive, err := pt.FromUnstructured(predictedLive.Object)
+	typedPredictedLive, err := pt.FromUnstructured(predictedLive.Object)
 	if err != nil {
-		return nil, fmt.Errorf("error creating typedPreditedLive: %s", err)
+		return nil, fmt.Errorf("error converting predicted live state from unstructured to %s: %w", gvk, err)
 	}
 
 	typedLive, err := pt.FromUnstructured(live.Object)
 	if err != nil {
-		return nil, fmt.Errorf("error creating typedLive: %s", err)
+		return nil, fmt.Errorf("error converting live state from unstructured to %s: %w", gvk, err)
 	}
 
-	comparison, err := typedLive.Compare(typedPreditedLive)
+	// Compare the predicted live with the live resource
+	comparison, err := typedLive.Compare(typedPredictedLive)
 	if err != nil {
-		return nil, fmt.Errorf("error comparing typedPreditedLive with typedLive: %s", err)
+		return nil, fmt.Errorf("error comparing predicted resource to live resource: %w", err)
 	}
 
-	for _, mfEntry := range predictedLive.GetManagedFields() {
+	// Loop over all existing managers in predicted live resource to identify
+	// fields mutated (in predicted live) not owned by any manager.
+	for _, mfEntry := range plManagedFields {
 		mfs := &fieldpath.Set{}
 		err := mfs.FromJSON(bytes.NewReader(mfEntry.FieldsV1.Raw))
 		if err != nil {
 			return nil, fmt.Errorf("error building managedFields set: %s", err)
 		}
 		if comparison.Added != nil && !comparison.Added.Empty() {
+			// exclude the added fields owned by this manager from the comparison
 			comparison.Added = comparison.Added.Difference(mfs)
 		}
 		if comparison.Modified != nil && !comparison.Modified.Empty() {
+			// exclude the modified fields owned by this manager from the comparison
 			comparison.Modified = comparison.Modified.Difference(mfs)
 		}
 		if comparison.Removed != nil && !comparison.Removed.Empty() {
+			// exclude the removed fields owned by this manager from the comparison
 			comparison.Removed = comparison.Removed.Difference(mfs)
 		}
 	}
+	// At this point, comparison holds all mutations that aren't owned by any
+	// of the existing managers.
 
 	if comparison.Added != nil && !comparison.Added.Empty() {
-		typedPreditedLive = typedPreditedLive.RemoveItems(comparison.Added)
+		// remove added fields that aren't owned by any manager
+		typedPredictedLive = typedPredictedLive.RemoveItems(comparison.Added)
 	}
 
 	if comparison.Modified != nil && !comparison.Modified.Empty() {
 		liveModValues := typedLive.ExtractItems(comparison.Modified)
-		typedPreditedLive, err = typedPreditedLive.Merge(liveModValues)
+		// revert modified fields not owned by any manager
+		typedPredictedLive, err = typedPredictedLive.Merge(liveModValues)
 		if err != nil {
-			return nil, fmt.Errorf("error merging liveModValues in typedPreditedLive: %s", err)
+			return nil, fmt.Errorf("error reverting webhook modified fields in predicted live resource: %s", err)
 		}
 	}
 
 	if comparison.Removed != nil && !comparison.Removed.Empty() {
 		liveRmValues := typedLive.ExtractItems(comparison.Removed)
-		typedPreditedLive, err = typedPreditedLive.Merge(liveRmValues)
+		// revert removed fields not owned by any manager
+		typedPredictedLive, err = typedPredictedLive.Merge(liveRmValues)
 		if err != nil {
-			return nil, fmt.Errorf("error merging liveRmValues in typedPreditedLive: %s", err)
+			return nil, fmt.Errorf("error reverting webhook removed fields in predicted live resource: %s", err)
 		}
 	}
 
-	plu := typedPreditedLive.AsValue().Unstructured()
+	plu := typedPredictedLive.AsValue().Unstructured()
 	pl, ok := plu.(map[string]interface{})
 	if !ok {
 		return nil, fmt.Errorf("error converting live typedValue: expected map got %T", plu)
