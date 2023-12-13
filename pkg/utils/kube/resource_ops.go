@@ -267,7 +267,7 @@ func (k *kubectlResourceOperations) newApplyOptions(ioStreams genericclioptions.
 		return nil, err
 	}
 	o.OpenAPISchema = k.openAPISchema
-	o.DryRunVerifier = resource.NewQueryParamVerifier(dynamicClient, k.fact.OpenAPIGetter(), resource.QueryParamFieldValidation)
+	o.DryRunVerifier = resource.NewQueryParamVerifier(dynamicClient, k.fact.OpenAPIGetter(), resource.QueryParamDryRun)
 	o.FieldValidationVerifier = resource.NewQueryParamVerifier(dynamicClient, k.fact.OpenAPIGetter(), resource.QueryParamFieldValidation)
 	validateDirective := metav1.FieldValidationIgnore
 	if validate {
@@ -337,7 +337,7 @@ func (k *kubectlResourceOperations) newCreateOptions(config *rest.Config, ioStre
 		return nil, err
 	}
 
-	o.DryRunVerifier = resource.NewQueryParamVerifier(dynamicClient, k.fact.OpenAPIGetter(), resource.QueryParamFieldValidation)
+	o.DryRunVerifier = resource.NewQueryParamVerifier(dynamicClient, k.fact.OpenAPIGetter(), resource.QueryParamDryRun)
 	o.FieldValidationVerifier = resource.NewQueryParamVerifier(dynamicClient, k.fact.OpenAPIGetter(), resource.QueryParamFieldValidation)
 
 	switch dryRunStrategy {
@@ -384,7 +384,7 @@ func (k *kubectlResourceOperations) newReplaceOptions(config *rest.Config, f cmd
 		return nil, err
 	}
 
-	o.DryRunVerifier = resource.NewQueryParamVerifier(dynamicClient, k.fact.OpenAPIGetter(), resource.QueryParamFieldValidation)
+	o.DryRunVerifier = resource.NewQueryParamVerifier(dynamicClient, k.fact.OpenAPIGetter(), resource.QueryParamDryRun)
 	o.FieldValidationVerifier = resource.NewQueryParamVerifier(dynamicClient, k.fact.OpenAPIGetter(), resource.QueryParamFieldValidation)
 	o.Builder = func() *resource.Builder {
 		return f.NewBuilder()
