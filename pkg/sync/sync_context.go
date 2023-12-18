@@ -922,8 +922,21 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 	var message string
 	shouldReplace := sc.replace || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplace)
 	applyFn := func(dryRunStrategy cmdutil.DryRunStrategy) (string, error) {
+		// Default to foreground deletion, use sync context policy, then use object-level config
+		prunePropagationPolicy := metav1.DeletePropagationForeground
+		if sc.prunePropagationPolicy != nil {
+			prunePropagationPolicy = *sc.prunePropagationPolicy
+		}
+		switch {
+		case resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyBackground):
+			prunePropagationPolicy = metav1.DeletePropagationBackground
+		case resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyForeground):
+			prunePropagationPolicy = metav1.DeletePropagationForeground
+		case resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyOrphan):
+			prunePropagationPolicy = metav1.DeletePropagationOrphan
+		}
 		if !shouldReplace {
-			return sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager)
+			return sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager, prunePropagationPolicy)
 		}
 		if t.liveObj == nil {
 			return sc.resourceOps.CreateResource(context.TODO(), t.targetObj, dryRunStrategy, validate)
@@ -940,19 +953,6 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 			}
 			return fmt.Sprintf("%s/%s updated", t.targetObj.GetKind(), t.targetObj.GetName()), nil
 
-		}
-		// Default to foreground deletion, use sync context policy, then use object-level config
-		prunePropagationPolicy := metav1.DeletePropagationForeground
-		if sc.prunePropagationPolicy != nil {
-			prunePropagationPolicy = *sc.prunePropagationPolicy
-		}
-		switch {
-		case resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyBackground):
-			prunePropagationPolicy = metav1.DeletePropagationBackground
-		case resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyForeground):
-			prunePropagationPolicy = metav1.DeletePropagationForeground
-		case resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyOrphan):
-			prunePropagationPolicy = metav1.DeletePropagationOrphan
 		}
 		return sc.resourceOps.ReplaceResource(context.TODO(), t.targetObj, dryRunStrategy, force, prunePropagationPolicy)
 	}
