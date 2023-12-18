@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
@@ -104,7 +105,7 @@ func (r *MockResourceOps) ApplyResource(ctx context.Context, obj *unstructured.U
 	return command.Output, command.Err
 }
 
-func (r *MockResourceOps) ReplaceResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force bool) (string, error) {
+func (r *MockResourceOps) ReplaceResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force bool, cascadingStrategy metav1.DeletionPropagation) (string, error) {
 	command, ok := r.Commands[obj.GetName()]
 	r.SetLastResourceCommand(kube.GetResourceKey(obj), "replace")
 

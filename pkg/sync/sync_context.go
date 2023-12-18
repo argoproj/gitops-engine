@@ -941,7 +941,20 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 			return fmt.Sprintf("%s/%s updated", t.targetObj.GetKind(), t.targetObj.GetName()), nil
 
 		}
-		return sc.resourceOps.ReplaceResource(context.TODO(), t.targetObj, dryRunStrategy, force)
+		// Default to foreground deletion, use sync context policy, then use object-level config
+		prunePropagationPolicy := metav1.DeletePropagationForeground
+		if sc.prunePropagationPolicy != nil {
+			prunePropagationPolicy = *sc.prunePropagationPolicy
+		}
+		switch {
+		case resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyBackground):
+			prunePropagationPolicy = metav1.DeletePropagationBackground
+		case resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyForeground):
+			prunePropagationPolicy = metav1.DeletePropagationForeground
+		case resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyOrphan):
+			prunePropagationPolicy = metav1.DeletePropagationOrphan
+		}
+		return sc.resourceOps.ReplaceResource(context.TODO(), t.targetObj, dryRunStrategy, force, prunePropagationPolicy)
 	}
 
 	message, err = applyFn(dryRunStrategy)
@@ -979,7 +992,21 @@ func (sc *syncContext) pruneObject(liveObj *unstructured.Unstructured, prune, dr
 			// Skip deletion if object is already marked for deletion, so we don't cause a resource update hotloop
 			deletionTimestamp := liveObj.GetDeletionTimestamp()
 			if deletionTimestamp == nil || deletionTimestamp.IsZero() {
-				err := sc.kubectl.DeleteResource(context.TODO(), sc.config, liveObj.GroupVersionKind(), liveObj.GetName(), liveObj.GetNamespace(), sc.getDeleteOptions())
+				propagationPolicy := metav1.DeletePropagationForeground
+				deleteOptions := sc.getDeleteOptions()
+				if deleteOptions.PropagationPolicy != nil {
+					propagationPolicy = *deleteOptions.PropagationPolicy
+				}
+				switch {
+				case resourceutil.HasAnnotationOption(liveObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyBackground):
+					propagationPolicy = metav1.DeletePropagationBackground
+				case resourceutil.HasAnnotationOption(liveObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyForeground):
+					propagationPolicy = metav1.DeletePropagationForeground
+				case resourceutil.HasAnnotationOption(liveObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyOrphan):
+					propagationPolicy = metav1.DeletePropagationOrphan
+				}
+				deleteOptions.PropagationPolicy = &propagationPolicy
+				err := sc.kubectl.DeleteResource(context.TODO(), sc.config, liveObj.GroupVersionKind(), liveObj.GetName(), liveObj.GetNamespace(), deleteOptions)
 				if err != nil {
 					return common.ResultCodeSyncFailed, err.Error()
 				}

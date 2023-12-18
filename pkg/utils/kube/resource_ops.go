@@ -39,7 +39,7 @@ import (
 // ResourceOperations provides methods to manage k8s resources
 type ResourceOperations interface {
 	ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string) (string, error)
-	ReplaceResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force bool) (string, error)
+	ReplaceResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force bool, cascadingStrategy metav1.DeletionPropagation) (string, error)
 	CreateResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, validate bool) (string, error)
 	UpdateResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy) (*unstructured.Unstructured, error)
 }
@@ -143,7 +143,7 @@ func kubeCmdFactory(kubeconfig, ns string, config *rest.Config) cmdutil.Factory 
 	return cmdutil.NewFactory(matchVersionKubeConfigFlags)
 }
 
-func (k *kubectlResourceOperations) ReplaceResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force bool) (string, error) {
+func (k *kubectlResourceOperations) ReplaceResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force bool, cascadingStrategy metav1.DeletionPropagation) (string, error) {
 	span := k.tracer.StartSpan("ReplaceResource")
 	span.SetBaggageItem("kind", obj.GetKind())
 	span.SetBaggageItem("name", obj.GetName())
@@ -156,7 +156,7 @@ func (k *kubectlResourceOperations) ReplaceResource(ctx context.Context, obj *un
 		}
 		defer cleanup()
 
-		replaceOptions, err := k.newReplaceOptions(k.config, f, ioStreams, fileName, obj.GetNamespace(), force, dryRunStrategy)
+		replaceOptions, err := k.newReplaceOptions(k.config, f, ioStreams, fileName, obj.GetNamespace(), force, dryRunStrategy, cascadingStrategy)
 		if err != nil {
 			return err
 		}
@@ -354,7 +354,7 @@ func (k *kubectlResourceOperations) newCreateOptions(config *rest.Config, ioStre
 	return o, nil
 }
 
-func (k *kubectlResourceOperations) newReplaceOptions(config *rest.Config, f cmdutil.Factory, ioStreams genericclioptions.IOStreams, fileName string, namespace string, force bool, dryRunStrategy cmdutil.DryRunStrategy) (*replace.ReplaceOptions, error) {
+func (k *kubectlResourceOperations) newReplaceOptions(config *rest.Config, f cmdutil.Factory, ioStreams genericclioptions.IOStreams, fileName string, namespace string, force bool, dryRunStrategy cmdutil.DryRunStrategy, cascadingStrategy metav1.DeletionPropagation) (*replace.ReplaceOptions, error) {
 	o := replace.NewReplaceOptions(ioStreams)
 
 	recorder, err := o.RecordFlags.ToRecorder()
@@ -404,6 +404,7 @@ func (k *kubectlResourceOperations) newReplaceOptions(config *rest.Config, f cmd
 	o.DeleteOptions.FilenameOptions.Filenames = []string{fileName}
 	o.Namespace = namespace
 	o.DeleteOptions.ForceDeletion = force
+	o.DeleteOptions.CascadingStrategy = cascadingStrategy
 	return o, nil
 }
 
