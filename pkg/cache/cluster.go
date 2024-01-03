@@ -635,11 +635,15 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 				if err != nil {
 					if c.connectionStatus != ConnectionStatusFailed {
 						c.log.Info("unable to access cluster", "cluster", c.config.Host, "reason", err.Error())
+						c.lock.Lock()
 						c.connectionStatus = ConnectionStatusFailed
+						c.lock.Unlock()
 						connectionUpdated = true
 					}
 				} else if c.connectionStatus != ConnectionStatusSuccessful {
+					c.lock.Lock()
 					c.connectionStatus = ConnectionStatusSuccessful
+					c.lock.Unlock()
 					connectionUpdated = true
 				}
 
