@@ -936,7 +936,7 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 			prunePropagationPolicy = metav1.DeletePropagationOrphan
 		}
 		if !shouldReplace {
-			return sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager, prunePropagationPolicy)
+			return sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager, false, prunePropagationPolicy)
 		}
 		if t.liveObj == nil {
 			return sc.resourceOps.CreateResource(context.TODO(), t.targetObj, dryRunStrategy, validate)
