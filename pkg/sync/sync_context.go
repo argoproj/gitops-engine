@@ -921,9 +921,10 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 	var err error
 	var message string
 	shouldReplace := sc.replace || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplace)
-	applyFn := func(dryRunStrategy cmdutil.DryRunStrategy) (string, error) {
+	applyFn := func(dryRunStrategy cmdutil.DryRunStrategy, serverSideApplyFlag bool) (string, error) {
+		sc.log.Info(fmt.Sprintf("calling applyFn using dry run strategy: %v and server side apply %v", dryRunStrategy, serverSideApplyFlag))
 		if !shouldReplace {
-			return sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager, false)
+			return sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApplyFlag, sc.serverSideApplyManager, false)
 		}
 		if t.liveObj == nil {
 			return sc.resourceOps.CreateResource(context.TODO(), t.targetObj, dryRunStrategy, validate)
@@ -934,24 +935,22 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 		if kube.IsCRD(t.targetObj) || t.targetObj.GetKind() == kubeutil.NamespaceKind {
 			update := t.targetObj.DeepCopy()
 			update.SetResourceVersion(t.liveObj.GetResourceVersion())
-			_, err = sc.resourceOps.UpdateResource(context.TODO(), update, dryRunStrategy)
+			_, err := sc.resourceOps.UpdateResource(context.TODO(), update, dryRunStrategy)
 			if err != nil {
 				return fmt.Sprintf("error when updating: %v", err.Error()), err
 			}
 			return fmt.Sprintf("%s/%s updated", t.targetObj.GetKind(), t.targetObj.GetName()), nil
-
 		}
 		return sc.resourceOps.ReplaceResource(context.TODO(), t.targetObj, dryRunStrategy, force)
 	}
-
-	message, err = applyFn(dryRunStrategy)
-
+	message, err = applyFn(dryRunStrategy, serverSideApply)
 	// DryRunServer fails with "Kind does not support fieldValidation" error for kubernetes server < 1.25
 	// it fails inside apply.go , o.DryRunVerifier.HasSupport(info.Mapping.GroupVersionKind) line
 	// so we retry with DryRunClient that works for all cases, but cause issues with hooks
 	// Details: https://github.com/argoproj/argo-cd/issues/16177
 	if dryRunStrategy == cmdutil.DryRunServer && err != nil {
-		message, err = applyFn(cmdutil.DryRunClient)
+		sc.log.Info("Reapplying dry run with client strategy and server side apply false")
+		message, err = applyFn(cmdutil.DryRunClient, false)
 	}
 
 	if err != nil {
@@ -959,7 +958,7 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 	}
 	if kube.IsCRD(t.targetObj) && !dryRun {
 		crdName := t.targetObj.GetName()
-		if err = sc.ensureCRDReady(crdName); err != nil {
+		if err := sc.ensureCRDReady(crdName); err != nil {
 			sc.log.Error(err, fmt.Sprintf("failed to ensure that CRD %s is ready", crdName))
 		}
 	}
