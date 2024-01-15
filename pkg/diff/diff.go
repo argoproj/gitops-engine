@@ -169,7 +169,6 @@ func serverSideDiff(config, live *unstructured.Unstructured, opts ...Option) (*D
 	}
 	predictedLive, err := jsonStrToUnstructured(predictedLiveStr)
 	if err != nil {
-		fmt.Printf(">>>>>>>>>>\n%s\n<<<<<<<<<<\n", predictedLiveStr)
 		return nil, fmt.Errorf("error converting json string to unstructured for resource %s/%s: %w", config.GetKind(), config.GetName(), err)
 	}
 
