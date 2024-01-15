@@ -91,7 +91,7 @@ func (k *kubectlResourceOperations) runResourceCommand(ctx context.Context, obj 
 	}
 
 	var out []string
-	if obj.GetAPIVersion() == "rbac.authorization.k8s.io/v1" && !serverSideDiff {
+	if obj.GetAPIVersion() == "rbac.authorization.k8s.io/v1" {
 		outReconcile, err := k.rbacReconcile(ctx, obj, manifestFile.Name(), dryRunStrategy)
 		if err != nil {
 			return "", fmt.Errorf("error running rbacReconcile: %s", err)
@@ -101,21 +101,24 @@ func (k *kubectlResourceOperations) runResourceCommand(ctx context.Context, obj 
 		// last-applied-configuration annotation in the object.
 	}
 
-	// Run kubectl apply
-	ioStreams := genericclioptions.IOStreams{
-		In:     &bytes.Buffer{},
-		Out:    &bytes.Buffer{},
-		ErrOut: &bytes.Buffer{},
-	}
-	err = executor(k.fact, ioStreams, manifestFile.Name())
-	if err != nil {
-		return "", errors.New(cleanKubectlOutput(err.Error()))
-	}
-	if buf := strings.TrimSpace(ioStreams.Out.(*bytes.Buffer).String()); len(buf) > 0 {
-		out = append(out, buf)
-	}
-	if buf := strings.TrimSpace(ioStreams.ErrOut.(*bytes.Buffer).String()); len(buf) > 0 {
-		out = append(out, buf)
+	if !serverSideDiff {
+		// Run kubectl apply
+		ioStreams := genericclioptions.IOStreams{
+			In:     &bytes.Buffer{},
+			Out:    &bytes.Buffer{},
+			ErrOut: &bytes.Buffer{},
+		}
+		err = executor(k.fact, ioStreams, manifestFile.Name())
+		if err != nil {
+			return "", errors.New(cleanKubectlOutput(err.Error()))
+		}
+		if buf := strings.TrimSpace(ioStreams.Out.(*bytes.Buffer).String()); len(buf) > 0 {
+			out = append(out, buf)
+		}
+		if buf := strings.TrimSpace(ioStreams.ErrOut.(*bytes.Buffer).String()); len(buf) > 0 {
+			out = append(out, buf)
+		}
+
 	}
 	return strings.Join(out, ". "), nil
 }
@@ -330,7 +333,7 @@ func (k *kubectlResourceOperations) newApplyOptions(ioStreams genericclioptions.
 	if manager != "" {
 		o.FieldManager = manager
 	}
-	if serverSideApply {
+	if serverSideApply || serverSideDiff {
 		o.ForceConflicts = true
 	}
 	return o, nil
@@ -484,6 +487,8 @@ func (k *kubectlResourceOperations) authReconcile(ctx context.Context, obj *unst
 	if err != nil {
 		return "", err
 	}
+
+	// reconcileOpts.PrintFlags =
 
 	err = reconcileOpts.Validate()
 	if err != nil {
