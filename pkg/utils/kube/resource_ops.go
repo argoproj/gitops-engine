@@ -497,7 +497,6 @@ func (k *kubectlResourceOperations) authReconcile(ctx context.Context, obj *unst
 			return "", fmt.Errorf("error configuring server-side diff printer: %w", err)
 		}
 		reconcileOpts.PrintObject = p.PrintObj
-
 	}
 
 	err = reconcileOpts.Validate()
