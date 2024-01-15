@@ -92,33 +92,33 @@ func (k *kubectlResourceOperations) runResourceCommand(ctx context.Context, obj 
 
 	var out []string
 	if obj.GetAPIVersion() == "rbac.authorization.k8s.io/v1" {
-		outReconcile, err := k.rbacReconcile(ctx, obj, manifestFile.Name(), dryRunStrategy)
+		outReconcile, err := k.rbacReconcile(ctx, obj, manifestFile.Name(), dryRunStrategy, serverSideDiff)
 		if err != nil {
 			return "", fmt.Errorf("error running rbacReconcile: %s", err)
+		}
+		if serverSideDiff {
+			return outReconcile, nil
 		}
 		out = append(out, outReconcile)
 		// We still want to fallthrough and run `kubectl apply` in order set the
 		// last-applied-configuration annotation in the object.
 	}
 
-	if !serverSideDiff {
-		// Run kubectl apply
-		ioStreams := genericclioptions.IOStreams{
-			In:     &bytes.Buffer{},
-			Out:    &bytes.Buffer{},
-			ErrOut: &bytes.Buffer{},
-		}
-		err = executor(k.fact, ioStreams, manifestFile.Name())
-		if err != nil {
-			return "", errors.New(cleanKubectlOutput(err.Error()))
-		}
-		if buf := strings.TrimSpace(ioStreams.Out.(*bytes.Buffer).String()); len(buf) > 0 {
-			out = append(out, buf)
-		}
-		if buf := strings.TrimSpace(ioStreams.ErrOut.(*bytes.Buffer).String()); len(buf) > 0 {
-			out = append(out, buf)
-		}
-
+	// Run kubectl apply
+	ioStreams := genericclioptions.IOStreams{
+		In:     &bytes.Buffer{},
+		Out:    &bytes.Buffer{},
+		ErrOut: &bytes.Buffer{},
+	}
+	err = executor(k.fact, ioStreams, manifestFile.Name())
+	if err != nil {
+		return "", errors.New(cleanKubectlOutput(err.Error()))
+	}
+	if buf := strings.TrimSpace(ioStreams.Out.(*bytes.Buffer).String()); len(buf) > 0 {
+		out = append(out, buf)
+	}
+	if buf := strings.TrimSpace(ioStreams.ErrOut.(*bytes.Buffer).String()); len(buf) > 0 {
+		out = append(out, buf)
 	}
 	return strings.Join(out, ". "), nil
 }
@@ -132,14 +132,14 @@ func (k *kubectlResourceOperations) runResourceCommand(ctx context.Context, obj 
 // roleRef, which is an immutable field.
 // See: https://github.com/kubernetes/kubernetes/issues/66353
 // `auth reconcile` will delete and recreate the resource if necessary
-func (k *kubectlResourceOperations) rbacReconcile(ctx context.Context, obj *unstructured.Unstructured, fileName string, dryRunStrategy cmdutil.DryRunStrategy) (string, error) {
+func (k *kubectlResourceOperations) rbacReconcile(ctx context.Context, obj *unstructured.Unstructured, fileName string, dryRunStrategy cmdutil.DryRunStrategy, serverSideDiff bool) (string, error) {
 	outReconcile, err := func() (string, error) {
 		cleanup, err := k.processKubectlRun("auth")
 		if err != nil {
 			return "", err
 		}
 		defer cleanup()
-		return k.authReconcile(ctx, obj, fileName, dryRunStrategy)
+		return k.authReconcile(ctx, obj, fileName, dryRunStrategy, serverSideDiff)
 	}()
 	if err != nil {
 		return "", err
@@ -463,7 +463,7 @@ func newReconcileOptions(f cmdutil.Factory, kubeClient *kubernetes.Clientset, fi
 	return o, nil
 }
 
-func (k *kubectlResourceOperations) authReconcile(ctx context.Context, obj *unstructured.Unstructured, manifestFile string, dryRunStrategy cmdutil.DryRunStrategy) (string, error) {
+func (k *kubectlResourceOperations) authReconcile(ctx context.Context, obj *unstructured.Unstructured, manifestFile string, dryRunStrategy cmdutil.DryRunStrategy, serverSideDiff bool) (string, error) {
 	kubeClient, err := kubernetes.NewForConfig(k.config)
 	if err != nil {
 		return "", err
@@ -485,10 +485,20 @@ func (k *kubectlResourceOperations) authReconcile(ctx context.Context, obj *unst
 	}
 	reconcileOpts, err := newReconcileOptions(k.fact, kubeClient, manifestFile, ioStreams, obj.GetNamespace(), dryRunStrategy)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("error calling newReconcileOptions: %w", err)
 	}
 
-	// reconcileOpts.PrintFlags =
+	if serverSideDiff {
+		// managedFields are required by server-side diff to identify
+		// changes made by mutation webhooks.
+		reconcileOpts.PrintFlags.JSONYamlPrintFlags.ShowManagedFields = true
+		p, err := reconcileOpts.PrintFlags.JSONYamlPrintFlags.ToPrinter("json")
+		if err != nil {
+			return "", fmt.Errorf("error configuring server-side diff printer: %w", err)
+		}
+		reconcileOpts.PrintObject = p.PrintObj
+
+	}
 
 	err = reconcileOpts.Validate()
 	if err != nil {
