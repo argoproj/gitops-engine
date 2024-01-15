@@ -91,8 +91,8 @@ func (k *kubectlResourceOperations) runResourceCommand(ctx context.Context, obj 
 	}
 
 	var out []string
-	if obj.GetAPIVersion() == "rbac.authorization.k8s.io/v1" {
-		outReconcile, err := k.rbacReconcile(ctx, obj, manifestFile.Name(), dryRunStrategy, serverSideDiff)
+	if obj.GetAPIVersion() == "rbac.authorization.k8s.io/v1" && !serverSideDiff {
+		outReconcile, err := k.rbacReconcile(ctx, obj, manifestFile.Name(), dryRunStrategy)
 		if err != nil {
 			return "", fmt.Errorf("error running rbacReconcile: %s", err)
 		}
@@ -132,14 +132,14 @@ func (k *kubectlResourceOperations) runResourceCommand(ctx context.Context, obj 
 // roleRef, which is an immutable field.
 // See: https://github.com/kubernetes/kubernetes/issues/66353
 // `auth reconcile` will delete and recreate the resource if necessary
-func (k *kubectlResourceOperations) rbacReconcile(ctx context.Context, obj *unstructured.Unstructured, fileName string, dryRunStrategy cmdutil.DryRunStrategy, serverSideDiff bool) (string, error) {
+func (k *kubectlResourceOperations) rbacReconcile(ctx context.Context, obj *unstructured.Unstructured, fileName string, dryRunStrategy cmdutil.DryRunStrategy) (string, error) {
 	outReconcile, err := func() (string, error) {
 		cleanup, err := k.processKubectlRun("auth")
 		if err != nil {
 			return "", err
 		}
 		defer cleanup()
-		return k.authReconcile(ctx, obj, fileName, dryRunStrategy, serverSideDiff)
+		return k.authReconcile(ctx, obj, fileName, dryRunStrategy)
 	}()
 	if err != nil {
 		return "", err
@@ -463,7 +463,7 @@ func newReconcileOptions(f cmdutil.Factory, kubeClient *kubernetes.Clientset, fi
 	return o, nil
 }
 
-func (k *kubectlResourceOperations) authReconcile(ctx context.Context, obj *unstructured.Unstructured, manifestFile string, dryRunStrategy cmdutil.DryRunStrategy, serverSideDiff bool) (string, error) {
+func (k *kubectlResourceOperations) authReconcile(ctx context.Context, obj *unstructured.Unstructured, manifestFile string, dryRunStrategy cmdutil.DryRunStrategy) (string, error) {
 	kubeClient, err := kubernetes.NewForConfig(k.config)
 	if err != nil {
 		return "", err
@@ -487,18 +487,6 @@ func (k *kubectlResourceOperations) authReconcile(ctx context.Context, obj *unst
 	if err != nil {
 		return "", fmt.Errorf("error calling newReconcileOptions: %w", err)
 	}
-
-	if serverSideDiff {
-		// managedFields are required by server-side diff to identify
-		// changes made by mutation webhooks.
-		reconcileOpts.PrintFlags.JSONYamlPrintFlags.ShowManagedFields = true
-		p, err := reconcileOpts.PrintFlags.JSONYamlPrintFlags.ToPrinter("json")
-		if err != nil {
-			return "", fmt.Errorf("error configuring server-side diff printer: %w", err)
-		}
-		reconcileOpts.PrintObject = p.PrintObj
-	}
-
 	err = reconcileOpts.Validate()
 	if err != nil {
 		return "", errors.New(cleanKubectlOutput(err.Error()))
