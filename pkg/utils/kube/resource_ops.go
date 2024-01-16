@@ -91,7 +91,7 @@ func (k *kubectlResourceOperations) runResourceCommand(ctx context.Context, obj 
 	}
 
 	var out []string
-	// rbac resouces are applied with auth reconcile kubectl feature.
+	// rbac resouces are first applied with auth reconcile kubectl feature.
 	// serverSideDiff should avoid this step as the resources are not being actually
 	// applied but just running in dryrun mode. Also, kubectl auth reconcile doesn't
 	// currently support running dryrun in server mode.
