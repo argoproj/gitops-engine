@@ -91,13 +91,14 @@ func (k *kubectlResourceOperations) runResourceCommand(ctx context.Context, obj 
 	}
 
 	var out []string
+	// rbac resouces are applied with auth reconcile kubectl feature.
+	// serverSideDiff should avoid this step as the resources are not being actually
+	// applied but just running in dryrun mode. Also, kubectl auth reconcile doesn't
+	// currently support running dryrun in server mode.
 	if obj.GetAPIVersion() == "rbac.authorization.k8s.io/v1" && !serverSideDiff {
 		outReconcile, err := k.rbacReconcile(ctx, obj, manifestFile.Name(), dryRunStrategy)
 		if err != nil {
 			return "", fmt.Errorf("error running rbacReconcile: %s", err)
-		}
-		if serverSideDiff {
-			return outReconcile, nil
 		}
 		out = append(out, outReconcile)
 		// We still want to fallthrough and run `kubectl apply` in order set the
