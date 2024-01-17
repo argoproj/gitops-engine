@@ -935,7 +935,7 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 		if kube.IsCRD(t.targetObj) || t.targetObj.GetKind() == kubeutil.NamespaceKind {
 			update := t.targetObj.DeepCopy()
 			update.SetResourceVersion(t.liveObj.GetResourceVersion())
-			_, err := sc.resourceOps.UpdateResource(context.TODO(), update, dryRunStrategy)
+			_, err = sc.resourceOps.UpdateResource(context.TODO(), update, dryRunStrategy)
 			if err != nil {
 				return fmt.Sprintf("error when updating: %v", err.Error()), err
 			}
@@ -943,7 +943,9 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 		}
 		return sc.resourceOps.ReplaceResource(context.TODO(), t.targetObj, dryRunStrategy, force)
 	}
+
 	message, err = applyFn(dryRunStrategy, serverSideApply)
+
 	// DryRunServer fails with "Kind does not support fieldValidation" error for kubernetes server < 1.25
 	// it fails inside apply.go , o.DryRunVerifier.HasSupport(info.Mapping.GroupVersionKind) line
 	// so we retry with DryRunClient that works for all cases, but cause issues with hooks
@@ -958,7 +960,7 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 	}
 	if kube.IsCRD(t.targetObj) && !dryRun {
 		crdName := t.targetObj.GetName()
-		if err := sc.ensureCRDReady(crdName); err != nil {
+		if err = sc.ensureCRDReady(crdName); err != nil {
 			sc.log.Error(err, fmt.Sprintf("failed to ensure that CRD %s is ready", crdName))
 		}
 	}
