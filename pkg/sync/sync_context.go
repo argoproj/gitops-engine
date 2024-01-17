@@ -921,13 +921,13 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 	var err error
 	var message string
 	shouldReplace := sc.replace || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplace)
-	applyFn := func(dryRunOption cmdutil.DryRunStrategy, serverSideApplyFlag bool) (string, error) {
-		sc.log.Info(fmt.Sprintf("calling applyFn using dry run strategy: %v and server side apply %v", dryRunOption, serverSideApplyFlag))
+	applyFn := func(dryRunStrategy cmdutil.DryRunStrategy, serverSideApplyFlag bool) (string, error) {
+		sc.log.V(2).Info(fmt.Sprintf("calling applyFn using dry run strategy: %v and server side apply %v", dryRunStrategy, serverSideApplyFlag))
 		if !shouldReplace {
-			return sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunOption, force, validate, serverSideApplyFlag, sc.serverSideApplyManager, false)
+			return sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApplyFlag, sc.serverSideApplyManager, false)
 		}
 		if t.liveObj == nil {
-			return sc.resourceOps.CreateResource(context.TODO(), t.targetObj, dryRunOption, validate)
+			return sc.resourceOps.CreateResource(context.TODO(), t.targetObj, dryRunStrategy, validate)
 		}
 		// Avoid using `kubectl replace` for CRDs since 'replace' might recreate resource and so delete all CRD instances.
 		// The same thing applies for namespaces, which would delete the namespace as well as everything within it,
@@ -935,13 +935,13 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 		if kube.IsCRD(t.targetObj) || t.targetObj.GetKind() == kubeutil.NamespaceKind {
 			update := t.targetObj.DeepCopy()
 			update.SetResourceVersion(t.liveObj.GetResourceVersion())
-			_, err := sc.resourceOps.UpdateResource(context.TODO(), update, dryRunOption)
+			_, err := sc.resourceOps.UpdateResource(context.TODO(), update, dryRunStrategy)
 			if err != nil {
 				return fmt.Sprintf("error when updating: %v", err.Error()), err
 			}
 			return fmt.Sprintf("%s/%s updated", t.targetObj.GetKind(), t.targetObj.GetName()), nil
 		}
-		return sc.resourceOps.ReplaceResource(context.TODO(), t.targetObj, dryRunOption, force)
+		return sc.resourceOps.ReplaceResource(context.TODO(), t.targetObj, dryRunStrategy, force)
 	}
 	message, err = applyFn(dryRunStrategy, serverSideApply)
 	// DryRunServer fails with "Kind does not support fieldValidation" error for kubernetes server < 1.25
