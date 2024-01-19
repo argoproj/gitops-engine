@@ -233,8 +233,7 @@ func (k *kubectlResourceOperations) ApplyResource(ctx context.Context, obj *unst
 		"dry-run", dryRunStrategy,
 		"manager", manager,
 		"serverSideApply", serverSideApply,
-		"serverSideDiff", serverSideDiff
-		).Info(fmt.Sprintf("Applying resource %s/%s in cluster: %s, namespace: %s", obj.GetKind(), obj.GetName(), k.config.Host, obj.GetNamespace()))
+		"serverSideDiff", serverSideDiff).Info(fmt.Sprintf("Applying resource %s/%s in cluster: %s, namespace: %s", obj.GetKind(), obj.GetName(), k.config.Host, obj.GetNamespace()))
 	return k.runResourceCommand(ctx, obj, dryRunStrategy, func(f cmdutil.Factory, ioStreams genericclioptions.IOStreams, fileName string) error {
 		cleanup, err := k.processKubectlRun("apply")
 		if err != nil {
