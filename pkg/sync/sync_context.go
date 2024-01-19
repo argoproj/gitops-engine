@@ -909,6 +909,8 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 		// irrespective of the dry run mode set in the sync context, always run
 		// in client dry run mode as the goal is to validate only the
 		// yaml correctness of the rendered manifests.
+		// running dry-run in server mode breaks the auto create namespace feature
+		// https://github.com/argoproj/argo-cd/issues/13874
 		dryRunStrategy = cmdutil.DryRunClient
 	}
 
@@ -917,6 +919,8 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 	shouldReplace := sc.replace || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplace)
 	// if it is a dry run, disable server side apply, as the goal is to validate only the
 	// yaml correctness of the rendered manifests.
+	// running dry-run in server mode breaks the auto create namespace feature
+	// https://github.com/argoproj/argo-cd/issues/13874
 	serverSideApply := !dryRun && (sc.serverSideApply || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionServerSideApply))
 	if shouldReplace {
 		if t.liveObj != nil {
