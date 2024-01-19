@@ -906,13 +906,18 @@ func (sc *syncContext) ensureCRDReady(name string) error {
 func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (common.ResultCode, string) {
 	dryRunStrategy := cmdutil.DryRunNone
 	if dryRun {
+		// irrespective of the dry run mode set in the sync context, always run
+		// in client dry run mode as the goal is to validate only the
+		// yaml correctness of the rendered manifests.
 		dryRunStrategy = cmdutil.DryRunClient
 	}
 
 	var err error
 	var message string
 	shouldReplace := sc.replace || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplace)
-	serverSideApply := sc.serverSideApply || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionServerSideApply)
+	// if it is a dry run, disable server side apply, as the goal is to validate only the
+	// yaml correctness of the rendered manifests.
+	serverSideApply := !dryRun && (sc.serverSideApply || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionServerSideApply))
 	if shouldReplace {
 		if t.liveObj != nil {
 			// Avoid using `kubectl replace` for CRDs since 'replace' might recreate resource and so delete all CRD instances.
