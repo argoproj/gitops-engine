@@ -913,7 +913,7 @@ func getDryRunStrategy(serverSideApply, dryRun bool) cmdutil.DryRunStrategy {
 	return cmdutil.DryRunClient
 }
 
-func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (common.ResultCode, string) {
+func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.ResultCode, string) {
 	serverSideApply := sc.serverSideApply || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionServerSideApply)
 
 	dryRunStrategy := getDryRunStrategy(serverSideApply, dryRun)
@@ -921,6 +921,7 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 	var err error
 	var message string
 	shouldReplace := sc.replace || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplace)
+	force := sc.force || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionForce)
 	applyFn := func(dryRunStrategy cmdutil.DryRunStrategy) (string, error) {
 		if !shouldReplace {
 			return sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager, false)
@@ -1205,7 +1206,7 @@ func (sc *syncContext) processCreateTasks(state runState, tasks syncTasks, dryRu
 			logCtx := sc.log.WithValues("dryRun", dryRun, "task", t)
 			logCtx.V(1).Info("Applying")
 			validate := sc.validate && !resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionsDisableValidation)
-			result, message := sc.applyObject(t, dryRun, sc.force, validate)
+			result, message := sc.applyObject(t, dryRun, validate)
 			if result == common.ResultCodeSyncFailed {
 				logCtx.WithValues("message", message).Info("Apply failed")
 				state = failed
