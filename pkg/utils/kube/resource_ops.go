@@ -134,16 +134,14 @@ func (k *kubectlResourceOperations) runResourceCommand(ctx context.Context, obj 
 // See: https://github.com/kubernetes/kubernetes/issues/66353
 // `auth reconcile` will delete and recreate the resource if necessary
 func (k *kubectlResourceOperations) rbacReconcile(ctx context.Context, obj *unstructured.Unstructured, fileName string, dryRunStrategy cmdutil.DryRunStrategy) (string, error) {
-	outReconcile, err := func() (string, error) {
-		cleanup, err := k.processKubectlRun("auth")
-		if err != nil {
-			return "", err
-		}
-		defer cleanup()
-		return k.authReconcile(ctx, obj, fileName, dryRunStrategy)
-	}()
+	cleanup, err := k.processKubectlRun("auth")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("error processing kubectl run auth: %w", err)
+	}
+	defer cleanup()
+	outReconcile, err := k.authReconcile(ctx, obj, fileName, dryRunStrategy)
+	if err != nil {
+		return "", fmt.Errorf("error running kubectl auth reconcile: %w", err)
 	}
 	return outReconcile, nil
 }
