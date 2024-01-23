@@ -2,18 +2,11 @@ package resource
 
 import (
 	"strings"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// AnnotationGetter defines the operations required to inspect if a resource
-// has annotations
-type AnnotationGetter interface {
-	GetAnnotations() map[string]string
-}
-
-// GetAnnotationCSVs will return the value of the annotation identified by
-// the given key. If the annotation has comma separated values, the returned
-// list will contain all deduped values.
-func GetAnnotationCSVs(obj AnnotationGetter, key string) []string {
+func GetAnnotationCSVs(obj *unstructured.Unstructured, key string) []string {
 	// may for de-duping
 	valuesToBool := make(map[string]bool)
 	for _, item := range strings.Split(obj.GetAnnotations()[key], ",") {
@@ -29,9 +22,7 @@ func GetAnnotationCSVs(obj AnnotationGetter, key string) []string {
 	return values
 }
 
-// HasAnnotationOption will return if the given obj has an annotation defined
-// as the given key and has in its values, the ocurrence of val.
-func HasAnnotationOption(obj AnnotationGetter, key, val string) bool {
+func HasAnnotationOption(obj *unstructured.Unstructured, key, val string) bool {
 	for _, item := range GetAnnotationCSVs(obj, key) {
 		if item == val {
 			return true
