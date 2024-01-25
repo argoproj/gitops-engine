@@ -3,7 +3,10 @@
 package mocks
 
 import (
+	context "context"
+
 	cache "github.com/argoproj/gitops-engine/pkg/cache"
+
 	kube "github.com/argoproj/gitops-engine/pkg/utils/kube"
 
 	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
@@ -277,9 +280,9 @@ func (_m *ClusterCache) OnResourceUpdated(handler cache.OnResourceUpdatedHandler
 	return r0
 }
 
-// UpdateClusterConnectionStatus provides a mock function with given fields:
-func (_m *ClusterCache) UpdateClusterConnectionStatus() {
-	_m.Called()
+// UpdateClusterConnectionStatus provides a mock function with given fields: ctx
+func (_m *ClusterCache) UpdateClusterConnectionStatus(ctx context.Context) {
+	_m.Called(ctx)
 }
 
 // NewClusterCache creates a new instance of ClusterCache. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

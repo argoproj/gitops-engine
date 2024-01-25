@@ -135,7 +135,7 @@ type ClusterCache interface {
 	// OnEvent register event handler that is executed every time when new K8S event received
 	OnEvent(handler OnEventHandler) Unsubscribe
 	// UpdateClusterConnectionStatus checks the watch errors periodically and updates the cluster connection status.
-	UpdateClusterConnectionStatus()
+	UpdateClusterConnectionStatus(ctx context.Context)
 }
 
 type WeightedSemaphore interface {
@@ -1236,11 +1236,11 @@ func skipAppRequeuing(key kube.ResourceKey) bool {
 // UpdateClusterConnectionStatus starts a goroutine that checks for watch failures.
 // If there are any watch errors, it will periodically ping the remote cluster
 // and update the cluster connection status.
-func (c *clusterCache) UpdateClusterConnectionStatus() {
-	go c.clusterConnectionService()
+func (c *clusterCache) UpdateClusterConnectionStatus(ctx context.Context) {
+	go c.clusterConnectionService(ctx)
 }
 
-func (c *clusterCache) clusterConnectionService() {
+func (c *clusterCache) clusterConnectionService(ctx context.Context) {
 	clusterConnectionTimeout := 10 * time.Second
 	ticker := time.NewTicker(clusterConnectionTimeout)
 	defer ticker.Stop()
@@ -1263,6 +1263,9 @@ func (c *clusterCache) clusterConnectionService() {
 					c.updateConnectionStatus(ConnectionStatusSuccessful)
 				}
 			}
+		case <-ctx.Done():
+			ticker.Stop()
+			return
 		}
 	}
 
