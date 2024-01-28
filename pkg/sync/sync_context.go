@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -382,7 +383,7 @@ func (sc *syncContext) setRunningPhase(tasks []*syncTask, isPendingDeletion bool
 	}
 }
 
-// sync has performs the actual apply or hook based sync
+// sync performs the actual apply or hook based sync
 func (sc *syncContext) Sync() {
 	sc.log.WithValues("skipHooks", sc.skipHooks, "started", sc.started()).Info("Syncing")
 	tasks, ok := sc.getSyncTasks()
@@ -396,7 +397,7 @@ func (sc *syncContext) Sync() {
 	} else {
 		// Perform a `kubectl apply --dry-run` against all the manifests. This will detect most (but
 		// not all) validation issues with the user's manifests (e.g. will detect syntax issues, but
-		// will not not detect if they are mutating immutable fields). If anything fails, we will refuse
+		// will not detect if they are mutating immutable fields). If anything fails, we will refuse
 		// to perform the sync. we only wish to do this once per operation, performing additional dry-runs
 		// is harmless, but redundant. The indicator we use to detect if we have already performed
 		// the dry-run for this operation, is if the resource or hook list is empty.
@@ -544,6 +545,14 @@ func (sc *syncContext) Sync() {
 			// delete all completed hooks which have appropriate delete policy
 			sc.deleteHooks(hooksPendingDeletionSuccessful)
 			sc.setOperationPhase(common.OperationSucceeded, "successfully synced (all tasks run)")
+		} else {
+			sc.setRunningPhase(remainingTasks, false)
+		}
+	case warning:
+		if remainingTasks.Len() == 0 {
+			// delete all completed hooks which have appropriate delete policy
+			sc.deleteHooks(hooksPendingDeletionSuccessful)
+			sc.setOperationPhase(common.OperationWarning, "synced with warning")
 		} else {
 			sc.setRunningPhase(remainingTasks, false)
 		}
@@ -950,7 +959,9 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 		// https://github.com/argoproj/argo-cd/issues/13874
 		dryRunStrategy = cmdutil.DryRunClient
 	}
-
+	// Warnings handler
+	warn := bytes.NewBuffer(nil)
+	rest.SetDefaultWarningHandler(rest.NewWarningWriter(warn, rest.WarningWriterOptions{}))
 	var err error
 	var message string
 	shouldReplace := sc.replace || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplace)
@@ -990,6 +1001,9 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 		if err = sc.ensureCRDReady(crdName); err != nil {
 			sc.log.Error(err, fmt.Sprintf("failed to ensure that CRD %s is ready", crdName))
 		}
+	}
+	if warn.Len() != 0 {
+		return common.ResultCodeSyncedWithWarning, warn.String()
 	}
 	return common.ResultCodeSynced, message
 }
@@ -1115,10 +1129,11 @@ func (sc *syncContext) getResourceIf(task *syncTask, verb string) (dynamic.Resou
 }
 
 var operationPhases = map[common.ResultCode]common.OperationPhase{
-	common.ResultCodeSynced:       common.OperationRunning,
-	common.ResultCodeSyncFailed:   common.OperationFailed,
-	common.ResultCodePruned:       common.OperationSucceeded,
-	common.ResultCodePruneSkipped: common.OperationSucceeded,
+	common.ResultCodeSynced:            common.OperationRunning,
+	common.ResultCodeSyncFailed:        common.OperationFailed,
+	common.ResultCodePruned:            common.OperationSucceeded,
+	common.ResultCodePruneSkipped:      common.OperationSucceeded,
+	common.ResultCodeSyncedWithWarning: common.OperationWarning,
 }
 
 // tri-state
@@ -1126,6 +1141,7 @@ type runState int
 
 const (
 	successful runState = iota
+	warning
 	pending
 	failed
 )
@@ -1238,6 +1254,11 @@ func (sc *syncContext) processCreateTasks(state runState, tasks syncTasks, dryRu
 				logCtx.WithValues("message", message).Info("Apply failed")
 				state = failed
 			}
+			if result == common.ResultCodeSyncedWithWarning {
+				state = warning
+				phase := operationPhases[result]
+				sc.setResourceResult(t, result, phase, message)
+			}
 			if !dryRun || sc.dryRun || result == common.ResultCodeSyncFailed {
 				phase := operationPhases[result]
 				// no resources are created in dry-run, so running phase means validation was
@@ -1339,7 +1360,7 @@ func (s *stateSync) Wait() runState {
 			}
 		case successful:
 			switch result {
-			case pending, failed:
+			case warning, pending, failed:
 				res = result
 			}
 		}
