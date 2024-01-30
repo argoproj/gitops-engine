@@ -772,6 +772,17 @@ func buildGVKParser(t *testing.T) *managedfields.GvkParser {
 	return gvkParser
 }
 
+func TestUnsortedEndpointSlice(t *testing.T) {
+	configUn := unmarshalFile("testdata/endpointslice-config.json")
+	liveUn := unmarshalFile("testdata/endpointslice-live.json")
+	dr := diff(t, configUn, liveUn, diffOptionsForTest()...)
+	if !assert.False(t, dr.Modified) {
+		ascii, err := printDiff(dr)
+		require.NoError(t, err)
+		t.Log(ascii)
+	}
+}
+
 func TestStructuredMergeDiff(t *testing.T) {
 	buildParams := func(live, config *unstructured.Unstructured) *SMDParams {
 		gvkParser := buildGVKParser(t)
