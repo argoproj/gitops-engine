@@ -38,8 +38,8 @@ import (
 
 // ResourceOperations provides methods to manage k8s resources
 type ResourceOperations interface {
-	ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string, serverSideDiff bool) (string, error)
-	ReplaceResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force bool) (string, error)
+	ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string, serverSideDiff bool, cascadingStrategy metav1.DeletionPropagation) (string, error)
+	ReplaceResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force bool, cascadingStrategy metav1.DeletionPropagation) (string, error)
 	CreateResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, validate bool) (string, error)
 	UpdateResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy) (*unstructured.Unstructured, error)
 }
@@ -158,7 +158,7 @@ func kubeCmdFactory(kubeconfig, ns string, config *rest.Config) cmdutil.Factory 
 	return cmdutil.NewFactory(matchVersionKubeConfigFlags)
 }
 
-func (k *kubectlResourceOperations) ReplaceResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force bool) (string, error) {
+func (k *kubectlResourceOperations) ReplaceResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force bool, cascadingStrategy metav1.DeletionPropagation) (string, error) {
 	span := k.tracer.StartSpan("ReplaceResource")
 	span.SetBaggageItem("kind", obj.GetKind())
 	span.SetBaggageItem("name", obj.GetName())
@@ -171,7 +171,7 @@ func (k *kubectlResourceOperations) ReplaceResource(ctx context.Context, obj *un
 		}
 		defer cleanup()
 
-		replaceOptions, err := k.newReplaceOptions(k.config, f, ioStreams, fileName, obj.GetNamespace(), force, dryRunStrategy)
+		replaceOptions, err := k.newReplaceOptions(k.config, f, ioStreams, fileName, obj.GetNamespace(), force, dryRunStrategy, cascadingStrategy)
 		if err != nil {
 			return err
 		}
@@ -239,7 +239,7 @@ func (k *kubectlResourceOperations) UpdateResource(ctx context.Context, obj *uns
 }
 
 // ApplyResource performs an apply of a unstructured resource
-func (k *kubectlResourceOperations) ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string, serverSideDiff bool) (string, error) {
+func (k *kubectlResourceOperations) ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string, serverSideDiff bool, cascadingStrategy metav1.DeletionPropagation) (string, error) {
 	span := k.tracer.StartSpan("ApplyResource")
 	span.SetBaggageItem("kind", obj.GetKind())
 	span.SetBaggageItem("name", obj.GetName())
@@ -257,7 +257,7 @@ func (k *kubectlResourceOperations) ApplyResource(ctx context.Context, obj *unst
 		}
 		defer cleanup()
 
-		applyOpts, err := k.newApplyOptions(ioStreams, obj, fileName, validate, force, serverSideApply, dryRunStrategy, manager, serverSideDiff)
+		applyOpts, err := k.newApplyOptions(ioStreams, obj, fileName, validate, force, serverSideApply, dryRunStrategy, manager, serverSideDiff, cascadingStrategy)
 		if err != nil {
 			return err
 		}
@@ -265,7 +265,7 @@ func (k *kubectlResourceOperations) ApplyResource(ctx context.Context, obj *unst
 	})
 }
 
-func (k *kubectlResourceOperations) newApplyOptions(ioStreams genericclioptions.IOStreams, obj *unstructured.Unstructured, fileName string, validate bool, force, serverSideApply bool, dryRunStrategy cmdutil.DryRunStrategy, manager string, serverSideDiff bool) (*apply.ApplyOptions, error) {
+func (k *kubectlResourceOperations) newApplyOptions(ioStreams genericclioptions.IOStreams, obj *unstructured.Unstructured, fileName string, validate bool, force, serverSideApply bool, dryRunStrategy cmdutil.DryRunStrategy, manager string, serverSideDiff bool, cascadingStrategy metav1.DeletionPropagation) (*apply.ApplyOptions, error) {
 	flags := apply.NewApplyFlags(k.fact, ioStreams)
 	o := &apply.ApplyOptions{
 		IOStreams:         ioStreams,
@@ -333,6 +333,7 @@ func (k *kubectlResourceOperations) newApplyOptions(ioStreams genericclioptions.
 	o.DeleteOptions.FilenameOptions.Filenames = []string{fileName}
 	o.Namespace = obj.GetNamespace()
 	o.DeleteOptions.ForceDeletion = force
+	o.DeleteOptions.CascadingStrategy = cascadingStrategy
 	o.DryRunStrategy = dryRunStrategy
 	if manager != "" {
 		o.FieldManager = manager
@@ -385,7 +386,7 @@ func (k *kubectlResourceOperations) newCreateOptions(config *rest.Config, ioStre
 	return o, nil
 }
 
-func (k *kubectlResourceOperations) newReplaceOptions(config *rest.Config, f cmdutil.Factory, ioStreams genericclioptions.IOStreams, fileName string, namespace string, force bool, dryRunStrategy cmdutil.DryRunStrategy) (*replace.ReplaceOptions, error) {
+func (k *kubectlResourceOperations) newReplaceOptions(config *rest.Config, f cmdutil.Factory, ioStreams genericclioptions.IOStreams, fileName string, namespace string, force bool, dryRunStrategy cmdutil.DryRunStrategy, cascadingStrategy metav1.DeletionPropagation) (*replace.ReplaceOptions, error) {
 	o := replace.NewReplaceOptions(ioStreams)
 
 	recorder, err := o.RecordFlags.ToRecorder()
@@ -435,6 +436,7 @@ func (k *kubectlResourceOperations) newReplaceOptions(config *rest.Config, f cmd
 	o.DeleteOptions.FilenameOptions.Filenames = []string{fileName}
 	o.Namespace = namespace
 	o.DeleteOptions.ForceDeletion = force
+	o.DeleteOptions.CascadingStrategy = cascadingStrategy
 	return o, nil
 }
 

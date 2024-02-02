@@ -32,7 +32,10 @@ const (
 	// Sync option that disables resource deletion
 	SyncOptionDisableDeletion = "Delete=false"
 	// Sync option that sync only out of sync resources
-	SyncOptionApplyOutOfSyncOnly = "ApplyOutOfSyncOnly=true"
+	SyncOptionApplyOutOfSyncOnly               = "ApplyOutOfSyncOnly=true"
+	SyncOptionPrunePropagationPolicyForeground = "PrunePropagationPolicy=foreground"
+	SyncOptionPrunePropagationPolicyBackground = "PrunePropagationPolicy=background"
+	SyncOptionPrunePropagationPolicyOrphan     = "PrunePropagationPolicy=orphan"
 )
 
 type PermissionValidator func(un *unstructured.Unstructured, res *metav1.APIResource) error
