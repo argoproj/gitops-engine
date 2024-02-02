@@ -761,31 +761,31 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	// for prune tasks, modify the waves for proper cleanup i.e reverse of sync wave (creation order)
 	pruneTasks := make(map[int][]*syncTask)
 	for _, task := range tasks {
-	    if task.isPrune() {
-	        pruneTasks[task.wave()] = append(pruneTasks[task.wave()], task)
-	    }
+		if task.isPrune() {
+			pruneTasks[task.wave()] = append(pruneTasks[task.wave()], task)
+		}
 	}
 
 	var uniquePruneWaves []int
 	for k := range pruneTasks {
-	    uniquePruneWaves = append(uniquePruneWaves, k)
+		uniquePruneWaves = append(uniquePruneWaves, k)
 	}
 	sort.Ints(uniquePruneWaves)
 
 	// reorder waves for pruning tasks using symmetric swap on prune waves
 	n := len(uniquePruneWaves)
 	for i := 0; i < n/2; i++ {
-	    // waves to swap
-	    startWave := uniquePruneWaves[i]
-	    endWave := uniquePruneWaves[n-1-i]
+		// waves to swap
+		startWave := uniquePruneWaves[i]
+		endWave := uniquePruneWaves[n-1-i]
 
-	    for _, task := range pruneTasks[startWave] {
+		for _, task := range pruneTasks[startWave] {
 			task.waveOverride = &endWave
-	    }
+		}
 
-	    for _, task := range pruneTasks[endWave] {
+		for _, task := range pruneTasks[endWave] {
 			task.waveOverride = &startWave
-	    }
+		}
 	}
 
 	// for pruneLast tasks, modify the wave to sync phase last wave of tasks + 1
@@ -954,6 +954,19 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 	var err error
 	var message string
 	shouldReplace := sc.replace || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplace)
+	// Default to foreground deletion, use sync context policy, then use object-level config
+	prunePropagationPolicy := metav1.DeletePropagationForeground
+	if sc.prunePropagationPolicy != nil {
+		prunePropagationPolicy = *sc.prunePropagationPolicy
+	}
+	switch {
+	case resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyBackground):
+		prunePropagationPolicy = metav1.DeletePropagationBackground
+	case resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyForeground):
+		prunePropagationPolicy = metav1.DeletePropagationForeground
+	case resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyOrphan):
+		prunePropagationPolicy = metav1.DeletePropagationOrphan
+	}
 	// if it is a dry run, disable server side apply, as the goal is to validate only the
 	// yaml correctness of the rendered manifests.
 	// running dry-run in server mode breaks the auto create namespace feature
@@ -974,13 +987,13 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (c
 					message = fmt.Sprintf("error when updating: %v", err.Error())
 				}
 			} else {
-				message, err = sc.resourceOps.ReplaceResource(context.TODO(), t.targetObj, dryRunStrategy, force)
+				message, err = sc.resourceOps.ReplaceResource(context.TODO(), t.targetObj, dryRunStrategy, force, prunePropagationPolicy)
 			}
 		} else {
 			message, err = sc.resourceOps.CreateResource(context.TODO(), t.targetObj, dryRunStrategy, validate)
 		}
 	} else {
-		message, err = sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager, false)
+		message, err = sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager, false, prunePropagationPolicy)
 	}
 	if err != nil {
 		return common.ResultCodeSyncFailed, err.Error()
