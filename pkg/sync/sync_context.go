@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -457,6 +456,18 @@ func (sc *syncContext) Sync() {
 		return
 	}
 
+	// if pruned tasks pending deletion, then wait...
+	prunedTasksPendingDelete := tasks.Filter(func(t *syncTask) bool {
+		if t.pruned() && t.liveObj != nil {
+			return t.liveObj.GetDeletionTimestamp() != nil
+		}
+		return false
+	})
+	if prunedTasksPendingDelete.Len() > 0 {
+		sc.setRunningPhase(prunedTasksPendingDelete, true)
+		return
+	}
+
 	// collect all completed hooks which have appropriate delete policy
 	hooksPendingDeletionSuccessful := tasks.Filter(func(task *syncTask) bool {
 		return task.isHook() && task.liveObj != nil && !task.running() && task.deleteOnPhaseSuccessful()
@@ -747,11 +758,42 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 		}
 	}
 
-	// for pruneLast tasks, modify the wave to sync phase last wave of non prune task +1
+	// for prune tasks, modify the waves for proper cleanup i.e reverse of sync wave (creation order)
+	pruneTasks := make(map[int][]*syncTask)
+	for _, task := range tasks {
+	    if task.isPrune() {
+	        pruneTasks[task.wave()] = append(pruneTasks[task.wave()], task)
+	    }
+	}
+
+	var uniquePruneWaves []int
+	for k := range pruneTasks {
+	    uniquePruneWaves = append(uniquePruneWaves, k)
+	}
+	sort.Ints(uniquePruneWaves)
+
+	// reorder waves for pruning tasks using symmetric swap on prune waves
+	n := len(uniquePruneWaves)
+	for i := 0; i < n/2; i++ {
+	    // waves to swap
+	    startWave := uniquePruneWaves[i]
+	    endWave := uniquePruneWaves[n-1-i]
+
+	    for _, task := range pruneTasks[startWave] {
+			task.waveOverride = &endWave
+	    }
+
+	    for _, task := range pruneTasks[endWave] {
+			task.waveOverride = &startWave
+	    }
+	}
+
+	// for pruneLast tasks, modify the wave to sync phase last wave of tasks + 1
+	// to ensure proper cleanup, syncPhaseLastWave should also consider prune tasks to determine last wave
 	syncPhaseLastWave := 0
 	for _, task := range tasks {
 		if task.phase == common.SyncPhaseSync {
-			if task.wave() > syncPhaseLastWave && !task.isPrune() {
+			if task.wave() > syncPhaseLastWave {
 				syncPhaseLastWave = task.wave()
 			}
 		}
@@ -761,12 +803,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	for _, task := range tasks {
 		if task.isPrune() &&
 			(sc.pruneLast || resourceutil.HasAnnotationOption(task.liveObj, common.AnnotationSyncOptions, common.SyncOptionPruneLast)) {
-			annotations := task.liveObj.GetAnnotations()
-			if annotations == nil {
-				annotations = make(map[string]string)
-			}
-			annotations[common.AnnotationSyncWave] = strconv.Itoa(syncPhaseLastWave)
-			task.liveObj.SetAnnotations(annotations)
+			task.waveOverride = &syncPhaseLastWave
 		}
 	}
 
@@ -903,70 +940,48 @@ func (sc *syncContext) ensureCRDReady(name string) error {
 	})
 }
 
-func getDryRunStrategy(serverSideApply, dryRun bool) cmdutil.DryRunStrategy {
-	if !dryRun {
-		return cmdutil.DryRunNone
-	}
-	if serverSideApply {
-		return cmdutil.DryRunServer
-	}
-	return cmdutil.DryRunClient
-}
-
 func (sc *syncContext) applyObject(t *syncTask, dryRun, force, validate bool) (common.ResultCode, string) {
-	serverSideApply := sc.serverSideApply || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionServerSideApply)
-
-	dryRunStrategy := getDryRunStrategy(serverSideApply, dryRun)
+	dryRunStrategy := cmdutil.DryRunNone
+	if dryRun {
+		// irrespective of the dry run mode set in the sync context, always run
+		// in client dry run mode as the goal is to validate only the
+		// yaml correctness of the rendered manifests.
+		// running dry-run in server mode breaks the auto create namespace feature
+		// https://github.com/argoproj/argo-cd/issues/13874
+		dryRunStrategy = cmdutil.DryRunClient
+	}
 
 	var err error
 	var message string
 	shouldReplace := sc.replace || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplace)
-	applyFn := func(dryRunStrategy cmdutil.DryRunStrategy) (string, error) {
-		// Default to foreground deletion, use sync context policy, then use object-level config
-		prunePropagationPolicy := metav1.DeletePropagationForeground
-		if sc.prunePropagationPolicy != nil {
-			prunePropagationPolicy = *sc.prunePropagationPolicy
-		}
-		switch {
-		case resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyBackground):
-			prunePropagationPolicy = metav1.DeletePropagationBackground
-		case resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyForeground):
-			prunePropagationPolicy = metav1.DeletePropagationForeground
-		case resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyOrphan):
-			prunePropagationPolicy = metav1.DeletePropagationOrphan
-		}
-		if !shouldReplace {
-			return sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager, false, prunePropagationPolicy)
-		}
-		if t.liveObj == nil {
-			return sc.resourceOps.CreateResource(context.TODO(), t.targetObj, dryRunStrategy, validate)
-		}
-		// Avoid using `kubectl replace` for CRDs since 'replace' might recreate resource and so delete all CRD instances.
-		// The same thing applies for namespaces, which would delete the namespace as well as everything within it,
-		// so we want to avoid using `kubectl replace` in that case as well.
-		if kube.IsCRD(t.targetObj) || t.targetObj.GetKind() == kubeutil.NamespaceKind {
-			update := t.targetObj.DeepCopy()
-			update.SetResourceVersion(t.liveObj.GetResourceVersion())
-			_, err = sc.resourceOps.UpdateResource(context.TODO(), update, dryRunStrategy)
-			if err != nil {
-				return fmt.Sprintf("error when updating: %v", err.Error()), err
+	// if it is a dry run, disable server side apply, as the goal is to validate only the
+	// yaml correctness of the rendered manifests.
+	// running dry-run in server mode breaks the auto create namespace feature
+	// https://github.com/argoproj/argo-cd/issues/13874
+	serverSideApply := !dryRun && (sc.serverSideApply || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionServerSideApply))
+	if shouldReplace {
+		if t.liveObj != nil {
+			// Avoid using `kubectl replace` for CRDs since 'replace' might recreate resource and so delete all CRD instances.
+			// The same thing applies for namespaces, which would delete the namespace as well as everything within it,
+			// so we want to avoid using `kubectl replace` in that case as well.
+			if kube.IsCRD(t.targetObj) || t.targetObj.GetKind() == kubeutil.NamespaceKind {
+				update := t.targetObj.DeepCopy()
+				update.SetResourceVersion(t.liveObj.GetResourceVersion())
+				_, err = sc.resourceOps.UpdateResource(context.TODO(), update, dryRunStrategy)
+				if err == nil {
+					message = fmt.Sprintf("%s/%s updated", t.targetObj.GetKind(), t.targetObj.GetName())
+				} else {
+					message = fmt.Sprintf("error when updating: %v", err.Error())
+				}
+			} else {
+				message, err = sc.resourceOps.ReplaceResource(context.TODO(), t.targetObj, dryRunStrategy, force)
 			}
-			return fmt.Sprintf("%s/%s updated", t.targetObj.GetKind(), t.targetObj.GetName()), nil
-
+		} else {
+			message, err = sc.resourceOps.CreateResource(context.TODO(), t.targetObj, dryRunStrategy, validate)
 		}
-		return sc.resourceOps.ReplaceResource(context.TODO(), t.targetObj, dryRunStrategy, force, prunePropagationPolicy)
+	} else {
+		message, err = sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager, false)
 	}
-
-	message, err = applyFn(dryRunStrategy)
-
-	// DryRunServer fails with "Kind does not support fieldValidation" error for kubernetes server < 1.25
-	// it fails inside apply.go , o.DryRunVerifier.HasSupport(info.Mapping.GroupVersionKind) line
-	// so we retry with DryRunClient that works for all cases, but cause issues with hooks
-	// Details: https://github.com/argoproj/argo-cd/issues/16177
-	if dryRunStrategy == cmdutil.DryRunServer && err != nil {
-		message, err = applyFn(cmdutil.DryRunClient)
-	}
-
 	if err != nil {
 		return common.ResultCodeSyncFailed, err.Error()
 	}
