@@ -134,8 +134,8 @@ type ClusterCache interface {
 	OnResourceUpdated(handler OnResourceUpdatedHandler) Unsubscribe
 	// OnEvent register event handler that is executed every time when new K8S event received
 	OnEvent(handler OnEventHandler) Unsubscribe
-	// UpdateClusterConnectionStatus checks the watch errors periodically and updates the cluster connection status.
-	UpdateClusterConnectionStatus(ctx context.Context)
+	// StartClusterConnectionStatusMonitoring  starts a goroutine that checks the watch errors periodically and updates the cluster connection status.
+	StartClusterConnectionStatusMonitoring(ctx context.Context)
 }
 
 type WeightedSemaphore interface {
@@ -175,7 +175,7 @@ func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCa
 		listRetryUseBackoff:     false,
 		listRetryFunc:           ListRetryFuncNever,
 		connectionStatus:        ConnectionStatusUnknown,
-		watchFails:              newWatchFaiures(),
+		watchFails:              newWatchFailures(),
 	}
 	for i := range opts {
 		opts[i](cache)
@@ -1233,10 +1233,10 @@ func skipAppRequeuing(key kube.ResourceKey) bool {
 	return ignoredRefreshResources[key.Group+"/"+key.Kind]
 }
 
-// UpdateClusterConnectionStatus starts a goroutine that checks for watch failures.
+// StartClusterConnectionStatusMonitoring starts a goroutine that checks for watch failures.
 // If there are any watch errors, it will periodically ping the remote cluster
 // and update the cluster connection status.
-func (c *clusterCache) UpdateClusterConnectionStatus(ctx context.Context) {
+func (c *clusterCache) StartClusterConnectionStatusMonitoring(ctx context.Context) {
 	go c.clusterConnectionService(ctx)
 }
 
@@ -1251,15 +1251,23 @@ func (c *clusterCache) clusterConnectionService(ctx context.Context) {
 			watchErrors := c.watchFails.len()
 			// Ping the cluster for connection verification if there are watch failures or
 			// if the cluster has recovered back from watch failures.
-			if watchErrors > 0 || (watchErrors == 0 && c.connectionStatus == ConnectionStatusFailed) {
+			watchesRecovered := false
+			if watchErrors == 0 {
+				// If there are no watch failures check if the status needs to be updated.
+				c.lock.RLock()
+				if c.connectionStatus == ConnectionStatusFailed {
+					watchesRecovered = true
+				}
+				c.lock.RUnlock()
+			}
+
+			if watchErrors > 0 || watchesRecovered {
 				c.log.V(1).Info("verifying cluster connection", "watches", watchErrors)
 
 				_, err := c.kubectl.GetServerVersion(c.config)
 				if err != nil {
-					if c.connectionStatus != ConnectionStatusFailed {
-						c.updateConnectionStatus(ConnectionStatusFailed)
-					}
-				} else if c.connectionStatus != ConnectionStatusSuccessful {
+					c.updateConnectionStatus(ConnectionStatusFailed)
+				} else {
 					c.updateConnectionStatus(ConnectionStatusSuccessful)
 				}
 			}
@@ -1272,13 +1280,17 @@ func (c *clusterCache) clusterConnectionService(ctx context.Context) {
 }
 
 func (c *clusterCache) updateConnectionStatus(status ConnectionStatus) {
-	if c.connectionStatus == status {
+	invalidateCache := false
+	c.lock.Lock()
+	if c.connectionStatus != status {
+		c.connectionStatus = status
+		invalidateCache = true
+	}
+	c.lock.Unlock()
+
+	if !invalidateCache {
 		return
 	}
-
-	c.lock.Lock()
-	c.connectionStatus = status
-	c.lock.Unlock()
 
 	c.log.V(1).Info("updated cluster connection status", "server", c.config.Host, "status", status)
 
@@ -1295,7 +1307,7 @@ type watchFailures struct {
 	mu      sync.RWMutex
 }
 
-func newWatchFaiures() *watchFailures {
+func newWatchFailures() *watchFailures {
 	return &watchFailures{
 		watches: make(map[string]bool),
 	}
