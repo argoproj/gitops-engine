@@ -280,8 +280,8 @@ func (_m *ClusterCache) OnResourceUpdated(handler cache.OnResourceUpdatedHandler
 	return r0
 }
 
-// UpdateClusterConnectionStatus provides a mock function with given fields: ctx
-func (_m *ClusterCache) UpdateClusterConnectionStatus(ctx context.Context) {
+// StartClusterConnectionStatusMonitoring provides a mock function with given fields: ctx
+func (_m *ClusterCache) StartClusterConnectionStatusMonitoring(ctx context.Context) {
 	_m.Called(ctx)
 }
 
