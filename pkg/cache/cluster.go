@@ -57,6 +57,9 @@ const (
 	// Limit is required to avoid memory spikes during cache initialization.
 	// The default limit of 50 is chosen based on experiments.
 	defaultListSemaphoreWeight = 50
+
+	// The default interval for monitoring the cluster connection status.
+	defaultClusterConnectionInterval = 10 * time.Second
 )
 
 const (
@@ -89,6 +92,8 @@ type ClusterInfo struct {
 	SyncError error
 	// APIResources holds list of API resources supported by the cluster
 	APIResources []kube.APIResourceInfo
+	// ConnectionStatus indicates the status of the connection with the cluster.
+	ConnectionStatus ConnectionStatus
 }
 
 // OnEventHandler is a function that handles Kubernetes event
@@ -132,6 +137,8 @@ type ClusterCache interface {
 	OnResourceUpdated(handler OnResourceUpdatedHandler) Unsubscribe
 	// OnEvent register event handler that is executed every time when new K8S event received
 	OnEvent(handler OnEventHandler) Unsubscribe
+	// StartClusterConnectionStatusMonitoring  starts a goroutine that checks the watch errors periodically and updates the cluster connection status.
+	StartClusterConnectionStatusMonitoring(ctx context.Context)
 }
 
 type WeightedSemaphore interface {
@@ -162,14 +169,17 @@ func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCa
 			resyncTimeout: defaultClusterResyncTimeout,
 			syncTime:      nil,
 		},
-		watchResyncTimeout:      defaultWatchResyncTimeout,
-		clusterSyncRetryTimeout: ClusterRetryTimeout,
-		resourceUpdatedHandlers: map[uint64]OnResourceUpdatedHandler{},
-		eventHandlers:           map[uint64]OnEventHandler{},
-		log:                     log,
-		listRetryLimit:          1,
-		listRetryUseBackoff:     false,
-		listRetryFunc:           ListRetryFuncNever,
+		watchResyncTimeout:        defaultWatchResyncTimeout,
+		clusterSyncRetryTimeout:   ClusterRetryTimeout,
+		resourceUpdatedHandlers:   map[uint64]OnResourceUpdatedHandler{},
+		eventHandlers:             map[uint64]OnEventHandler{},
+		log:                       log,
+		listRetryLimit:            1,
+		listRetryUseBackoff:       false,
+		listRetryFunc:             ListRetryFuncNever,
+		connectionStatus:          ConnectionStatusUnknown,
+		watchFails:                newWatchFailures(),
+		clusterConnectionInterval: defaultClusterConnectionInterval,
 	}
 	for i := range opts {
 		opts[i](cache)
@@ -177,8 +187,26 @@ func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCa
 	return cache
 }
 
+// ConnectionStatus indicates the status of the connection with the cluster.
+type ConnectionStatus string
+
+const (
+	ConnectionStatusSuccessful ConnectionStatus = "Successful"
+	ConnectionStatusFailed     ConnectionStatus = "Failed"
+	ConnectionStatusUnknown    ConnectionStatus = "Unknown"
+)
+
 type clusterCache struct {
 	syncStatus clusterCacheSync
+
+	// connectionStatus indicates the status of the connection with the cluster.
+	connectionStatus ConnectionStatus
+
+	// clusterConnectionInterval is the interval used to monitor the cluster connection status.
+	clusterConnectionInterval time.Duration
+
+	// watchFails is used to keep track of the failures while watching resources.
+	watchFails *watchFailures
 
 	apisMeta      map[schema.GroupKind]*apiMeta
 	serverVersion string
@@ -595,6 +623,7 @@ func (c *clusterCache) loadInitialState(ctx context.Context, api kube.APIResourc
 }
 
 func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo, resClient dynamic.ResourceInterface, ns string, resourceVersion string) {
+	watchKey := api.GroupKind.String()
 	kube.RetryUntilSucceed(ctx, watchResourcesRetryTimeout, fmt.Sprintf("watch %s on %s", api.GroupKind, c.config.Host), c.log, func() (err error) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -615,7 +644,16 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 				res, err := resClient.Watch(ctx, options)
 				if errors.IsNotFound(err) {
 					c.stopWatching(api.GroupKind, ns)
+					c.watchFails.remove(watchKey)
+					return res, err
 				}
+
+				if err != nil {
+					c.watchFails.add(watchKey)
+				} else {
+					c.watchFails.remove(watchKey)
+				}
+
 				return res, err
 			},
 		})
@@ -809,8 +847,14 @@ func (c *clusterCache) sync() error {
 	version, err := c.kubectl.GetServerVersion(config)
 
 	if err != nil {
+		if c.connectionStatus != ConnectionStatusFailed {
+			c.log.Info("unable to access cluster", "cluster", c.config.Host, "reason", err.Error())
+			c.connectionStatus = ConnectionStatusFailed
+		}
 		return err
 	}
+
+	c.connectionStatus = ConnectionStatusSuccessful
 	c.serverVersion = version
 	apiResources, err := c.kubectl.GetAPIResources(config, false, NewNoopSettings())
 	if err != nil {
@@ -1185,6 +1229,7 @@ func (c *clusterCache) GetClusterInfo() ClusterInfo {
 		LastCacheSyncTime: c.syncStatus.syncTime,
 		SyncError:         c.syncStatus.syncError,
 		APIResources:      c.apiResources,
+		ConnectionStatus:  c.connectionStatus,
 	}
 }
 
@@ -1192,4 +1237,101 @@ func (c *clusterCache) GetClusterInfo() ClusterInfo {
 // We ignore API types which have a high churn rate, and/or whose updates are irrelevant to the app
 func skipAppRequeuing(key kube.ResourceKey) bool {
 	return ignoredRefreshResources[key.Group+"/"+key.Kind]
+}
+
+// StartClusterConnectionStatusMonitoring starts a goroutine that checks for watch failures.
+// If there are any watch errors, it will periodically ping the remote cluster
+// and update the cluster connection status.
+func (c *clusterCache) StartClusterConnectionStatusMonitoring(ctx context.Context) {
+	go c.clusterConnectionService(ctx)
+}
+
+func (c *clusterCache) clusterConnectionService(ctx context.Context) {
+	ticker := time.NewTicker(c.clusterConnectionInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			watchErrors := c.watchFails.len()
+			// Ping the cluster for connection verification if there are watch failures or
+			// if the cluster has recovered back from watch failures.
+			watchesRecovered := false
+			if watchErrors == 0 {
+				// If there are no watch failures check if the status needs to be updated.
+				c.lock.RLock()
+				if c.connectionStatus == ConnectionStatusFailed {
+					watchesRecovered = true
+				}
+				c.lock.RUnlock()
+			}
+
+			if watchErrors > 0 || watchesRecovered {
+				c.log.V(1).Info("verifying cluster connection", "watches", watchErrors)
+
+				_, err := c.kubectl.GetServerVersion(c.config)
+				if err != nil {
+					c.updateConnectionStatus(ConnectionStatusFailed)
+				} else {
+					c.updateConnectionStatus(ConnectionStatusSuccessful)
+				}
+			}
+		case <-ctx.Done():
+			ticker.Stop()
+			return
+		}
+	}
+
+}
+
+func (c *clusterCache) updateConnectionStatus(status ConnectionStatus) {
+	invalidateCache := false
+	c.lock.Lock()
+	if c.connectionStatus != status {
+		c.connectionStatus = status
+		invalidateCache = true
+	}
+	c.lock.Unlock()
+
+	if !invalidateCache {
+		return
+	}
+
+	c.log.V(1).Info("updated cluster connection status", "server", c.config.Host, "status", status)
+
+	c.Invalidate()
+	if err := c.EnsureSynced(); err != nil {
+		c.log.Error(err, "failed to sync cache state after updating cluster connection status", "server", c.config.Host)
+	}
+}
+
+// watchFailures is used to keep track of the failures while watching resources. It is updated
+// whenever an error occurs during watch or when the watch recovers back from a failure.
+type watchFailures struct {
+	watches map[string]bool
+	mu      sync.RWMutex
+}
+
+func newWatchFailures() *watchFailures {
+	return &watchFailures{
+		watches: make(map[string]bool),
+	}
+}
+
+func (w *watchFailures) add(key string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.watches[key] = true
+}
+
+func (w *watchFailures) remove(key string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.watches, key)
+}
+
+func (w *watchFailures) len() int {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return len(w.watches)
 }

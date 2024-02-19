@@ -3,11 +3,12 @@ package cache
 import (
 	"context"
 	"fmt"
-	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -148,6 +149,7 @@ func TestEnsureSynced(t *testing.T) {
 	}
 
 	cluster := newCluster(t, obj1, obj2)
+	assert.Equal(t, cluster.connectionStatus, ConnectionStatusUnknown)
 	err := cluster.EnsureSynced()
 	require.NoError(t, err)
 
@@ -160,6 +162,7 @@ func TestEnsureSynced(t *testing.T) {
 		names = append(names, k.Name)
 	}
 	assert.ElementsMatch(t, []string{"helm-guestbook1", "helm-guestbook2"}, names)
+	assert.Equal(t, cluster.connectionStatus, ConnectionStatusSuccessful)
 }
 
 func TestStatefulSetOwnershipInferred(t *testing.T) {
@@ -492,23 +495,23 @@ metadata:
 func TestGetManagedLiveObjsFailedConversion(t *testing.T) {
 	cronTabGroup := "stable.example.com"
 
-	testCases := []struct{
-		name string
-		localConvertFails bool
+	testCases := []struct {
+		name                         string
+		localConvertFails            bool
 		expectConvertToVersionCalled bool
-		expectGetResourceCalled bool
+		expectGetResourceCalled      bool
 	}{
 		{
-			name: "local convert fails, so GetResource is called",
-			localConvertFails: true,
+			name:                         "local convert fails, so GetResource is called",
+			localConvertFails:            true,
 			expectConvertToVersionCalled: true,
-			expectGetResourceCalled: true,
+			expectGetResourceCalled:      true,
 		},
 		{
-			name: "local convert succeeds, so GetResource is not called",
-			localConvertFails: false,
+			name:                         "local convert succeeds, so GetResource is not called",
+			localConvertFails:            false,
 			expectConvertToVersionCalled: true,
-			expectGetResourceCalled: false,
+			expectGetResourceCalled:      false,
 		},
 	}
 
@@ -556,7 +559,6 @@ metadata:
 					getResourceWasCalled = true
 					return testCronTab(), nil
 				})
-
 
 			managedObjs, err := cluster.GetManagedLiveObjs([]*unstructured.Unstructured{targetDeploy}, func(r *Resource) bool {
 				return true
@@ -716,9 +718,10 @@ func TestGetClusterInfo(t *testing.T) {
 	cluster.serverVersion = "v1.16"
 	info := cluster.GetClusterInfo()
 	assert.Equal(t, ClusterInfo{
-		Server:       cluster.config.Host,
-		APIResources: cluster.apiResources,
-		K8SVersion:   cluster.serverVersion,
+		Server:           cluster.config.Host,
+		APIResources:     cluster.apiResources,
+		K8SVersion:       cluster.serverVersion,
+		ConnectionStatus: ConnectionStatusUnknown,
 	}, info)
 }
 
@@ -816,25 +819,25 @@ func testPod() *corev1.Pod {
 
 func testCRD() *apiextensions.CustomResourceDefinition {
 	return &apiextensions.CustomResourceDefinition{
-		TypeMeta:   metav1.TypeMeta{
+		TypeMeta: metav1.TypeMeta{
 			APIVersion: "apiextensions.k8s.io/v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "crontabs.stable.example.com",
 		},
-		Spec:       apiextensions.CustomResourceDefinitionSpec{
+		Spec: apiextensions.CustomResourceDefinitionSpec{
 			Group: "stable.example.com",
 			Versions: []apiextensions.CustomResourceDefinitionVersion{
 				{
-					Name: "v1",
-					Served: true,
+					Name:    "v1",
+					Served:  true,
 					Storage: true,
 					Schema: &apiextensions.CustomResourceValidation{
 						OpenAPIV3Schema: &apiextensions.JSONSchemaProps{
 							Type: "object",
 							Properties: map[string]apiextensions.JSONSchemaProps{
 								"cronSpec": {Type: "string"},
-								"image": {Type: "string"},
+								"image":    {Type: "string"},
 								"replicas": {Type: "integer"},
 							},
 						},
@@ -855,14 +858,14 @@ func testCRD() *apiextensions.CustomResourceDefinition {
 func testCronTab() *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": "stable.example.com/v1",
-		"kind": "CronTab",
+		"kind":       "CronTab",
 		"metadata": map[string]interface{}{
-			"name": "test-crontab",
+			"name":      "test-crontab",
 			"namespace": "default",
 		},
 		"spec": map[string]interface{}{
 			"cronSpec": "* * * * */5",
-			"image": "my-awesome-cron-image",
+			"image":    "my-awesome-cron-image",
 		},
 	}}
 }
