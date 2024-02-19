@@ -170,3 +170,10 @@ func SetRespectRBAC(respectRBAC int) UpdateSettingsFunc {
 		}
 	}
 }
+
+// SetClusterConnectionInterval sets the interval for monitoring the cluster connection status.
+func SetClusterConnectionInterval(interval time.Duration) UpdateSettingsFunc {
+	return func(cache *clusterCache) {
+		cache.clusterConnectionInterval = interval
+	}
+}

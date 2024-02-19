@@ -57,6 +57,9 @@ const (
 	// Limit is required to avoid memory spikes during cache initialization.
 	// The default limit of 50 is chosen based on experiments.
 	defaultListSemaphoreWeight = 50
+
+	// The default interval for monitoring the cluster connection status.
+	defaultClusterConnectionInterval = 10 * time.Second
 )
 
 const (
@@ -166,16 +169,17 @@ func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCa
 			resyncTimeout: defaultClusterResyncTimeout,
 			syncTime:      nil,
 		},
-		watchResyncTimeout:      defaultWatchResyncTimeout,
-		clusterSyncRetryTimeout: ClusterRetryTimeout,
-		resourceUpdatedHandlers: map[uint64]OnResourceUpdatedHandler{},
-		eventHandlers:           map[uint64]OnEventHandler{},
-		log:                     log,
-		listRetryLimit:          1,
-		listRetryUseBackoff:     false,
-		listRetryFunc:           ListRetryFuncNever,
-		connectionStatus:        ConnectionStatusUnknown,
-		watchFails:              newWatchFailures(),
+		watchResyncTimeout:        defaultWatchResyncTimeout,
+		clusterSyncRetryTimeout:   ClusterRetryTimeout,
+		resourceUpdatedHandlers:   map[uint64]OnResourceUpdatedHandler{},
+		eventHandlers:             map[uint64]OnEventHandler{},
+		log:                       log,
+		listRetryLimit:            1,
+		listRetryUseBackoff:       false,
+		listRetryFunc:             ListRetryFuncNever,
+		connectionStatus:          ConnectionStatusUnknown,
+		watchFails:                newWatchFailures(),
+		clusterConnectionInterval: defaultClusterConnectionInterval,
 	}
 	for i := range opts {
 		opts[i](cache)
@@ -197,6 +201,9 @@ type clusterCache struct {
 
 	// connectionStatus indicates the status of the connection with the cluster.
 	connectionStatus ConnectionStatus
+
+	// clusterConnectionInterval is the interval used to monitor the cluster connection status.
+	clusterConnectionInterval time.Duration
 
 	// watchFails is used to keep track of the failures while watching resources.
 	watchFails *watchFailures
@@ -1241,8 +1248,7 @@ func (c *clusterCache) StartClusterConnectionStatusMonitoring(ctx context.Contex
 }
 
 func (c *clusterCache) clusterConnectionService(ctx context.Context) {
-	clusterConnectionTimeout := 10 * time.Second
-	ticker := time.NewTicker(clusterConnectionTimeout)
+	ticker := time.NewTicker(c.clusterConnectionInterval)
 	defer ticker.Stop()
 
 	for {
