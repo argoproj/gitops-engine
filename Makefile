@@ -29,4 +29,5 @@ agent-manifests:
 
 .PHONY: generate-mocks
 generate-mocks:
+	(cd pkg/cache && mockery --name ClusterCache --keeptree --output=../../pkg/cache/mocks/)
 	go generate -x -v "github.com/argoproj/gitops-engine/pkg/utils/tracing/tracer_testing"
