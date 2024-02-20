@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/managedfields"
+	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -25,7 +26,7 @@ type MockKubectlCmd struct {
 	APIResources  []kube.APIResourceInfo
 	Commands      map[string]KubectlOutput
 	Events        chan watch.Event
-	Version       string
+	Version       *version.Info
 	DynamicClient dynamic.Interface
 
 	convertToVersionFunc *func(obj *unstructured.Unstructured, group, version string) (*unstructured.Unstructured, error)
@@ -85,7 +86,7 @@ func (k *MockKubectlCmd) ConvertToVersion(obj *unstructured.Unstructured, group,
 	return obj, nil
 }
 
-func (k *MockKubectlCmd) GetServerVersion(config *rest.Config) (string, error) {
+func (k *MockKubectlCmd) GetServerVersion(config *rest.Config) (*version.Info, error) {
 	return k.Version, nil
 }
 

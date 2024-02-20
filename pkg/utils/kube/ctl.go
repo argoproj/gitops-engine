@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/managedfields"
+	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -36,7 +37,7 @@ type Kubectl interface {
 	CreateResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string, obj *unstructured.Unstructured, createOptions metav1.CreateOptions, subresources ...string) (*unstructured.Unstructured, error)
 	PatchResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string, patchType types.PatchType, patchBytes []byte, subresources ...string) (*unstructured.Unstructured, error)
 	GetAPIResources(config *rest.Config, preferred bool, resourceFilter ResourceFilter) ([]APIResourceInfo, error)
-	GetServerVersion(config *rest.Config) (string, error)
+	GetServerVersion(config *rest.Config) (*version.Info, error)
 	NewDynamicClient(config *rest.Config) (dynamic.Interface, error)
 	SetOnKubectlRun(onKubectlRun OnKubectlRunFunc)
 }
@@ -320,18 +321,18 @@ func (k *KubectlCmd) ConvertToVersion(obj *unstructured.Unstructured, group stri
 	return convertToVersionWithScheme(obj, group, version)
 }
 
-func (k *KubectlCmd) GetServerVersion(config *rest.Config) (string, error) {
+func (k *KubectlCmd) GetServerVersion(config *rest.Config) (*version.Info, error) {
 	span := k.Tracer.StartSpan("GetServerVersion")
 	defer span.Finish()
 	client, err := discovery.NewDiscoveryClientForConfig(config)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	v, err := client.ServerVersion()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return fmt.Sprintf("%s.%s", v.Major, v.Minor), nil
+	return v, nil
 }
 
 func (k *KubectlCmd) NewDynamicClient(config *rest.Config) (dynamic.Interface, error) {

@@ -59,6 +59,13 @@ func SetSettings(settings Settings) UpdateSettingsFunc {
 	}
 }
 
+// SetFullServerVersion control ServerVersion. If 'true' - ServerVersion contain Kubernetes Patch version.
+func SetFullServerVersion(fullServerVersion bool) UpdateSettingsFunc {
+	return func(cache *clusterCache) {
+		cache.fullServerVersion = fullServerVersion
+	}
+}
+
 // SetNamespaces updates list of monitored namespaces
 func SetNamespaces(namespaces []string) UpdateSettingsFunc {
 	return func(cache *clusterCache) {
