@@ -12,7 +12,7 @@ import (
 
 	"github.com/argoproj/gitops-engine/pkg/diff/mocks"
 	"github.com/argoproj/gitops-engine/pkg/diff/testdata"
-	openapi_v2 "github.com/google/gnostic/openapiv2"
+	openapi_v2 "github.com/google/gnostic-models/openapiv2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
