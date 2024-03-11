@@ -459,8 +459,8 @@ func (sc *syncContext) Sync() {
 	// if pruned tasks pending deletion, then wait...
 	prunedTasksPendingDelete := tasks.Filter(func(t *syncTask) bool {
 		if t.pruned() && t.liveObj != nil {
-			return t.liveObj.GetDeletionTimestamp() != nil 
-		} 
+			return t.liveObj.GetDeletionTimestamp() != nil
+		}
 		return false
 	})
 	if prunedTasksPendingDelete.Len() > 0 {
@@ -761,31 +761,31 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	// for prune tasks, modify the waves for proper cleanup i.e reverse of sync wave (creation order)
 	pruneTasks := make(map[int][]*syncTask)
 	for _, task := range tasks {
-	    if task.isPrune() {
-	        pruneTasks[task.wave()] = append(pruneTasks[task.wave()], task)
-	    }
+		if task.isPrune() {
+			pruneTasks[task.wave()] = append(pruneTasks[task.wave()], task)
+		}
 	}
-	
+
 	var uniquePruneWaves []int
 	for k := range pruneTasks {
-	    uniquePruneWaves = append(uniquePruneWaves, k)
+		uniquePruneWaves = append(uniquePruneWaves, k)
 	}
 	sort.Ints(uniquePruneWaves)
-	
+
 	// reorder waves for pruning tasks using symmetric swap on prune waves
 	n := len(uniquePruneWaves)
 	for i := 0; i < n/2; i++ {
-	    // waves to swap
-	    startWave := uniquePruneWaves[i]
-	    endWave := uniquePruneWaves[n-1-i]
-	
-	    for _, task := range pruneTasks[startWave] {
+		// waves to swap
+		startWave := uniquePruneWaves[i]
+		endWave := uniquePruneWaves[n-1-i]
+
+		for _, task := range pruneTasks[startWave] {
 			task.waveOverride = &endWave
-	    }
-	
-	    for _, task := range pruneTasks[endWave] {
+		}
+
+		for _, task := range pruneTasks[endWave] {
 			task.waveOverride = &startWave
-	    }
+		}
 	}
 
 	// for pruneLast tasks, modify the wave to sync phase last wave of tasks + 1
@@ -1006,7 +1006,10 @@ func (sc *syncContext) pruneObject(liveObj *unstructured.Unstructured, prune, dr
 		} else {
 			// Skip deletion if object is already marked for deletion, so we don't cause a resource update hotloop
 			deletionTimestamp := liveObj.GetDeletionTimestamp()
-			if deletionTimestamp == nil || deletionTimestamp.IsZero() {
+			// We need delete resource again when not foreground policy. Because the user may modify the policy
+			// and then expect to delete the resource again
+			if (deletionTimestamp == nil || deletionTimestamp.IsZero()) ||
+				*sc.getDeleteOptions().PropagationPolicy != metav1.DeletePropagationForeground {
 				err := sc.kubectl.DeleteResource(context.TODO(), sc.config, liveObj.GroupVersionKind(), liveObj.GetName(), liveObj.GetNamespace(), sc.getDeleteOptions())
 				if err != nil {
 					return common.ResultCodeSyncFailed, err.Error()
