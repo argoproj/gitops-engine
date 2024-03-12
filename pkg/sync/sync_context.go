@@ -22,7 +22,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
-	"k8s.io/klog/v2/klogr"
+	"k8s.io/klog/v2/textlogger"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/openapi"
 
@@ -233,7 +233,7 @@ func NewSyncContext(
 		kubectl:             kubectl,
 		resourceOps:         resourceOps,
 		namespace:           namespace,
-		log:                 klogr.New(),
+		log:                 textlogger.NewLogger(textlogger.NewConfig()),
 		validate:            true,
 		startedAt:           time.Now(),
 		syncRes:             map[string]common.ResourceSyncResult{},
@@ -459,8 +459,8 @@ func (sc *syncContext) Sync() {
 	// if pruned tasks pending deletion, then wait...
 	prunedTasksPendingDelete := tasks.Filter(func(t *syncTask) bool {
 		if t.pruned() && t.liveObj != nil {
-			return t.liveObj.GetDeletionTimestamp() != nil 
-		} 
+			return t.liveObj.GetDeletionTimestamp() != nil
+		}
 		return false
 	})
 	if prunedTasksPendingDelete.Len() > 0 {
@@ -761,31 +761,31 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	// for prune tasks, modify the waves for proper cleanup i.e reverse of sync wave (creation order)
 	pruneTasks := make(map[int][]*syncTask)
 	for _, task := range tasks {
-	    if task.isPrune() {
-	        pruneTasks[task.wave()] = append(pruneTasks[task.wave()], task)
-	    }
+		if task.isPrune() {
+			pruneTasks[task.wave()] = append(pruneTasks[task.wave()], task)
+		}
 	}
-	
+
 	var uniquePruneWaves []int
 	for k := range pruneTasks {
-	    uniquePruneWaves = append(uniquePruneWaves, k)
+		uniquePruneWaves = append(uniquePruneWaves, k)
 	}
 	sort.Ints(uniquePruneWaves)
-	
+
 	// reorder waves for pruning tasks using symmetric swap on prune waves
 	n := len(uniquePruneWaves)
 	for i := 0; i < n/2; i++ {
-	    // waves to swap
-	    startWave := uniquePruneWaves[i]
-	    endWave := uniquePruneWaves[n-1-i]
-	
-	    for _, task := range pruneTasks[startWave] {
+		// waves to swap
+		startWave := uniquePruneWaves[i]
+		endWave := uniquePruneWaves[n-1-i]
+
+		for _, task := range pruneTasks[startWave] {
 			task.waveOverride = &endWave
-	    }
-	
-	    for _, task := range pruneTasks[endWave] {
+		}
+
+		for _, task := range pruneTasks[endWave] {
 			task.waveOverride = &startWave
-	    }
+		}
 	}
 
 	// for pruneLast tasks, modify the wave to sync phase last wave of tasks + 1
@@ -926,7 +926,7 @@ func (sc *syncContext) setOperationPhase(phase common.OperationPhase, message st
 
 // ensureCRDReady waits until specified CRD is ready (established condition is true).
 func (sc *syncContext) ensureCRDReady(name string) error {
-	return wait.PollImmediate(time.Duration(100)*time.Millisecond, crdReadinessTimeout, func() (bool, error) {
+	return wait.PollUntilContextTimeout(context.Background(), time.Duration(100)*time.Millisecond, crdReadinessTimeout, true, func(ctx context.Context) (bool, error) {
 		crd, err := sc.extensionsclientset.ApiextensionsV1().CustomResourceDefinitions().Get(context.TODO(), name, metav1.GetOptions{})
 		if err != nil {
 			return false, err
