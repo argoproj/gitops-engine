@@ -147,7 +147,7 @@ type WeightedSemaphore interface {
 	Release(n int64)
 }
 
-type ListRetryFunc func(err error) bool
+type RetryFunc func(err error) bool
 
 // NewClusterCache creates new instance of cluster cache
 func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCache {
@@ -176,9 +176,10 @@ func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCa
 		log:                       log,
 		listRetryLimit:            1,
 		listRetryUseBackoff:       false,
-		listRetryFunc:             ListRetryFuncNever,
+		listRetryFunc:             RetryFuncNever,
 		connectionStatus:          ConnectionStatusUnknown,
 		watchFails:                newWatchFailures(),
+		clusterStatusRetryFunc:    RetryFuncNever,
 		clusterConnectionInterval: defaultClusterConnectionInterval,
 	}
 	for i := range opts {
@@ -208,6 +209,8 @@ type clusterCache struct {
 	// watchFails is used to keep track of the failures while watching resources.
 	watchFails *watchFailures
 
+	clusterStatusRetryFunc RetryFunc
+
 	apisMeta      map[schema.GroupKind]*apiMeta
 	serverVersion string
 	apiResources  []kube.APIResourceInfo
@@ -228,7 +231,7 @@ type clusterCache struct {
 	// retry options for list operations
 	listRetryLimit      int32
 	listRetryUseBackoff bool
-	listRetryFunc       ListRetryFunc
+	listRetryFunc       RetryFunc
 
 	// lock is a rw lock which protects the fields of clusterInfo
 	lock      sync.RWMutex
@@ -264,13 +267,13 @@ type clusterCacheSync struct {
 	resyncTimeout time.Duration
 }
 
-// ListRetryFuncNever never retries on errors
-func ListRetryFuncNever(err error) bool {
+// RetryFuncNever never retries on errors
+func RetryFuncNever(err error) bool {
 	return false
 }
 
-// ListRetryFuncAlways always retries on errors
-func ListRetryFuncAlways(err error) bool {
+// RetryFuncAlways always retries on errors
+func RetryFuncAlways(err error) bool {
 	return true
 }
 
@@ -1248,6 +1251,10 @@ func (c *clusterCache) StartClusterConnectionStatusMonitoring(ctx context.Contex
 }
 
 func (c *clusterCache) clusterConnectionService(ctx context.Context) {
+	if c.clusterConnectionInterval <= 0 {
+		return
+	}
+
 	ticker := time.NewTicker(c.clusterConnectionInterval)
 	defer ticker.Stop()
 
@@ -1268,9 +1275,15 @@ func (c *clusterCache) clusterConnectionService(ctx context.Context) {
 			}
 
 			if watchErrors > 0 || watchesRecovered {
-				c.log.V(1).Info("verifying cluster connection", "watches", watchErrors)
-
-				_, err := c.kubectl.GetServerVersion(c.config)
+				c.log.V(1).Info("verifying cluster connection", "server", c.config.Host)
+				// Retry fetching the server version to avoid invalidating the cache due to transient errors.
+				err := retry.OnError(retry.DefaultBackoff, c.clusterStatusRetryFunc, func() error {
+					_, err := c.kubectl.GetServerVersion(c.config)
+					if err != nil && c.clusterStatusRetryFunc(err) {
+						c.log.V(1).Info("Error while fetching server version", "error", err.Error())
+					}
+					return err
+				})
 				if err != nil {
 					c.updateConnectionStatus(ConnectionStatusFailed)
 				} else {
@@ -1278,6 +1291,7 @@ func (c *clusterCache) clusterConnectionService(ctx context.Context) {
 				}
 			}
 		case <-ctx.Done():
+			c.log.V(1).Info("Stopping cluster connection status monitoring", "server", c.config.Host)
 			ticker.Stop()
 			return
 		}
