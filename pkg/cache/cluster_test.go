@@ -283,7 +283,7 @@ func TestEnsureSyncedSingleNamespace(t *testing.T) {
 }
 
 func TestGetChildren(t *testing.T) {
-	cluster := newCluster(t, testPod(), testRS(), testDeploy(), testClusterRole(), testSA())
+	cluster := newCluster(t, testPod(), testRS(), testDeploy(), testClusterRole(), testSA(), testSADeployment())
 	err := cluster.EnsureSynced()
 	require.NoError(t, err)
 	cluster.showClusterResourceChildren = true
@@ -327,13 +327,35 @@ func TestGetChildren(t *testing.T) {
 
 	unstructuredClusterRole := mustToUnstructured(testClusterRole())
 	unstructuredSA := mustToUnstructured(testSA())
+	unstructuredSADeployment := mustToUnstructured(testSADeployment())
 	cluster.childrenByParent = map[kube.ResourceKey][]kube.ResourceKey{
 		kube.GetResourceKey(unstructuredClusterRole): {
 			kube.GetResourceKey(unstructuredSA),
 		},
+		kube.GetResourceKey(unstructuredSA): {
+			kube.GetResourceKey(unstructuredSADeployment),
+		},
 	}
-	crChildren := getChildren(cluster, mustToUnstructured(testClusterRole()))
+
+	saChildren := getChildren(cluster, mustToUnstructured(testSA()))
 	assert.Equal(t, []*Resource{{
+		Ref: corev1.ObjectReference{
+			Kind:       "Deployment",
+			Namespace:  "default",
+			Name:       "helm-guestbook-sa",
+			APIVersion: "apps/v1",
+			UID:        "6",
+		},
+		ResourceVersion: "234",
+		OwnerRefs:       []metav1.OwnerReference{{APIVersion: "v1", Kind: "ServiceAccount", Name: "helm-guestbook-sa", UID: "4"}},
+		CreationTimestamp: &metav1.Time{
+			Time: testCreationTime.Local(),
+		},
+	}}, saChildren)
+
+
+	crChildren := getChildren(cluster, mustToUnstructured(testClusterRole()))
+	assert.Equal(t, append([]*Resource{{
 		Ref: corev1.ObjectReference{
 			Kind:       "ServiceAccount",
 			Namespace:  "default",
@@ -346,7 +368,7 @@ func TestGetChildren(t *testing.T) {
 		CreationTimestamp: &metav1.Time{
 			Time: testCreationTime.Local(),
 		},
-	}}, crChildren)
+	}}, saChildren...), crChildren)
 }
 
 func TestUpdateChildrenByParentMap(t *testing.T) {
@@ -1248,6 +1270,30 @@ func TestMergeResourceMaps(t *testing.T) {
 	expectedVal := mapA[testKey]
 	mergedMap[testKey] = nil
 	assert.Equal(t, expectedVal, mapA[testKey])
+}
+
+func testSADeployment() *appsv1.Deployment {
+	return &appsv1.Deployment{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "apps/v1",
+			Kind:       "Deployment",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "helm-guestbook-sa",
+			Namespace:         "default",
+			UID: "6",
+			ResourceVersion: "234",
+			CreationTimestamp: metav1.NewTime(testCreationTime),
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "v1",
+					UID:        "4",
+					Kind:       "ServiceAccount",
+					Name:       "helm-guestbook-sa",
+				},
+			},
+		},
+	}
 }
 
 func testSA() *corev1.ServiceAccount {
