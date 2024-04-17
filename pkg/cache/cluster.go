@@ -977,6 +977,20 @@ func (c *clusterCache) FindResources(namespace string, predicates ...func(r *Res
 	return result
 }
 
+func (c *clusterCache) addChildResourcesRecursivly(nsNodes map[kube.ResourceKey]*Resource, key kube.ResourceKey) map[kube.ResourceKey]*Resource {
+	nsNodeReturned := nsNodes
+	childRefs := c.childrenByParent[key]
+	childResources := map[kube.ResourceKey]*Resource{}
+	for _, childRef := range childRefs {
+		if c.resources[childRef] != nil {
+			childResources[childRef] = c.resources[childRef]
+			nsNodeReturned = c.addChildResourcesRecursivly(nsNodeReturned, childRef)
+		}
+	}
+	// Merge the maps into a different copy to avoid updating the original nsIndex map
+	return mergeResourceMaps(nsNodeReturned, childResources)
+}
+
 // IterateHierarchy iterates resource tree starting from the specified top level resource and executes callback for each resource in the tree
 func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(resource *Resource, namespaceResources map[kube.ResourceKey]*Resource) bool) {
 	c.lock.RLock()
@@ -984,15 +998,7 @@ func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(resour
 	if res, ok := c.resources[key]; ok {
 		nsNodes := c.nsIndex[key.Namespace]
 		if key.Namespace == "" && c.showClusterResourceChildren {
-			childRefs := c.childrenByParent[key]
-			childResources := map[kube.ResourceKey]*Resource{}
-			for _, childRef := range childRefs {
-				if c.resources[childRef] != nil {
-					childResources[childRef] = c.resources[childRef]
-				}
-			}
-			// Merge the maps into a different copy to avoid updating the original nsIndex map
-			nsNodes = mergeResourceMaps(nsNodes, childResources)
+			nsNodes = c.addChildResourcesRecursivly(nsNodes, key)
 		}
 		if !action(res, nsNodes) {
 			return
