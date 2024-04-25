@@ -1,9 +1,11 @@
 package cache
 
 import (
-	"encoding/json"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 	"github.com/stretchr/testify/assert"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"testing"
 )
@@ -13,24 +15,30 @@ func Test_isStatefulSetChild(t *testing.T) {
 		un *unstructured.Unstructured
 	}
 
-	statefulsetJSON := `{
-        "apiVersion": "apps/v1",
-        "kind": "StatefulSet",
-        "metadata": {
-            "name": "sw-broker"
-        },
-        "spec": {
-            "volumeClaimTemplates": [{
-                "metadata": {
-                    "name": "emqx-data"
-                }
-            }]
-        }
-    }`
+	statefulSet := &appsv1.StatefulSet{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "apps/v1",
+			Kind:       "StatefulSet",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "sw-broker",
+		},
+		Spec: appsv1.StatefulSetSpec{
+			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "emqx-data",
+					},
+				},
+			},
+		},
+	}
 
 	// Create a new unstructured object from the JSON string
-	un := unstructured.Unstructured{}
-	json.Unmarshal([]byte(statefulsetJSON), &un)
+	un, err := kube.ToUnstructured(statefulSet)
+	if err != nil {
+		t.Errorf("Failed to convert StatefulSet to unstructured: %v", err)
+	}
 
 	tests := []struct {
 		name      string
@@ -40,7 +48,7 @@ func Test_isStatefulSetChild(t *testing.T) {
 	}{
 		{
 			name:    "Valid PVC for sw-broker",
-			args:    args{un: &un},
+			args:    args{un: un},
 			wantErr: false,
 			checkFunc: func(fn func(kube.ResourceKey) bool) bool {
 				// Check a valid PVC name for "sw-broker"
@@ -49,11 +57,37 @@ func Test_isStatefulSetChild(t *testing.T) {
 		},
 		{
 			name:    "Invalid PVC for sw-broker",
-			args:    args{un: &un},
+			args:    args{un: un},
 			wantErr: false,
 			checkFunc: func(fn func(kube.ResourceKey) bool) bool {
 				// Check an invalid PVC name that should belong to "sw-broker-internal"
 				return !fn(kube.ResourceKey{Kind: "PersistentVolumeClaim", Name: "emqx-data-sw-broker-internal-0"})
+			},
+		},
+		{
+			name: "Mismatch PVC for sw-broker",
+			args: args{un: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"apiVersion": "apps/v1",
+					"kind":       "StatefulSet",
+					"metadata": map[string]interface{}{
+						"name": "sw-broker",
+					},
+					"spec": map[string]interface{}{
+						"volumeClaimTemplates": []interface{}{
+							map[string]interface{}{
+								"metadata": map[string]interface{}{
+									"name": "volume-2",
+								},
+							},
+						},
+					},
+				},
+			}},
+			wantErr: false,
+			checkFunc: func(fn func(kube.ResourceKey) bool) bool {
+				// Check an invalid PVC name for "api-test"
+				return !fn(kube.ResourceKey{Kind: "PersistentVolumeClaim", Name: "volume-2"})
 			},
 		},
 	}
