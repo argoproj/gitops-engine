@@ -14,6 +14,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/cli-runtime/pkg/printers"
 	"k8s.io/cli-runtime/pkg/resource"
@@ -267,12 +269,14 @@ func (k *kubectlResourceOperations) ApplyResource(ctx context.Context, obj *unst
 func (k *kubectlResourceOperations) newApplyOptions(ioStreams genericclioptions.IOStreams, obj *unstructured.Unstructured, fileName string, validate bool, force, serverSideApply bool, dryRunStrategy cmdutil.DryRunStrategy, manager string, serverSideDiff bool) (*apply.ApplyOptions, error) {
 	flags := apply.NewApplyFlags(ioStreams)
 	o := &apply.ApplyOptions{
-		IOStreams:       ioStreams,
-		Recorder:        genericclioptions.NoopRecorder{},
-		PrintFlags:      flags.PrintFlags,
-		Overwrite:       true,
-		OpenAPIPatch:    true,
-		ServerSideApply: serverSideApply,
+		IOStreams:         ioStreams,
+		VisitedUids:       sets.Set[types.UID]{},
+		VisitedNamespaces: sets.Set[string]{},
+		Recorder:          genericclioptions.NoopRecorder{},
+		PrintFlags:        flags.PrintFlags,
+		Overwrite:         true,
+		OpenAPIPatch:      true,
+		ServerSideApply:   serverSideApply,
 	}
 	dynamicClient, err := dynamic.NewForConfig(k.config)
 	if err != nil {
