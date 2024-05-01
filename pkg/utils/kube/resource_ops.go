@@ -288,6 +288,8 @@ func (k *kubectlResourceOperations) newApplyOptions(ioStreams genericclioptions.
 		return nil, err
 	}
 	o.OpenAPIGetter = k.fact
+	o.DryRunStrategy = dryRunStrategy
+	o.FieldManager = manager
 	validateDirective := metav1.FieldValidationIgnore
 	if validate {
 		validateDirective = metav1.FieldValidationStrict
