@@ -55,6 +55,11 @@ const (
 	HorizontalPodAutoscalerKind  = "HorizontalPodAutoscaler"
 )
 
+const (
+	// defaultKubectlRequestTimeout is the timeout value used when calling the 'apply' command of kubectl. The previous default was no timeout, which would allow apply operation to potentially run forever, thus leaking YAML files into /dev/shm until Pod restart.
+	defaultKubectlRequestTimeout = time.Hour * 1
+)
+
 type ResourceInfoProvider interface {
 	IsNamespaced(gk schema.GroupKind) (bool, error)
 }

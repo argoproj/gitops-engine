@@ -175,6 +175,11 @@ func (k *kubectlResourceOperations) ReplaceResource(ctx context.Context, obj *un
 		if err != nil {
 			return err
 		}
+
+		// When calling the kubectl 'replace' command, it will run _without_ a timeout (as of this writing, May 2024):
+		// - If users are finding that 'replace' operations are running forever (and thus leaking manifest files into '/dev/shm'), one can enable 'force' via sync options or annotation, which will enable a default timeout of 5 minutes within the 'replace' kubectl call.
+		// - However, this guidance apply to replace options only (i.e. not apply).
+
 		return replaceOptions.Run(f)
 	})
 }
@@ -261,6 +266,14 @@ func (k *kubectlResourceOperations) ApplyResource(ctx context.Context, obj *unst
 		if err != nil {
 			return err
 		}
+
+		// If no timeout is specified (and thus an infinite wait), we will substitute a LONG default value.
+		// This allows enough time to complete for any valid, expected long running apply operations, while also preventing excessive leaks of resources into /dev/shm, due to operations that are likely never going to complete.
+		if applyOpts.DeleteOptions.Timeout == 0 {
+			// Yes, this is correct: Apply uses the 'DeleteOptions' struct to set the timeout val
+			applyOpts.DeleteOptions.Timeout = defaultKubectlRequestTimeout
+		}
+
 		return applyOpts.Run()
 	})
 }
