@@ -56,7 +56,7 @@ func getAppsv1StatefulSetHealth(sts *appsv1.StatefulSet) (*HealthStatus, error) 
 	if sts.Spec.UpdateStrategy.Type == appsv1.OnDeleteStatefulSetStrategyType {
 		return &HealthStatus{
 			Status:  HealthStatusHealthy,
-			Message: fmt.Sprintf("statefulset has %d ready pods", sts.Status.ReadyReplicas),
+			Message: fmt.Sprintf("statefulset has %d ready pods (%d updated)", sts.Status.ReadyReplicas, sts.Status.UpdatedReplicas),
 		}, nil
 	}
 	if sts.Status.UpdateRevision != sts.Status.CurrentRevision {
