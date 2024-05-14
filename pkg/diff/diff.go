@@ -1045,8 +1045,12 @@ func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstru
 		valToReplacement := make(map[string]string)
 		for _, obj := range []*unstructured.Unstructured{target, live, orig} {
 			var annots map[string]interface{}
+			var err error
 			if obj != nil {
-				annots, _, _ = unstructured.NestedMap(obj.Object, "metadata", "annotations")
+				annots, _, err = unstructured.NestedMap(obj.Object, "metadata", "annotations")
+				if err != nil {
+					return nil, nil, fmt.Errorf("unstructured.NestedMap error: %s", err)
+				}
 			}
 			if annots == nil {
 				annots = make(map[string]interface{})
@@ -1063,7 +1067,10 @@ func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstru
 				valToReplacement[strVal] = replacement
 			}
 			annots[k] = replacement
-			unstructured.SetNestedMap(obj.Object, annots, "metadata", "annotations")
+			err = unstructured.SetNestedMap(obj.Object, annots, "metadata", "annotations")
+			if err != nil {
+				return nil, nil, fmt.Errorf("unstructured.SetNestedField error: %s", err)
+			}
 		}
 	}
 
