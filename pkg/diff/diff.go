@@ -969,10 +969,10 @@ func CreateTwoWayMergePatch(orig, new, dataStruct interface{}) ([]byte, bool, er
 	return patch, string(patch) != "{}", nil
 }
 
-// HideSecretData replaces secret data values in specified target, live secrets and in last applied configuration of live secret with stars. Also preserves differences between
+// HideSecretData replaces secret data & optional annotations values in specified target, live secrets and in last applied configuration of live secret with stars. Also preserves differences between
 // target, live and last applied config values. E.g. if all three are equal the values would be replaced with same number of stars. If all the are different then number of stars
 // in replacement should be different.
-func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstructured) (*unstructured.Unstructured, *unstructured.Unstructured, error) {
+func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstructured, hideAnnots ...string) (*unstructured.Unstructured, *unstructured.Unstructured, error) {
 	var orig *unstructured.Unstructured
 	if live != nil {
 		orig, _ = GetLastAppliedConfigAnnotation(live)
@@ -995,6 +995,7 @@ func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstru
 		}
 	}
 
+	// hide data
 	for k := range keys {
 		// we use "+" rather than the more common "*"
 		nextReplacement := "++++++++"
@@ -1037,6 +1038,36 @@ func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstru
 			}
 		}
 	}
+
+	// hide annotations
+	for _, k := range hideAnnots {
+		nextReplacement := "++++++++"
+		valToReplacement := make(map[string]string)
+		for _, obj := range []*unstructured.Unstructured{target, live, orig} {
+			var annots map[string]interface{}
+			if obj != nil {
+				annots, _, _ = unstructured.NestedMap(obj.Object, "metadata", "annotations")
+			}
+			if annots == nil {
+				annots = make(map[string]interface{})
+			}
+			val, ok := annots[k]
+			if !ok {
+				continue
+			}
+			strVal := toString(val)
+			replacement, ok := valToReplacement[strVal]
+			if !ok {
+				replacement = nextReplacement
+				nextReplacement = nextReplacement + "++++"
+				valToReplacement[strVal] = replacement
+			}
+			annots[k] = replacement
+			unstructured.SetNestedMap(obj.Object, annots, "metadata", "annotations")
+		}
+	}
+
+	// hide last-applied-config annotation
 	if live != nil && orig != nil {
 		annotations := live.GetAnnotations()
 		if annotations == nil {
