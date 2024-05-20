@@ -1,6 +1,8 @@
 module github.com/argoproj/gitops-engine
 
-go 1.21
+go 1.22
+
+toolchain go1.22.2
 
 require (
 	github.com/davecgh/go-spew v1.1.1
