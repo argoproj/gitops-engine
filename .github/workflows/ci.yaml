@@ -8,9 +8,6 @@ on:
   pull_request:
     branches:
       - 'master'
-env:
-  # Golang version to use across CI steps
-  GOLANG_VERSION: '1.19'
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -24,7 +21,7 @@ jobs:
             ${{ runner.os }}-go-
       - uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v4.0.0
         with:
-          go-version: ${{ env.GOLANG_VERSION }}
+          go-version-file: go.mod
       - run: make test
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@08e2f20817b15149a52b5b3ebe7de50aff2ba8c5 # v3.4.0
