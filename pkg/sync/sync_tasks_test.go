@@ -457,14 +457,14 @@ func TestSyncTasksSort_CRDAndCR(t *testing.T) {
 	assert.Equal(t, syncTasks{crd, cr}, unsorted)
 }
 
-func Test_syncTasks_multiStep(t *testing.T) {
+func Test_syncTasks_hasMoreSteps(t *testing.T) {
 	t.Run("Single", func(t *testing.T) {
 		tasks := syncTasks{{liveObj: Annotate(NewPod(), common.AnnotationSyncWave, "-1"), phase: common.SyncPhaseSync}}
 		assert.Equal(t, common.SyncPhaseSync, string(tasks.phase()))
 		assert.Equal(t, -1, tasks.wave())
 		assert.Equal(t, common.SyncPhaseSync, string(tasks.lastPhase()))
 		assert.Equal(t, -1, tasks.lastWave())
-		assert.False(t, tasks.multiStep())
+		assert.False(t, tasks.hasMoreSteps())
 	})
 	t.Run("Double", func(t *testing.T) {
 		tasks := syncTasks{
@@ -475,6 +475,6 @@ func Test_syncTasks_multiStep(t *testing.T) {
 		assert.Equal(t, -1, tasks.wave())
 		assert.Equal(t, common.SyncPhasePostSync, string(tasks.lastPhase()))
 		assert.Equal(t, 1, tasks.lastWave())
-		assert.True(t, tasks.multiStep())
+		assert.True(t, tasks.hasMoreSteps())
 	})
 }
