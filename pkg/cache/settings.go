@@ -147,7 +147,7 @@ func SetTracer(tracer tracing.Tracer) UpdateSettingsFunc {
 }
 
 // SetRetryOptions sets cluster list retry options
-func SetRetryOptions(maxRetries int32, useBackoff bool, retryFunc ListRetryFunc) UpdateSettingsFunc {
+func SetRetryOptions(maxRetries int32, useBackoff bool, retryFunc RetryFunc) UpdateSettingsFunc {
 	return func(cache *clusterCache) {
 		// Max retries must be at least one
 		if maxRetries < 1 {
@@ -168,5 +168,19 @@ func SetRespectRBAC(respectRBAC int) UpdateSettingsFunc {
 		} else {
 			cache.respectRBAC = respectRBAC
 		}
+	}
+}
+
+// SetClusterConnectionInterval sets the interval for monitoring the cluster connection status.
+func SetClusterConnectionInterval(interval time.Duration) UpdateSettingsFunc {
+	return func(cache *clusterCache) {
+		cache.clusterConnectionInterval = interval
+	}
+}
+
+// SetClusterStatusRetryFunc sets the retry function for monitoring the cluster connection status.
+func SetClusterStatusRetryFunc(retryFunc RetryFunc) UpdateSettingsFunc {
+	return func(cache *clusterCache) {
+		cache.clusterStatusRetryFunc = retryFunc
 	}
 }
