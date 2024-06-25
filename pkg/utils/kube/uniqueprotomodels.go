@@ -98,6 +98,7 @@ func newUniqueModels(models proto.Models) (proto.Models, []string) {
 				_, ok := gvks[gvk]
 				if ok {
 					warnings = append(warnings, fmt.Sprintf("encountered duplicate OpenAPI model %v for GVK %v", modelName, gvk))
+					continue
 				}
 				gvks[gvk] = modelName
 				um.models[modelName] = model
