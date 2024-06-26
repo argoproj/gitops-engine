@@ -93,19 +93,35 @@ func newUniqueModels(models proto.Models) (proto.Models, []string) {
 			panic(fmt.Sprintf("ListModels returns a model that can't be looked-up for: %v", modelName))
 		}
 		gvkList := parseGroupVersionKind(model)
-		for _, gvk := range gvkList {
-			if len(gvk.Kind) > 0 {
-				_, ok := gvks[gvk]
-				if ok {
-					warnings = append(warnings, fmt.Sprintf("encountered duplicate OpenAPI model %v for GVK %v", modelName, gvk))
-					continue
+		gvk, wouldError := wouldTriggerDuplicateError(model, gvks)
+		if !wouldError {
+			um.models[modelName] = model
+
+			// Add GVKs to the map, so we can detect a duplicate GVK later.
+			for _, gvk := range gvkList {
+				if len(gvk.Kind) > 0 {
+					gvks[gvk] = modelName
 				}
-				gvks[gvk] = modelName
-				um.models[modelName] = model
 			}
+		} else {
+			warnings = append(warnings, fmt.Sprintf("encountered duplicate OpenAPI model %v for GVK %v", modelName, gvk))
 		}
 	}
 	return um, warnings
+}
+
+func wouldTriggerDuplicateError(model proto.Schema, gvks map[schema.GroupVersionKind]string) (schema.GroupVersionKind, bool) {
+	gvkList := parseGroupVersionKind(model)
+	for _, gvk := range gvkList {
+		if len(gvk.Kind) > 0 {
+			_, ok := gvks[gvk]
+			if ok {
+				// This is the only condition under which NewGVKParser would return a duplicate GVK error.
+				return gvk, true
+			}
+		}
+	}
+	return schema.GroupVersionKind{}, false
 }
 
 // groupVersionKindExtensionKey is the key used to lookup the
