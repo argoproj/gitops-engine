@@ -152,11 +152,11 @@ func (k *KubectlCmd) newGVKParser(oapiGetter *openapi.CachedOpenAPIGetter) (*man
 	if err != nil {
 		return nil, fmt.Errorf("error getting openapi data: %s", err)
 	}
-	var warnings []string
-	models, warnings = newUniqueModels(models)
-	for _, warning := range warnings {
-		k.Log.Info(warning)
-	}
+	//var warnings []string
+	//models, warnings = newUniqueModels(models)
+	//for _, warning := range warnings {
+	//	k.Log.Info(warning)
+	//}
 	typeSchema, err := schemaconv.ToSchemaWithPreserveUnknownFields(models, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert models to schema: %v", err)
