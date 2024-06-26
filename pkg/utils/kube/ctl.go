@@ -2,7 +2,6 @@ package kube
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"k8s.io/kube-openapi/pkg/schemaconv"
 	"os"
@@ -152,20 +151,19 @@ func (k *KubectlCmd) newGVKParser(oapiGetter *openapi.CachedOpenAPIGetter) (*man
 	if err != nil {
 		return nil, fmt.Errorf("error getting openapi data: %s", err)
 	}
-	//var warnings []string
-	//models, warnings = newUniqueModels(models)
-	//for _, warning := range warnings {
-	//	k.Log.Info(warning)
-	//}
-	typeSchema, err := schemaconv.ToSchemaWithPreserveUnknownFields(models, false)
+	_, err = schemaconv.ToSchemaWithPreserveUnknownFields(models, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert models to schema: %v", err)
 	}
-	typeSchemaJson, err := json.Marshal(typeSchema.Types)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal schema to json: %v", err)
+	var warnings []string
+	models, warnings = newUniqueModels(models)
+	for _, warning := range warnings {
+		k.Log.Info(warning)
 	}
-	k.Log.V(1).Info("OpenAPI schema", "schema", string(typeSchemaJson))
+	_, err = schemaconv.ToSchemaWithPreserveUnknownFields(models, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert models to schema: %v", err)
+	}
 	gvkParser, err := managedfields.NewGVKParser(models, false)
 	if err != nil {
 		return nil, err
