@@ -2,7 +2,9 @@ package kube
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"k8s.io/kube-openapi/pkg/schemaconv"
 	"os"
 	"strings"
 
@@ -136,9 +138,6 @@ func (k *KubectlCmd) LoadOpenAPISchema(config *rest.Config) (openapi.Resources, 
 	}
 	gvkParser, err := k.newGVKParser(oapiGetter)
 	if err != nil {
-		// return a specific error type to allow gracefully handle
-		// creating GVK Parser bug:
-		// https://github.com/kubernetes/kubernetes/issues/103597
 		return oapiResources, nil, err
 	}
 	return oapiResources, gvkParser, nil
@@ -158,6 +157,15 @@ func (k *KubectlCmd) newGVKParser(oapiGetter *openapi.CachedOpenAPIGetter) (*man
 	for _, warning := range warnings {
 		k.Log.Info(warning)
 	}
+	typeSchema, err := schemaconv.ToSchemaWithPreserveUnknownFields(models, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert models to schema: %v", err)
+	}
+	typeSchemaJson, err := json.Marshal(typeSchema.Types)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal schema to json: %v", err)
+	}
+	k.Log.V(1).Info("OpenAPI schema", "schema", string(typeSchemaJson))
 	gvkParser, err := managedfields.NewGVKParser(models, false)
 	if err != nil {
 		return nil, err
