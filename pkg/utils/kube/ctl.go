@@ -141,7 +141,7 @@ func (k *KubectlCmd) LoadOpenAPISchema(config *rest.Config) (openapi.Resources, 
 	return oapiResources, gvkParser, nil
 }
 
-func (k *KubectlCmd) newGVKParser(oapiGetter *openapi.CachedOpenAPIGetter) (*managedfields.GvkParser, error) {
+func (k *KubectlCmd) newGVKParser(oapiGetter discovery.OpenAPISchemaInterface) (*managedfields.GvkParser, error) {
 	doc, err := oapiGetter.OpenAPISchema()
 	if err != nil {
 		return nil, fmt.Errorf("error getting openapi schema: %s", err)
