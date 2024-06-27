@@ -3,9 +3,7 @@ package kube
 import (
 	"context"
 	"fmt"
-	"k8s.io/kube-openapi/pkg/schemaconv"
 	"os"
-	"sort"
 	"strings"
 
 	"github.com/go-logr/logr"
@@ -152,28 +150,10 @@ func (k *KubectlCmd) newGVKParser(oapiGetter *openapi.CachedOpenAPIGetter) (*man
 	if err != nil {
 		return nil, fmt.Errorf("error getting openapi data: %s", err)
 	}
-	_, err = schemaconv.ToSchemaWithPreserveUnknownFields(models, false)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert models to schema: %v", err)
-	}
-	modelNames := models.ListModels()
-	sort.Slice(modelNames, func(i, j int) bool {
-		return modelNames[i] < modelNames[j]
-	})
-	k.Log.Info("Loaded OpenAPI schema", "models", modelNames)
-	var warnings []string
-	models, warnings = newUniqueModels(models)
-	modelNames = models.ListModels()
-	sort.Slice(modelNames, func(i, j int) bool {
-		return modelNames[i] < modelNames[j]
-	})
-	k.Log.Info("Loaded OpenAPI schema", "models", modelNames)
-	for _, warning := range warnings {
-		k.Log.Info(warning)
-	}
-	_, err = schemaconv.ToSchemaWithPreserveUnknownFields(models, false)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert models to schema: %v", err)
+	var taintedGVKs []schema.GroupVersionKind
+	models, taintedGVKs = newUniqueModels(models)
+	if len(taintedGVKs) > 0 {
+		k.Log.Info("Duplicate GVKs detected in OpenAPI schema. This could cause inaccurate diffs.", "gvks", taintedGVKs)
 	}
 	gvkParser, err := managedfields.NewGVKParser(models, false)
 	if err != nil {

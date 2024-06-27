@@ -15,16 +15,17 @@ The function fails in instances where it is probably more desirable for Argo CD 
 But since the upstream implementation doesn't offer the option to ignore the error, we have to mutate the input to the
 function to completely avoid the case that can produce the error.
 
-When encountering the error from NewGVKParser, we used to just set the internal gvkparser instance to nil, log the
+When encountering the error from NewGVKParser, we used to just set the internal GVKParser instance to nil, log the
 error as info, and move on.
 
-But Argo CD increasingly relies on the gvpparser to produce reliable diffs, especially with server-side diffing. And
-we're better off with an incorrectly-initialized gvkparser than no gvkparser at all.
+But Argo CD increasingly relies on the GVKParser to produce reliable diffs, especially with server-side diffing. And
+we're better off with an incorrectly-initialized GVKParser than no GVKParser at all.
 
 To understand why NewGVKParser fails, we need to understand how Kubernetes constructs its OpenAPI models.
 
 Kubernetes contains a built-in OpenAPI document containing the `definitions` for every built-in Kubernetes API. This
-document includes shared structs like APIResourceList.
+document includes shared structs like APIResourceList. Some of these definitions include an
+x-kubernetes-group-version-kind extension.
 
 Aggregated APIs produce their own OpenAPI documents, which are merged with the built-in OpenAPI document. The aggregated
 API documents generally include all the definitions of all the structs which are used anywhere by the API. This often
@@ -33,9 +34,12 @@ includes some of the same structs as the built-in OpenAPI document.
 So when Kubernetes constructs the complete OpenAPI document (the one served at /openapi/v2), it merges the built-in
 OpenAPI document with the aggregated API OpenAPI documents.
 
-When the aggregator encounters two different definitions for the same struct (as determined by a deep compare), it
-appends a `_vX` suffix to the definition name in the OpenAPI document (where X is the count of the number of times the
-aggregator has seen the same definition).
+When the aggregator encounters two different definitions for the same struct (as determined by a deep compare) with the
+same GVK (as determined by the value in the x-kubernetes-group-version-kind extension), it appends a `_vX` suffix to the
+definition name in the OpenAPI document (where X is the count of the number of times the aggregator has seen the same
+definition). Basically, it's communicating "different APIs have different opinions about the structure of structs with
+this GVK, so I'm going to give them different names and let you sort it out."
+https://github.com/kubernetes/kube-openapi/blob/b456828f718bab62dc3013d192665eb3d17f8fe9/pkg/aggregator/aggregator.go#L238-L279
 
 This behavior is fine from the perspective of a typical Kubernetes API user. They download the OpenAPI document, they
 see that there are two different "opinions" about the structure of a struct, and they can choose which one they want to
@@ -45,7 +49,7 @@ But Argo CD has to be generic. We need to take the provided OpenAPI document and
 the GVKParser (reasonably) rejects the OpenAPI document if it contains two definitions for the same struct.
 
 So we have to do some work to make the OpenAPI document palatable to the GVKParser. We have to remove the duplicate
-definitions. Specifically, we take the first one and log a warning for each subsequent definition with the same gvk.
+definitions. Specifically, we take the first one and log a warning for each subsequent definition with the same GVK.
 
 In practice, this probably generally appears when a common aggregated API was built at a time significantly before the
 current Kubernetes version. The most common case is that the metrics server is built against an older version of the
@@ -54,7 +58,7 @@ the Kubernetes libraries, the problems go away, because the aggregated API and K
 struct.
 
 Using the first encountered definition is imperfect and could result in unreliable diffs. But it's better than
-constructing completely-wrong diffs due to the lack of a gvkparser.
+constructing completely-wrong diffs due to the lack of a GVKParser.
 */
 
 // uniqueModels is a model provider that ensures that no two models share the same gvk. Use newUniqueModels to
@@ -83,8 +87,8 @@ func (d *uniqueModels) ListModels() []string {
 }
 
 // newUniqueModels returns a new uniqueModels instance and a list of warnings for models that share the same gvk.
-func newUniqueModels(models proto.Models) (proto.Models, []string) {
-	var warnings []string
+func newUniqueModels(models proto.Models) (proto.Models, []schema.GroupVersionKind) {
+	var taintedGVKs []schema.GroupVersionKind
 	gvks := map[schema.GroupVersionKind]string{}
 	um := &uniqueModels{models: map[string]proto.Schema{}}
 	for _, modelName := range models.ListModels() {
@@ -104,10 +108,10 @@ func newUniqueModels(models proto.Models) (proto.Models, []string) {
 				}
 			}
 		} else {
-			warnings = append(warnings, fmt.Sprintf("encountered duplicate OpenAPI model %v for GVK %v", modelName, gvk))
+			taintedGVKs = append(taintedGVKs, gvk)
 		}
 	}
-	return um, warnings
+	return um, taintedGVKs
 }
 
 func wouldTriggerDuplicateError(model proto.Schema, gvks map[schema.GroupVersionKind]string) (schema.GroupVersionKind, bool) {
