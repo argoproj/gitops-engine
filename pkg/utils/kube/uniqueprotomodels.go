@@ -97,8 +97,8 @@ func newUniqueModels(models proto.Models) (proto.Models, []schema.GroupVersionKi
 			panic(fmt.Sprintf("ListModels returns a model that can't be looked-up for: %v", modelName))
 		}
 		gvkList := parseGroupVersionKind(model)
-		gvk, wouldError := wouldTriggerDuplicateError(model, gvks)
-		if !wouldError {
+		gvk, wasProcessed := modelGvkWasAlreadyProcessed(model, gvks)
+		if !wasProcessed {
 			um.models[modelName] = model
 
 			// Add GVKs to the map, so we can detect a duplicate GVK later.
@@ -114,9 +114,15 @@ func newUniqueModels(models proto.Models) (proto.Models, []schema.GroupVersionKi
 	return um, taintedGVKs
 }
 
-func wouldTriggerDuplicateError(model proto.Schema, gvks map[schema.GroupVersionKind]string) (schema.GroupVersionKind, bool) {
+// modelGvkWasAlreadyProcessed inspects a model to determine if it would trigger a duplicate GVK error. The gvks map
+// holds the GVKs of all the models that have already been processed. If the model would trigger a duplicate GVK error,
+// the function returns the GVK that would trigger the error and true. Otherwise, it returns an empty GVK and false.
+func modelGvkWasAlreadyProcessed(model proto.Schema, gvks map[schema.GroupVersionKind]string) (schema.GroupVersionKind, bool) {
 	gvkList := parseGroupVersionKind(model)
+	// Not every model has a GVK extension specified. For those models, this loop will be skipped.
 	for _, gvk := range gvkList {
+		// The kind length check is copied from managedfields.NewGVKParser. It's unclear what edge case it's handling,
+		// but the behavior of this function should match NewGVKParser.
 		if len(gvk.Kind) > 0 {
 			_, ok := gvks[gvk]
 			if ok {
@@ -134,7 +140,7 @@ func wouldTriggerDuplicateError(model proto.Schema, gvks map[schema.GroupVersion
 // Copied verbatim from: https://github.com/kubernetes/apimachinery/blob/eb26334eeb0f769be8f0c5665ff34713cfdec83e/pkg/util/managedfields/gvkparser.go#L29-L32
 const groupVersionKindExtensionKey = "x-kubernetes-group-version-kind"
 
-// Get and parse GroupVersionKind from the extension. Returns empty if it doesn't have one.
+// parseGroupVersionKind gets and parses GroupVersionKind from the extension. Returns empty if it doesn't have one.
 // Copied verbatim from: https://github.com/kubernetes/apimachinery/blob/eb26334eeb0f769be8f0c5665ff34713cfdec83e/pkg/util/managedfields/gvkparser.go#L82-L128
 func parseGroupVersionKind(s proto.Schema) []schema.GroupVersionKind {
 	extensions := s.GetExtensions()

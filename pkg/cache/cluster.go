@@ -707,7 +707,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 					err = runSynced(&c.lock, func() error {
 						openAPISchema, gvkParser, err := c.kubectl.LoadOpenAPISchema(c.config)
 						if err != nil {
-							return err
+							return fmt.Errorf("failed to load open api schema while handling CRD change: %w", err)
 						}
 						if gvkParser != nil {
 							c.gvkParser = gvkParser
@@ -817,7 +817,7 @@ func (c *clusterCache) sync() error {
 
 	openAPISchema, gvkParser, err := c.kubectl.LoadOpenAPISchema(config)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to load open api schema while syncing cluster cache: %w", err)
 	}
 
 	if gvkParser != nil {

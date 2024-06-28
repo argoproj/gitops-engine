@@ -136,7 +136,7 @@ func (k *KubectlCmd) LoadOpenAPISchema(config *rest.Config) (openapi.Resources, 
 	}
 	gvkParser, err := k.newGVKParser(oapiGetter)
 	if err != nil {
-		return oapiResources, nil, err
+		return oapiResources, nil, fmt.Errorf("error getting gvk parser: %s", err)
 	}
 	return oapiResources, gvkParser, nil
 }
