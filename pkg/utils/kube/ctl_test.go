@@ -3,7 +3,7 @@ package kube
 import (
 	_ "embed"
 	"encoding/json"
-	openapi_v2 "github.com/google/gnostic-models/openapiv2"
+	openapi_v2 "github.com/google/gnostic/openapiv2"
 	"github.com/stretchr/testify/require"
 	"testing"
 
