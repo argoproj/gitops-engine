@@ -183,6 +183,8 @@ type clusterCache struct {
 	apisMeta      map[schema.GroupKind]*apiMeta
 	serverVersion string
 	apiResources  []kube.APIResourceInfo
+
+	namespacedResourcesLock sync.RWMutex
 	// namespacedResources is a simple map which indicates a groupKind is namespaced
 	namespacedResources map[schema.GroupKind]bool
 
@@ -436,7 +438,11 @@ func (c *clusterCache) Invalidate(opts ...UpdateSettingsFunc) {
 		opts[i](c)
 	}
 	c.apisMeta = nil
+
+	c.namespacedResourcesLock.Lock()
 	c.namespacedResources = nil
+	c.namespacedResourcesLock.Unlock()
+
 	c.log.Info("Invalidated cluster")
 }
 
@@ -516,7 +522,11 @@ func (c *clusterCache) startMissingWatches() error {
 			}
 		}
 	}
+
+	c.namespacedResourcesLock.Lock()
 	c.namespacedResources = namespacedResources
+	c.namespacedResourcesLock.Unlock()
+
 	return nil
 }
 
@@ -801,7 +811,11 @@ func (c *clusterCache) sync() error {
 	}
 	c.apisMeta = make(map[schema.GroupKind]*apiMeta)
 	c.resources = make(map[kube.ResourceKey]*Resource)
+
+	c.namespacedResourcesLock.Lock()
+	defer c.namespacedResourcesLock.Unlock()
 	c.namespacedResources = make(map[schema.GroupKind]bool)
+
 	config := c.config
 	version, err := c.kubectl.GetServerVersion(config)
 
@@ -1002,6 +1016,9 @@ func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(resour
 
 // IsNamespaced answers if specified group/kind is a namespaced resource API or not
 func (c *clusterCache) IsNamespaced(gk schema.GroupKind) (bool, error) {
+	c.namespacedResourcesLock.RLock()
+	defer c.namespacedResourcesLock.RUnlock()
+
 	if isNamespaced, ok := c.namespacedResources[gk]; ok {
 		return isNamespaced, nil
 	}

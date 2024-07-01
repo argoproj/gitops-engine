@@ -3,11 +3,12 @@ package cache
 import (
 	"context"
 	"fmt"
-	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -84,6 +85,10 @@ func newCluster(t *testing.T, objs ...runtime.Object) *clusterCache {
 	})
 
 	apiResources := []kube.APIResourceInfo{{
+		GroupKind:            schema.GroupKind{Group: "", Kind: "Namespace"},
+		GroupVersionResource: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "namespaces"},
+		Meta:                 metav1.APIResource{Namespaced: false},
+	}, {
 		GroupKind:            schema.GroupKind{Group: "", Kind: "Pod"},
 		GroupVersionResource: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 		Meta:                 metav1.APIResource{Namespaced: true},
@@ -492,23 +497,23 @@ metadata:
 func TestGetManagedLiveObjsFailedConversion(t *testing.T) {
 	cronTabGroup := "stable.example.com"
 
-	testCases := []struct{
-		name string
-		localConvertFails bool
+	testCases := []struct {
+		name                         string
+		localConvertFails            bool
 		expectConvertToVersionCalled bool
-		expectGetResourceCalled bool
+		expectGetResourceCalled      bool
 	}{
 		{
-			name: "local convert fails, so GetResource is called",
-			localConvertFails: true,
+			name:                         "local convert fails, so GetResource is called",
+			localConvertFails:            true,
 			expectConvertToVersionCalled: true,
-			expectGetResourceCalled: true,
+			expectGetResourceCalled:      true,
 		},
 		{
-			name: "local convert succeeds, so GetResource is not called",
-			localConvertFails: false,
+			name:                         "local convert succeeds, so GetResource is not called",
+			localConvertFails:            false,
 			expectConvertToVersionCalled: true,
-			expectGetResourceCalled: false,
+			expectGetResourceCalled:      false,
 		},
 	}
 
@@ -556,7 +561,6 @@ metadata:
 					getResourceWasCalled = true
 					return testCronTab(), nil
 				})
-
 
 			managedObjs, err := cluster.GetManagedLiveObjs([]*unstructured.Unstructured{targetDeploy}, func(r *Resource) bool {
 				return true
@@ -816,25 +820,25 @@ func testPod() *corev1.Pod {
 
 func testCRD() *apiextensions.CustomResourceDefinition {
 	return &apiextensions.CustomResourceDefinition{
-		TypeMeta:   metav1.TypeMeta{
+		TypeMeta: metav1.TypeMeta{
 			APIVersion: "apiextensions.k8s.io/v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "crontabs.stable.example.com",
 		},
-		Spec:       apiextensions.CustomResourceDefinitionSpec{
+		Spec: apiextensions.CustomResourceDefinitionSpec{
 			Group: "stable.example.com",
 			Versions: []apiextensions.CustomResourceDefinitionVersion{
 				{
-					Name: "v1",
-					Served: true,
+					Name:    "v1",
+					Served:  true,
 					Storage: true,
 					Schema: &apiextensions.CustomResourceValidation{
 						OpenAPIV3Schema: &apiextensions.JSONSchemaProps{
 							Type: "object",
 							Properties: map[string]apiextensions.JSONSchemaProps{
 								"cronSpec": {Type: "string"},
-								"image": {Type: "string"},
+								"image":    {Type: "string"},
 								"replicas": {Type: "integer"},
 							},
 						},
@@ -855,14 +859,14 @@ func testCRD() *apiextensions.CustomResourceDefinition {
 func testCronTab() *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": "stable.example.com/v1",
-		"kind": "CronTab",
+		"kind":       "CronTab",
 		"metadata": map[string]interface{}{
-			"name": "test-crontab",
+			"name":      "test-crontab",
 			"namespace": "default",
 		},
 		"spec": map[string]interface{}{
 			"cronSpec": "* * * * */5",
-			"image": "my-awesome-cron-image",
+			"image":    "my-awesome-cron-image",
 		},
 	}}
 }
@@ -1005,4 +1009,33 @@ func TestIterateHierachy(t *testing.T) {
 			},
 			keys)
 	})
+}
+
+func TestIsNamespaced_Sync_RaceCondition(t *testing.T) {
+	cc := newCluster(t)
+
+	t.Log("Syncing cluster cache to prime namespacedResources map")
+	err := cc.sync()
+	require.NoError(t, err)
+
+	t.Log("Starting infinite sync loop goroutine")
+	go func() {
+		for {
+			cc.lock.Lock()
+			cc.syncStatus.lock.Lock()
+
+			err := cc.sync()
+
+			cc.syncStatus.lock.Unlock()
+			cc.lock.Unlock()
+
+			require.NoError(t, err)
+		}
+	}()
+
+	t.Log("Repeatedly checking if a Namespace is NamespacedOrUnknown")
+	namespaceGK := schema.GroupKind{Group: "", Kind: "Namespace"}
+	for i := 0; i < 1000; i++ {
+		require.False(t, kube.IsNamespacedOrUnknown(cc, namespaceGK))
+	}
 }
