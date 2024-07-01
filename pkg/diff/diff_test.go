@@ -1013,6 +1013,132 @@ func TestHideSecretDataDifferentKeysDifferentValues(t *testing.T) {
 	assert.Equal(t, map[string]interface{}{"key2": replacement2, "key3": replacement1}, secretData(live))
 }
 
+func TestHideSecretAnnotations(t *testing.T) {
+	tests := []struct {
+		name           string
+		hideAnnots     []string
+		annots         map[string]interface{}
+		expectedAnnots map[string]interface{}
+		targetNil      bool
+	}{
+		{
+			name:           "no hidden annotations",
+			hideAnnots:     []string{""},
+			annots:         map[string]interface{}{"token/value": "secret", "key": "secret-key", "app": "test"},
+			expectedAnnots: map[string]interface{}{"token/value": "secret", "key": "secret-key", "app": "test"},
+		},
+		{
+			name:           "hide annotations",
+			hideAnnots:     []string{"token/value", "key"},
+			annots:         map[string]interface{}{"token/value": "secret", "key": "secret-key", "app": "test"},
+			expectedAnnots: map[string]interface{}{"token/value": replacement1, "key": replacement1, "app": "test"},
+		},
+		{
+			name:       "hide annotations in last-applied-config",
+			hideAnnots: []string{"token/value", "key"},
+			annots: map[string]interface{}{
+				"token/value": "secret",
+				"app":         "test",
+				"kubectl.kubernetes.io/last-applied-configuration": `{"apiVersion":"v1","kind":"Secret","metadata":{"annotations":{"app":"test","token/value":"secret","key":"secret-key"},"labels":{"app.kubernetes.io/instance":"test"},"name":"my-secret","namespace":"default"},"type":"Opaque"}`,
+			},
+			expectedAnnots: map[string]interface{}{
+				"token/value": replacement1,
+				"app":         "test",
+				"kubectl.kubernetes.io/last-applied-configuration": `{"apiVersion":"v1","kind":"Secret","metadata":{"annotations":{"app":"test","key":"++++++++","token/value":"++++++++"},"labels":{"app.kubernetes.io/instance":"test"},"name":"my-secret","namespace":"default"},"type":"Opaque"}`,
+			},
+			targetNil: true,
+		},
+		{
+			name:           "hide annotations for malformed annotations",
+			hideAnnots:     []string{"token/value", "key"},
+			annots:         map[string]interface{}{"token/value": 0, "key": "secret", "app": true},
+			expectedAnnots: map[string]interface{}{"token/value": replacement1, "key": replacement1, "app": true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+
+			unSecret := &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"apiVersion": "v1",
+					"kind":       "Secret",
+					"metadata": map[string]interface{}{
+						"name":        "test-secret",
+						"annotations": tt.annots,
+					},
+					"type": "Opaque",
+				},
+			}
+
+			liveUn := remarshal(unSecret, applyOptions(diffOptionsForTest()))
+			targetUn := remarshal(unSecret, applyOptions(diffOptionsForTest()))
+
+			if tt.targetNil {
+				targetUn = nil
+			}
+
+			target, live, err := HideSecretData(targetUn, liveUn, tt.hideAnnots...)
+			require.NoError(t, err)
+
+			// verify configured annotations are hidden
+			for _, obj := range []*unstructured.Unstructured{target, live} {
+				if obj != nil {
+					annots, _, _ := unstructured.NestedMap(obj.Object, "metadata", "annotations")
+					for ek, ev := range tt.expectedAnnots {
+						v, found := annots[ek]
+						assert.True(t, found)
+						assert.Equal(t, ev, v)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestHideSecretAnnotationsPreserveDifference(t *testing.T) {
+	hideAnnots := []string{"token/value"}
+
+	liveUn := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":        "test-secret",
+				"annotations": map[string]interface{}{"token/value": "secret", "app": "test"},
+			},
+			"type": "Opaque",
+		},
+	}
+	targetUn := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":        "test-secret",
+				"annotations": map[string]interface{}{"token/value": "new-secret", "app": "test"},
+			},
+			"type": "Opaque",
+		},
+	}
+
+	liveUn = remarshal(liveUn, applyOptions(diffOptionsForTest()))
+	targetUn = remarshal(targetUn, applyOptions(diffOptionsForTest()))
+
+	target, live, err := HideSecretData(targetUn, liveUn, hideAnnots...)
+	require.NoError(t, err)
+
+	liveAnnots := live.GetAnnotations()
+	v, found := liveAnnots["token/value"]
+	assert.True(t, found)
+	assert.Equal(t, replacement2, v)
+
+	targetAnnots := target.GetAnnotations()
+	v, found = targetAnnots["token/value"]
+	assert.True(t, found)
+	assert.Equal(t, replacement1, v)
+}
+
 func getTargetSecretJsonBytes() []byte {
 	return []byte(`
 {
