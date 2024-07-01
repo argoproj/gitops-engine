@@ -76,18 +76,39 @@ func Reconcile(targetObjs []*unstructured.Unstructured, liveObjByKey map[kube.Re
 	managedLiveObj := make([]*unstructured.Unstructured, len(targetObjs))
 	for i, obj := range targetObjs {
 		gvk := obj.GroupVersionKind()
+
 		ns := text.FirstNonEmpty(obj.GetNamespace(), namespace)
 		if namespaced := kubeutil.IsNamespacedOrUnknown(resInfo, obj.GroupVersionKind().GroupKind()); !namespaced {
 			ns = ""
 		}
-		key := kubeutil.NewResourceKey(gvk.Group, gvk.Kind, ns, obj.GetName())
-		if liveObj, ok := liveObjByKey[key]; ok {
-			managedLiveObj[i] = liveObj
-			delete(liveObjByKey, key)
-		} else {
+
+		keys := []kubeutil.ResourceKey{
+			kubeutil.NewResourceKey(gvk.Group, gvk.Kind, ns, obj.GetName()),
+		}
+		if ns != "" {
+			// If IsNamespacedOrUnknown returned namespaced=true because it's actually unknown, there is a chance
+			// that we incorrectly use a non-empty value for ns for a cluster-scoped resource for the resource
+			// key, when it should actually be empty. This happens if the namespace parameter passed in to this
+			// method has a value. Therefore, we check a key both with and without the namespace set. Otherwise,
+			// we risk indicating that the live object does not exist when it in fact does, which then
+			// incorrectly appends a nil to targetObjs and potentially causes data loss.
+			keys = append(keys, kubeutil.NewResourceKey(gvk.Group, gvk.Kind, "", obj.GetName()))
+		}
+
+		found := false
+		for _, key := range keys {
+			if liveObj, ok := liveObjByKey[key]; ok {
+				managedLiveObj[i] = liveObj
+				delete(liveObjByKey, key)
+				found = true
+				break
+			}
+		}
+		if !found {
 			managedLiveObj[i] = nil
 		}
 	}
+
 	for _, obj := range liveObjByKey {
 		targetObjs = append(targetObjs, nil)
 		managedLiveObj = append(managedLiveObj, obj)
