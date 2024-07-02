@@ -29,7 +29,6 @@ func init() {
 		"NetworkPolicy",
 		"ResourceQuota",
 		"LimitRange",
-		"PodSecurityPolicy",
 		"PodDisruptionBudget",
 		"ServiceAccount",
 		"Secret",
