@@ -1007,7 +1007,10 @@ func (sc *syncContext) pruneObject(liveObj *unstructured.Unstructured, prune, dr
 		} else {
 			// Skip deletion if object is already marked for deletion, so we don't cause a resource update hotloop
 			deletionTimestamp := liveObj.GetDeletionTimestamp()
-			if deletionTimestamp == nil || deletionTimestamp.IsZero() {
+			// We need delete resource again when not foreground policy. Because the user may modify the policy
+			// and then expect to delete the resource again
+			if (deletionTimestamp == nil || deletionTimestamp.IsZero()) ||
+				*sc.getDeleteOptions().PropagationPolicy != metav1.DeletePropagationForeground {
 				err := sc.kubectl.DeleteResource(context.TODO(), sc.config, liveObj.GroupVersionKind(), liveObj.GetName(), liveObj.GetNamespace(), sc.getDeleteOptions())
 				if err != nil {
 					return common.ResultCodeSyncFailed, err.Error()
