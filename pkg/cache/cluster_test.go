@@ -3,11 +3,12 @@ package cache
 import (
 	"context"
 	"fmt"
-	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,6 +16,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	extensionsv1beta1 "k8s.io/api/extensions/v1beta1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -98,6 +100,14 @@ func newCluster(t *testing.T, objs ...runtime.Object) *clusterCache {
 	}, {
 		GroupKind:            schema.GroupKind{Group: "apps", Kind: "StatefulSet"},
 		GroupVersionResource: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"},
+		Meta:                 metav1.APIResource{Namespaced: true},
+	}, {
+		GroupKind:            schema.GroupKind{Group: "rbac.authorization.k8s.io", Kind: "ClusterRole"},
+		GroupVersionResource: schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterroles"},
+		Meta:                 metav1.APIResource{Namespaced: false},
+	}, {
+		GroupKind:            schema.GroupKind{Group: "", Kind: "ServiceAccount"},
+		GroupVersionResource: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "serviceaccounts"},
 		Meta:                 metav1.APIResource{Namespaced: true},
 	}}
 
@@ -273,9 +283,10 @@ func TestEnsureSyncedSingleNamespace(t *testing.T) {
 }
 
 func TestGetChildren(t *testing.T) {
-	cluster := newCluster(t, testPod(), testRS(), testDeploy())
+	cluster := newCluster(t, testPod(), testRS(), testDeploy(), testClusterRole(), testSA(), testSADeployment())
 	err := cluster.EnsureSynced()
 	require.NoError(t, err)
+	cluster.showClusterResourceChildren = true
 
 	rsChildren := getChildren(cluster, mustToUnstructured(testRS()))
 	assert.Equal(t, []*Resource{{
@@ -313,6 +324,224 @@ func TestGetChildren(t *testing.T) {
 			Time: testCreationTime.Local(),
 		},
 	}}, rsChildren...), deployChildren)
+
+	unstructuredClusterRole := mustToUnstructured(testClusterRole())
+	unstructuredSA := mustToUnstructured(testSA())
+	unstructuredSADeployment := mustToUnstructured(testSADeployment())
+	cluster.childrenByParent = map[kube.ResourceKey][]kube.ResourceKey{
+		kube.GetResourceKey(unstructuredClusterRole): {
+			kube.GetResourceKey(unstructuredSA),
+		},
+		kube.GetResourceKey(unstructuredSA): {
+			kube.GetResourceKey(unstructuredSADeployment),
+		},
+	}
+
+	saChildren := getChildren(cluster, mustToUnstructured(testSA()))
+	assert.Equal(t, []*Resource{{
+		Ref: corev1.ObjectReference{
+			Kind:       "Deployment",
+			Namespace:  "default",
+			Name:       "helm-guestbook-sa",
+			APIVersion: "apps/v1",
+			UID:        "6",
+		},
+		ResourceVersion: "234",
+		OwnerRefs:       []metav1.OwnerReference{{APIVersion: "v1", Kind: "ServiceAccount", Name: "helm-guestbook-sa", UID: "4"}},
+		CreationTimestamp: &metav1.Time{
+			Time: testCreationTime.Local(),
+		},
+	}}, saChildren)
+
+
+	crChildren := getChildren(cluster, mustToUnstructured(testClusterRole()))
+	assert.Equal(t, append([]*Resource{{
+		Ref: corev1.ObjectReference{
+			Kind:       "ServiceAccount",
+			Namespace:  "default",
+			Name:       "helm-guestbook-sa",
+			APIVersion: "v1",
+			UID:        "4",
+		},
+		ResourceVersion: "123",
+		OwnerRefs:       []metav1.OwnerReference{{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRole", Name: "helm-guestbook-cr", UID: "5"}},
+		CreationTimestamp: &metav1.Time{
+			Time: testCreationTime.Local(),
+		},
+	}}, saChildren...), crChildren)
+}
+
+func TestUpdateChildrenByParentMap(t *testing.T) {
+	cluster := newCluster(t, testDeploy(), testClusterRole(), testSA())
+	err := cluster.EnsureSynced()
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		cluster.showClusterResourceChildren = false
+	})
+
+	res := &Resource{
+		Ref: corev1.ObjectReference{
+			Kind:       "ServiceAccount",
+			Namespace:  "default",
+			Name:       "helm-guestbook-sa",
+			APIVersion: "v1",
+			UID:        "4",
+		},
+		ResourceVersion: "123",
+		CreationTimestamp: &metav1.Time{
+			Time: testCreationTime.Local(),
+		},
+	}
+
+	saResourceKey := kube.NewResourceKey("", "ServiceAccount", "default", "helm-guestbook-sa")
+	crResourceKey := kube.NewResourceKey("rbac.authorization.k8s.io", "ClusterRole", "", "helm-guestbook-cr")
+	deployResourceKey := kube.NewResourceKey("apps", "Deployment", "default", "helm-guestbook")
+
+	t.Run("cluster resource children are disabled", func(t *testing.T) {
+		res.OwnerRefs = []metav1.OwnerReference{
+			{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRole", Name: "helm-guestbook-cr", UID: "5"},
+			{APIVersion: "apps/v1", Kind: "Deployment", Name: "helm-guestbook", UID: "3"},
+		}
+		cluster.updateChildrenByParentMap(res)
+		assert.Equal(t, map[kube.ResourceKey][]kube.ResourceKey{}, cluster.childrenByParent)
+	})
+
+	t.Run("resource with no owner refs", func(t *testing.T) {
+		cluster.showClusterResourceChildren = true
+		res.OwnerRefs = []metav1.OwnerReference{}
+
+		cluster.updateChildrenByParentMap(res)
+		assert.Equal(t, map[kube.ResourceKey][]kube.ResourceKey{
+			saResourceKey: {},
+		}, cluster.childrenByParent)
+	})
+
+	t.Run("resource with an owner ref", func(t *testing.T) {
+		cluster.showClusterResourceChildren = true
+		res.OwnerRefs = []metav1.OwnerReference{{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRole", Name: "helm-guestbook-cr", UID: "5"}}
+		cluster.updateChildrenByParentMap(res)
+		assert.Equal(t, map[kube.ResourceKey][]kube.ResourceKey{
+			saResourceKey: {},
+			crResourceKey: {saResourceKey},
+		}, cluster.childrenByParent)
+	})
+
+	t.Run("resource with multiple owner refs", func(t *testing.T) {
+		cluster.showClusterResourceChildren = true
+		res.OwnerRefs = []metav1.OwnerReference{
+			{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRole", Name: "helm-guestbook-cr", UID: "5"},
+			{APIVersion: "apps/v1", Kind: "Deployment", Name: "helm-guestbook", UID: "3"},
+		}
+		cluster.updateChildrenByParentMap(res)
+		assert.Equal(t, map[kube.ResourceKey][]kube.ResourceKey{
+			saResourceKey:     {},
+			crResourceKey:     {saResourceKey},
+			deployResourceKey: {saResourceKey},
+		}, cluster.childrenByParent)
+	})
+}
+
+func TestRemoveFromChildrenByParentMap(t *testing.T) {
+	cluster := newCluster(t, testDeploy(), testClusterRole(), testSA())
+	err := cluster.EnsureSynced()
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		cluster.showClusterResourceChildren = false
+	})
+
+	res := &Resource{
+		Ref: corev1.ObjectReference{
+			Kind:       "ServiceAccount",
+			Namespace:  "default",
+			Name:       "helm-guestbook-sa",
+			APIVersion: "v1",
+			UID:        "4",
+		},
+		ResourceVersion: "123",
+		CreationTimestamp: &metav1.Time{
+			Time: testCreationTime.Local(),
+		},
+	}
+
+	crResourceKey := kube.NewResourceKey("rbac.authorization.k8s.io", "ClusterRole", "", "helm-guestbook-cr")
+	deployResourceKey := kube.NewResourceKey("apps", "Deployment", "default", "helm-guestbook")
+
+	t.Run("cluster resource children are disabled", func(t *testing.T) {
+		res.OwnerRefs = []metav1.OwnerReference{
+			{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRole", Name: "helm-guestbook-cr", UID: "5"},
+			{APIVersion: "apps/v1", Kind: "Deployment", Name: "helm-guestbook", UID: "3"},
+		}
+		cluster.updateChildrenByParentMap(res)
+		cluster.removeFromChildrenByParentMap(res.ResourceKey())
+
+		expected := map[kube.ResourceKey][]kube.ResourceKey{}
+		assert.Equal(t, expected, cluster.childrenByParent)
+	})
+
+	t.Run("remove object with multiple ownerRefs", func(t *testing.T) {
+		cluster.showClusterResourceChildren = true
+		res.OwnerRefs = []metav1.OwnerReference{
+			{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRole", Name: "helm-guestbook-cr", UID: "5"},
+			{APIVersion: "apps/v1", Kind: "Deployment", Name: "helm-guestbook", UID: "3"},
+		}
+		cluster.updateChildrenByParentMap(res)
+		cluster.removeFromChildrenByParentMap(res.ResourceKey())
+
+		expected := map[kube.ResourceKey][]kube.ResourceKey{
+			crResourceKey:     {},
+			deployResourceKey: {},
+		}
+		assert.Equal(t, expected, cluster.childrenByParent)
+	})
+
+	t.Run("object with no ownerRefs", func(t *testing.T) {
+		cluster.showClusterResourceChildren = true
+		res.OwnerRefs = []metav1.OwnerReference{}
+		cluster.updateChildrenByParentMap(res)
+		cluster.removeFromChildrenByParentMap(res.ResourceKey())
+
+		expected := map[kube.ResourceKey][]kube.ResourceKey{
+			crResourceKey:     {},
+			deployResourceKey: {},
+		}
+		assert.Equal(t, expected, cluster.childrenByParent)
+	})
+
+	t.Run("object not found in childrenByParentMap", func(t *testing.T) {
+		cluster.showClusterResourceChildren = true
+		res.OwnerRefs = []metav1.OwnerReference{
+			{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRole", Name: "helm-guestbook-cr", UID: "5"},
+			{APIVersion: "apps/v1", Kind: "Deployment", Name: "helm-guestbook", UID: "3"},
+		}
+
+		cluster.updateChildrenByParentMap(res)
+
+		newRes := &Resource{
+			Ref: corev1.ObjectReference{
+				Kind:       "CustomResource",
+				Namespace:  "default",
+				Name:       "sample",
+				APIVersion: "v1",
+				UID:        "4",
+			},
+			ResourceVersion: "123",
+			CreationTimestamp: &metav1.Time{
+				Time: testCreationTime.Local(),
+			},
+		}
+		cluster.removeFromChildrenByParentMap(newRes.ResourceKey())
+
+		saResourceKey := kube.NewResourceKey("", "ServiceAccount", "default", "helm-guestbook-sa")
+		expected := map[kube.ResourceKey][]kube.ResourceKey{
+			saResourceKey:     {},
+			crResourceKey:     {saResourceKey},
+			deployResourceKey: {saResourceKey},
+		}
+		assert.Equal(t, expected, cluster.childrenByParent)
+	})
+
 }
 
 func TestGetManagedLiveObjs(t *testing.T) {
@@ -492,23 +721,23 @@ metadata:
 func TestGetManagedLiveObjsFailedConversion(t *testing.T) {
 	cronTabGroup := "stable.example.com"
 
-	testCases := []struct{
-		name string
-		localConvertFails bool
+	testCases := []struct {
+		name                         string
+		localConvertFails            bool
 		expectConvertToVersionCalled bool
-		expectGetResourceCalled bool
+		expectGetResourceCalled      bool
 	}{
 		{
-			name: "local convert fails, so GetResource is called",
-			localConvertFails: true,
+			name:                         "local convert fails, so GetResource is called",
+			localConvertFails:            true,
 			expectConvertToVersionCalled: true,
-			expectGetResourceCalled: true,
+			expectGetResourceCalled:      true,
 		},
 		{
-			name: "local convert succeeds, so GetResource is not called",
-			localConvertFails: false,
+			name:                         "local convert succeeds, so GetResource is not called",
+			localConvertFails:            false,
 			expectConvertToVersionCalled: true,
-			expectGetResourceCalled: false,
+			expectGetResourceCalled:      false,
 		},
 	}
 
@@ -556,7 +785,6 @@ metadata:
 					getResourceWasCalled = true
 					return testCronTab(), nil
 				})
-
 
 			managedObjs, err := cluster.GetManagedLiveObjs([]*unstructured.Unstructured{targetDeploy}, func(r *Resource) bool {
 				return true
@@ -816,25 +1044,25 @@ func testPod() *corev1.Pod {
 
 func testCRD() *apiextensions.CustomResourceDefinition {
 	return &apiextensions.CustomResourceDefinition{
-		TypeMeta:   metav1.TypeMeta{
+		TypeMeta: metav1.TypeMeta{
 			APIVersion: "apiextensions.k8s.io/v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "crontabs.stable.example.com",
 		},
-		Spec:       apiextensions.CustomResourceDefinitionSpec{
+		Spec: apiextensions.CustomResourceDefinitionSpec{
 			Group: "stable.example.com",
 			Versions: []apiextensions.CustomResourceDefinitionVersion{
 				{
-					Name: "v1",
-					Served: true,
+					Name:    "v1",
+					Served:  true,
 					Storage: true,
 					Schema: &apiextensions.CustomResourceValidation{
 						OpenAPIV3Schema: &apiextensions.JSONSchemaProps{
 							Type: "object",
 							Properties: map[string]apiextensions.JSONSchemaProps{
 								"cronSpec": {Type: "string"},
-								"image": {Type: "string"},
+								"image":    {Type: "string"},
 								"replicas": {Type: "integer"},
 							},
 						},
@@ -855,14 +1083,14 @@ func testCRD() *apiextensions.CustomResourceDefinition {
 func testCronTab() *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": "stable.example.com/v1",
-		"kind": "CronTab",
+		"kind":       "CronTab",
 		"metadata": map[string]interface{}{
-			"name": "test-crontab",
+			"name":      "test-crontab",
 			"namespace": "default",
 		},
 		"spec": map[string]interface{}{
 			"cronSpec": "* * * * */5",
-			"image": "my-awesome-cron-image",
+			"image":    "my-awesome-cron-image",
 		},
 	}}
 }
@@ -1005,4 +1233,104 @@ func TestIterateHierachy(t *testing.T) {
 			},
 			keys)
 	})
+}
+
+func TestMergeResourceMaps(t *testing.T) {
+	mapA := map[kube.ResourceKey]*Resource{
+		kube.GetResourceKey(kube.MustToUnstructured(testPod())): {
+			ResourceVersion: "resource-a",
+		},
+		kube.GetResourceKey(kube.MustToUnstructured(testClusterRole())): {
+			ResourceVersion: "resource-b",
+		},
+	}
+	mapB := map[kube.ResourceKey]*Resource{
+		kube.GetResourceKey(kube.MustToUnstructured(testDeploy())): {
+			ResourceVersion: "resource-c",
+		},
+	}
+
+	mergedMap := mergeResourceMaps(mapA, mapB)
+	assert.Equal(t, len(mapA)+len(mapB), len(mergedMap))
+
+	containsKeysAndValues := func(t *testing.T, testMap map[kube.ResourceKey]*Resource) {
+		t.Helper()
+		for k, expectedVal := range testMap {
+			val, ok := mergedMap[k]
+			assert.True(t, ok, "expected key to be present in map", k)
+			assert.Equal(t, expectedVal, val)
+		}
+	}
+
+	containsKeysAndValues(t, mapA)
+	containsKeysAndValues(t, mapB)
+
+	// update the merged map and verify that the original map doesn't change
+	testKey := kube.GetResourceKey(kube.MustToUnstructured(testPod()))
+	expectedVal := mapA[testKey]
+	mergedMap[testKey] = nil
+	assert.Equal(t, expectedVal, mapA[testKey])
+}
+
+func testSADeployment() *appsv1.Deployment {
+	return &appsv1.Deployment{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "apps/v1",
+			Kind:       "Deployment",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "helm-guestbook-sa",
+			Namespace:         "default",
+			UID: "6",
+			ResourceVersion: "234",
+			CreationTimestamp: metav1.NewTime(testCreationTime),
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "v1",
+					UID:        "4",
+					Kind:       "ServiceAccount",
+					Name:       "helm-guestbook-sa",
+				},
+			},
+		},
+	}
+}
+
+func testSA() *corev1.ServiceAccount {
+	return &corev1.ServiceAccount{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "ServiceAccount",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "helm-guestbook-sa",
+			Namespace:         "default",
+			UID:               "4",
+			ResourceVersion:   "123",
+			CreationTimestamp: metav1.NewTime(testCreationTime),
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "rbac.authorization.k8s.io/v1",
+					UID:        "5",
+					Kind:       "ClusterRole",
+					Name:       "helm-guestbook-cr",
+				},
+			},
+		},
+	}
+}
+
+func testClusterRole() *rbacv1.ClusterRole {
+	return &rbacv1.ClusterRole{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "rbac.authorization.k8s.io/v1",
+			Kind:       "ClusterRole",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "helm-guestbook-cr",
+			UID:               "5",
+			ResourceVersion:   "123",
+			CreationTimestamp: metav1.NewTime(testCreationTime),
+		},
+	}
 }
