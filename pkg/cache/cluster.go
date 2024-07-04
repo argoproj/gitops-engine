@@ -120,6 +120,9 @@ type ClusterCache interface {
 	// IterateHierarchy iterates resource tree starting from the specified top level resource and executes callback for each resource in the tree.
 	// The action callback returns true if iteration should continue and false otherwise.
 	IterateHierarchy(key kube.ResourceKey, action func(resource *Resource, namespaceResources map[kube.ResourceKey]*Resource) bool)
+	// IterateHierarchyV2 iterates resource tree starting from the specified top level resources and executes callback for each resource in the tree.
+	// The action callback returns true if iteration should continue and false otherwise.
+	IterateHierarchyV2(keys []kube.ResourceKey, action func(resource *Resource, namespaceResources map[kube.ResourceKey]*Resource) bool)
 	// IsNamespaced answers if specified group/kind is a namespaced resource API or not
 	IsNamespaced(gk schema.GroupKind) (bool, error)
 	// GetManagedLiveObjs helps finding matching live K8S resources for a given resources list.
@@ -996,6 +999,94 @@ func (c *clusterCache) IterateHierarchy(key kube.ResourceKey, action func(resour
 					})
 				}
 			}
+		}
+	}
+}
+
+// IterateHierarchy iterates resource tree starting from the specified top level resources and executes callback for each resource in the tree
+func (c *clusterCache) IterateHierarchyV2(keys []kube.ResourceKey, action func(resource *Resource, namespaceResources map[kube.ResourceKey]*Resource) bool) {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	keysPerNamespace := make(map[string][]kube.ResourceKey)
+	for _, key := range keys {
+		keysPerNamespace[key.Namespace] = append(keysPerNamespace[key.Namespace], key)
+	}
+	for namespace, namespaceKeys := range keysPerNamespace {
+		nsNodes := c.nsIndex[namespace]
+		// Prepare to construct a graph
+		nodesByUID := make(map[types.UID][]*Resource)
+		nodeByGraphKey := make(map[string]*Resource)
+		for _, node := range nsNodes {
+			nodesByUID[node.Ref.UID] = append(nodesByUID[node.Ref.UID], node)
+			// Based on what's used by isParentOf
+			graphKey := fmt.Sprintf("%s/%s/%s", node.Ref.Kind, node.Ref.APIVersion, node.Ref.Name)
+			nodeByGraphKey[graphKey] = node
+		}
+		// Construct a graph using a logic similar to isParentOf but more optimal
+		graph := make(map[kube.ResourceKey][]kube.ResourceKey)
+		childrenByUID := make(map[kube.ResourceKey]map[types.UID][]*Resource)
+		for _, node := range nsNodes {
+			childrenByUID[node.ResourceKey()] = make(map[types.UID][]*Resource)
+		}
+		for _, node := range nsNodes {
+			for i, ownerRef := range node.OwnerRefs {
+				// backfill UID of inferred owner child references
+				if ownerRef.UID == "" {
+					graphKey := fmt.Sprintf("%s/%s/%s", ownerRef.Kind, ownerRef.APIVersion, ownerRef.Name)
+					graphKeyNode, ok := nodeByGraphKey[graphKey]
+					if ok {
+						ownerRef.UID = graphKeyNode.Ref.UID
+						node.OwnerRefs[i] = ownerRef
+					} else {
+						continue
+					}
+				}
+
+				uidNodes, ok := nodesByUID[ownerRef.UID]
+				if ok {
+					for _, uidNode := range uidNodes {
+						graph[uidNode.ResourceKey()] = append(graph[uidNode.ResourceKey()], node.ResourceKey())
+						childrenByUID[uidNode.ResourceKey()][node.Ref.UID] = append(childrenByUID[uidNode.ResourceKey()][node.Ref.UID], node)
+					}
+				}
+			}
+		}
+		visited := make(map[kube.ResourceKey]int)
+		for _, key := range namespaceKeys {
+			visited[key] = 0
+		}
+		for _, key := range namespaceKeys {
+			res, ok := c.resources[key]
+			if !ok {
+				continue
+			}
+			if visited[key] == 2 || !action(res, nsNodes) {
+				continue
+			}
+			visited[key] = 1
+			// make sure children has no duplicates
+			for _, children := range childrenByUID[key] {
+				if len(children) > 0 {
+					// The object might have multiple children with the same UID (e.g. replicaset from apps and extensions group). It is ok to pick any object but we need to make sure
+					// we pick the same child after every refresh.
+					sort.Slice(children, func(i, j int) bool {
+						key1 := children[i].ResourceKey()
+						key2 := children[j].ResourceKey()
+						return strings.Compare(key1.String(), key2.String()) < 0
+					})
+					child := children[0]
+					if visited[child.ResourceKey()] == 0 && action(child, nsNodes) {
+						child.iterateChildrenV2(graph, nsNodes, visited, func(err error, child *Resource, namespaceResources map[kube.ResourceKey]*Resource) bool {
+							if err != nil {
+								c.log.V(2).Info(err.Error())
+								return false
+							}
+							return action(child, namespaceResources)
+						})
+					}
+				}
+			}
+			visited[key] = 2
 		}
 	}
 }

@@ -99,3 +99,28 @@ func (r *Resource) iterateChildren(ns map[kube.ResourceKey]*Resource, parents ma
 		}
 	}
 }
+
+func (r *Resource) iterateChildrenV2(graph map[kube.ResourceKey][]kube.ResourceKey, ns map[kube.ResourceKey]*Resource, visited map[kube.ResourceKey]int, action func(err error, child *Resource, namespaceResources map[kube.ResourceKey]*Resource) bool) {
+	key := r.ResourceKey()
+	if visited[key] == 2 {
+		return
+	}
+	visited[key] = 1
+	defer func() {
+		visited[key] = 2
+	}()
+	childKeys, ok := graph[key]
+	if !ok || childKeys == nil {
+		return
+	}
+	for _, childKey := range childKeys {
+		child := ns[childKey]
+		if visited[childKey] == 1 {
+			_ = action(fmt.Errorf("circular dependency detected. %s is child and parent of %s", childKey.String(), key.String()), child, ns)
+		} else if visited[childKey] == 0 {
+			if action(nil, child, ns) {
+				child.iterateChildrenV2(graph, ns, visited, action)
+			}
+		}
+	}
+}
