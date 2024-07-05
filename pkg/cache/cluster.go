@@ -219,7 +219,7 @@ type clusterCache struct {
 	clusterResources bool
 	settings         Settings
 
-	handlersLock                sync.Mutex
+	handlersLock                sync.RWMutex
 	handlerKey                  uint64
 	populateResourceInfoHandler OnPopulateResourceInfoHandler
 	resourceUpdatedHandlers     map[uint64]OnResourceUpdatedHandler
@@ -266,8 +266,8 @@ func (c *clusterCache) OnResourceUpdated(handler OnResourceUpdatedHandler) Unsub
 }
 
 func (c *clusterCache) getResourceUpdatedHandlers() []OnResourceUpdatedHandler {
-	c.handlersLock.Lock()
-	defer c.handlersLock.Unlock()
+	c.handlersLock.RLock()
+	defer c.handlersLock.RUnlock()
 	var handlers []OnResourceUpdatedHandler
 	for _, h := range c.resourceUpdatedHandlers {
 		handlers = append(handlers, h)
@@ -290,8 +290,8 @@ func (c *clusterCache) OnEvent(handler OnEventHandler) Unsubscribe {
 }
 
 func (c *clusterCache) getEventHandlers() []OnEventHandler {
-	c.handlersLock.Lock()
-	defer c.handlersLock.Unlock()
+	c.handlersLock.RLock()
+	defer c.handlersLock.RUnlock()
 	handlers := make([]OnEventHandler, 0, len(c.eventHandlers))
 	for _, h := range c.eventHandlers {
 		handlers = append(handlers, h)
@@ -1240,26 +1240,54 @@ func (c *clusterCache) processEvent(event watch.EventType, un *unstructured.Unst
 		return
 	}
 
+	ok, newRes, oldRes, ns := c.writeForResourceEvent(key, event, un)
+	if ok {
+		// Requesting a read lock, so that namespace resources aren't written to as they are being read from.
+		// Since each group/kind is processed by its own goroutine, resource shouldn't be updated between
+		// releasing write lock in `writeForResourceEvent` and acquiring this read lock, but namespace resources might be
+		// updated by other goroutines, resulting in a potentially fresher view of resources. However, potentially all
+		// of these variables can become stale if there's a cluster cache update. With respect to ArgoCD usage, either of
+		// these scenarios can result in triggering refresh for a wrong app in the worst case, which should be rare and
+		// doesn't hurt.
+		c.lock.RLock()
+		defer c.lock.RUnlock()
+		for _, h := range c.getResourceUpdatedHandlers() {
+			h(newRes, oldRes, ns)
+		}
+	}
+}
+
+// Encapsulates the logic of updating the resource in the cluster cache to limit the scope of locking.
+func (c *clusterCache) writeForResourceEvent(key kube.ResourceKey, event watch.EventType, un *unstructured.Unstructured) (bool, *Resource, *Resource, map[kube.ResourceKey]*Resource) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	existingNode, exists := c.resources[key]
 	if event == watch.Deleted {
 		if exists {
-			c.onNodeRemoved(key)
+			ok, existing, ns := c.removeNode(key)
+			return ok, nil, existing, ns
+		} else {
+			return false, nil, nil, nil
 		}
-	} else if event != watch.Deleted {
-		c.onNodeUpdated(existingNode, c.newResource(un))
+	} else {
+		newRes, ns := c.updateNode(c.newResource(un))
+		return true, newRes, existingNode, ns
 	}
+}
+
+func (c *clusterCache) updateNode(newRes *Resource) (*Resource, map[kube.ResourceKey]*Resource) {
+	c.setNode(newRes)
+	return newRes, c.nsIndex[newRes.Ref.Namespace]
 }
 
 func (c *clusterCache) onNodeUpdated(oldRes *Resource, newRes *Resource) {
-	c.setNode(newRes)
+	_, ns := c.updateNode(newRes)
 	for _, h := range c.getResourceUpdatedHandlers() {
-		h(newRes, oldRes, c.nsIndex[newRes.Ref.Namespace])
+		h(newRes, oldRes, ns)
 	}
 }
 
-func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) {
+func (c *clusterCache) removeNode(key kube.ResourceKey) (bool, *Resource, map[kube.ResourceKey]*Resource) {
 	existing, ok := c.resources[key]
 	if ok {
 		delete(c.resources, key)
@@ -1278,6 +1306,14 @@ func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) {
 				}
 			}
 		}
+		return true, existing, ns
+	}
+	return false, nil, nil
+}
+
+func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) {
+	ok, existing, ns := c.removeNode(key)
+	if ok {
 		for _, h := range c.getResourceUpdatedHandlers() {
 			h(nil, existing, ns)
 		}

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -810,7 +811,7 @@ func getResourceKey(t *testing.T, obj runtime.Object) kube.ResourceKey {
 	return kube.NewResourceKey(gvk.Group, gvk.Kind, m.GetNamespace(), m.GetName())
 }
 
-func testPod1() *corev1.Pod {
+func testPod1WithAnnotations(annotations map[string]string) *corev1.Pod {
 	return &corev1.Pod{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "v1",
@@ -830,8 +831,13 @@ func testPod1() *corev1.Pod {
 					UID:        "2",
 				},
 			},
+			Annotations: annotations,
 		},
 	}
+}
+
+func testPod1() *corev1.Pod {
+	return testPod1WithAnnotations(nil)
 }
 
 // Similar to pod1, but owner reference lacks uid
@@ -1327,3 +1333,41 @@ func BenchmarkIterateHierarchyV2(b *testing.B) {
 //		})
 //	}
 //}
+
+func BenchmarkProcessEvents(b *testing.B) {
+	cluster := newCluster(b, testPod1(), testPod2(), testRS(), testExtensionsRS(), testDeploy())
+	err := cluster.EnsureSynced()
+	require.NoError(b, err)
+	counter := atomic.Int64{}
+	iterCount := 1000000
+	updatesCount := 10000
+	goroutineCount := 100
+	_ = cluster.OnResourceUpdated(func(newRes *Resource, oldRes *Resource, namespaceResources map[kube.ResourceKey]*Resource) {
+		localCounter := int64(0)
+		for i := 0; i < iterCount; i++ {
+			localCounter += 1
+		}
+		counter.Add(localCounter)
+	})
+	var wg sync.WaitGroup
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		counter.Store(0)
+		for i := 0; i < goroutineCount; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				limit := updatesCount / goroutineCount
+				if i < updatesCount%goroutineCount {
+					limit++
+				}
+				for j := 0; j < limit; j++ {
+					un := mustToUnstructured(testPod1WithAnnotations(map[string]string{"test": fmt.Sprintf("%d", goroutineCount*j+i)}))
+					cluster.processEvent(watch.Modified, un)
+				}
+			}(i)
+		}
+		wg.Wait()
+		require.Equal(b, int64(updatesCount)*int64(iterCount), counter.Load())
+	}
+}
