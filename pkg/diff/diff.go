@@ -1097,14 +1097,6 @@ func toString(val interface{}) string {
 	return fmt.Sprintf("%s", val)
 }
 
-func convertSliceToMap(s []string) map[string]bool {
-	m := make(map[string]bool)
-	for _, k := range s {
-		m[k] = true
-	}
-	return m
-}
-
 // remarshal checks resource kind and version and re-marshal using corresponding struct custom marshaller.
 // This ensures that expected resource state is formatter same as actual resource state in kubernetes
 // and allows to find differences between actual and target states more accurately.
