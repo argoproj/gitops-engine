@@ -972,7 +972,7 @@ func CreateTwoWayMergePatch(orig, new, dataStruct interface{}) ([]byte, bool, er
 // HideSecretData replaces secret data & optional annotations values in specified target, live secrets and in last applied configuration of live secret with stars. Also preserves differences between
 // target, live and last applied config values. E.g. if all three are equal the values would be replaced with same number of stars. If all the are different then number of stars
 // in replacement should be different.
-func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstructured, hideAnnots ...string) (*unstructured.Unstructured, *unstructured.Unstructured, error) {
+func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstructured, hideAnnots map[string]bool) (*unstructured.Unstructured, *unstructured.Unstructured, error) {
 	var orig *unstructured.Unstructured
 	if live != nil {
 		orig, _ = GetLastAppliedConfigAnnotation(live)
@@ -995,83 +995,17 @@ func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstru
 		}
 	}
 
+	var err error
 	// hide data
-	for k := range keys {
-		// we use "+" rather than the more common "*"
-		nextReplacement := "++++++++"
-		valToReplacement := make(map[string]string)
-		for _, obj := range []*unstructured.Unstructured{target, live, orig} {
-			var data map[string]interface{}
-			if obj != nil {
-				// handles an edge case when secret data has nil value
-				// https://github.com/argoproj/argo-cd/issues/5584
-				dataValue, ok := obj.Object["data"]
-				if ok {
-					if dataValue == nil {
-						continue
-					}
-				}
-				var err error
-				data, _, err = unstructured.NestedMap(obj.Object, "data")
-				if err != nil {
-					return nil, nil, fmt.Errorf("unstructured.NestedMap error: %s", err)
-				}
-			}
-			if data == nil {
-				data = make(map[string]interface{})
-			}
-			valData, ok := data[k]
-			if !ok {
-				continue
-			}
-			val := toString(valData)
-			replacement, ok := valToReplacement[val]
-			if !ok {
-				replacement = nextReplacement
-				nextReplacement = nextReplacement + "++++"
-				valToReplacement[val] = replacement
-			}
-			data[k] = replacement
-			err := unstructured.SetNestedField(obj.Object, data, "data")
-			if err != nil {
-				return nil, nil, fmt.Errorf("unstructured.SetNestedField error: %s", err)
-			}
-		}
+	target, live, orig, err = hide(target, live, orig, keys, "data")
+	if err != nil {
+		return nil, nil, err
 	}
 
 	// hide annotations
-	for _, k := range hideAnnots {
-		nextReplacement := "++++++++"
-		valToReplacement := make(map[string]string)
-		for _, obj := range []*unstructured.Unstructured{target, live, orig} {
-			var annots map[string]interface{}
-			var err error
-			if obj != nil {
-				annots, _, err = unstructured.NestedMap(obj.Object, "metadata", "annotations")
-				if err != nil {
-					return nil, nil, fmt.Errorf("unstructured.NestedMap error: %s", err)
-				}
-			}
-			if annots == nil {
-				annots = make(map[string]interface{})
-			}
-			val, ok := annots[k]
-			if !ok {
-				continue
-			}
-			strVal := toString(val)
-			replacement, ok := valToReplacement[strVal]
-			if !ok {
-				replacement = nextReplacement
-				nextReplacement = nextReplacement + "++++"
-				valToReplacement[strVal] = replacement
-			}
-			annots[k] = replacement
-			err = unstructured.SetNestedMap(obj.Object, annots, "metadata", "annotations")
-			if err != nil {
-				return nil, nil, fmt.Errorf("unstructured.SetNestedField error: %s", err)
-			}
-		}
+	target, live, orig, err = hide(target, live, orig, hideAnnots, "metadata", "annotations")
+	if err != nil {
+		return nil, nil, err
 	}
 
 	// hide last-applied-config annotation
@@ -1090,11 +1024,63 @@ func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstru
 	return target, live, nil
 }
 
+func hide(target, live, orig *unstructured.Unstructured, keys map[string]bool, fields ...string) (*unstructured.Unstructured, *unstructured.Unstructured, *unstructured.Unstructured, error) {
+	for k := range keys {
+		// we use "+" rather than the more common "*"
+		nextReplacement := "++++++++"
+		valToReplacement := make(map[string]string)
+		for _, obj := range []*unstructured.Unstructured{target, live, orig} {
+			var data map[string]interface{}
+			if obj != nil {
+				// handles an edge case when secret data has nil value
+				// https://github.com/argoproj/argo-cd/issues/5584
+				dataValue, ok, _ := unstructured.NestedFieldCopy(obj.Object, fields...)
+				if !ok || dataValue == nil {
+					continue
+				}
+				var err error
+				data, _, err = unstructured.NestedMap(obj.Object, fields...)
+				if err != nil {
+					return nil, nil, nil, fmt.Errorf("unstructured.NestedMap error: %s", err)
+				}
+			}
+			if data == nil {
+				data = make(map[string]interface{})
+			}
+			valData, ok := data[k]
+			if !ok {
+				continue
+			}
+			val := toString(valData)
+			replacement, ok := valToReplacement[val]
+			if !ok {
+				replacement = nextReplacement
+				nextReplacement = nextReplacement + "++++"
+				valToReplacement[val] = replacement
+			}
+			data[k] = replacement
+			err := unstructured.SetNestedField(obj.Object, data, fields...)
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("unstructured.SetNestedField error: %s", err)
+			}
+		}
+	}
+	return target, live, orig, nil
+}
+
 func toString(val interface{}) string {
 	if val == nil {
 		return ""
 	}
 	return fmt.Sprintf("%s", val)
+}
+
+func convertSliceToMap(s []string) map[string]bool {
+	m := make(map[string]bool)
+	for _, k := range s {
+		m[k] = true
+	}
+	return m
 }
 
 // remarshal checks resource kind and version and re-marshal using corresponding struct custom marshaller.

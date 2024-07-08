@@ -986,7 +986,9 @@ var (
 func TestHideSecretDataSameKeysDifferentValues(t *testing.T) {
 	target, live, err := HideSecretData(
 		createSecret(map[string]string{"key1": "test", "key2": "test"}),
-		createSecret(map[string]string{"key1": "test-1", "key2": "test-1"}))
+		createSecret(map[string]string{"key1": "test-1", "key2": "test-1"}),
+		nil,
+	)
 	require.NoError(t, err)
 
 	assert.Equal(t, map[string]interface{}{"key1": replacement1, "key2": replacement1}, secretData(target))
@@ -996,7 +998,9 @@ func TestHideSecretDataSameKeysDifferentValues(t *testing.T) {
 func TestHideSecretDataSameKeysSameValues(t *testing.T) {
 	target, live, err := HideSecretData(
 		createSecret(map[string]string{"key1": "test", "key2": "test"}),
-		createSecret(map[string]string{"key1": "test", "key2": "test"}))
+		createSecret(map[string]string{"key1": "test", "key2": "test"}),
+		nil,
+	)
 	require.NoError(t, err)
 
 	assert.Equal(t, map[string]interface{}{"key1": replacement1, "key2": replacement1}, secretData(target))
@@ -1006,7 +1010,9 @@ func TestHideSecretDataSameKeysSameValues(t *testing.T) {
 func TestHideSecretDataDifferentKeysDifferentValues(t *testing.T) {
 	target, live, err := HideSecretData(
 		createSecret(map[string]string{"key1": "test", "key2": "test"}),
-		createSecret(map[string]string{"key2": "test-1", "key3": "test-1"}))
+		createSecret(map[string]string{"key2": "test-1", "key3": "test-1"}),
+		nil,
+	)
 	require.NoError(t, err)
 
 	assert.Equal(t, map[string]interface{}{"key1": replacement1, "key2": replacement1}, secretData(target))
@@ -1016,26 +1022,26 @@ func TestHideSecretDataDifferentKeysDifferentValues(t *testing.T) {
 func TestHideSecretAnnotations(t *testing.T) {
 	tests := []struct {
 		name           string
-		hideAnnots     []string
+		hideAnnots     map[string]bool
 		annots         map[string]interface{}
 		expectedAnnots map[string]interface{}
 		targetNil      bool
 	}{
 		{
 			name:           "no hidden annotations",
-			hideAnnots:     []string{""},
+			hideAnnots:     nil,
 			annots:         map[string]interface{}{"token/value": "secret", "key": "secret-key", "app": "test"},
 			expectedAnnots: map[string]interface{}{"token/value": "secret", "key": "secret-key", "app": "test"},
 		},
 		{
 			name:           "hide annotations",
-			hideAnnots:     []string{"token/value", "key"},
+			hideAnnots:     map[string]bool{"token/value": true, "key": true},
 			annots:         map[string]interface{}{"token/value": "secret", "key": "secret-key", "app": "test"},
 			expectedAnnots: map[string]interface{}{"token/value": replacement1, "key": replacement1, "app": "test"},
 		},
 		{
 			name:       "hide annotations in last-applied-config",
-			hideAnnots: []string{"token/value", "key"},
+			hideAnnots: map[string]bool{"token/value": true, "key": true},
 			annots: map[string]interface{}{
 				"token/value": "secret",
 				"app":         "test",
@@ -1050,7 +1056,7 @@ func TestHideSecretAnnotations(t *testing.T) {
 		},
 		{
 			name:           "hide annotations for malformed annotations",
-			hideAnnots:     []string{"token/value", "key"},
+			hideAnnots:     map[string]bool{"token/value": true, "key": true},
 			annots:         map[string]interface{}{"token/value": 0, "key": "secret", "app": true},
 			expectedAnnots: map[string]interface{}{"token/value": replacement1, "key": replacement1, "app": true},
 		},
@@ -1078,7 +1084,7 @@ func TestHideSecretAnnotations(t *testing.T) {
 				targetUn = nil
 			}
 
-			target, live, err := HideSecretData(targetUn, liveUn, tt.hideAnnots...)
+			target, live, err := HideSecretData(targetUn, liveUn, tt.hideAnnots)
 			require.NoError(t, err)
 
 			// verify configured annotations are hidden
@@ -1097,7 +1103,7 @@ func TestHideSecretAnnotations(t *testing.T) {
 }
 
 func TestHideSecretAnnotationsPreserveDifference(t *testing.T) {
-	hideAnnots := []string{"token/value"}
+	hideAnnots := map[string]bool{"token/value": true}
 
 	liveUn := &unstructured.Unstructured{
 		Object: map[string]interface{}{
@@ -1125,7 +1131,7 @@ func TestHideSecretAnnotationsPreserveDifference(t *testing.T) {
 	liveUn = remarshal(liveUn, applyOptions(diffOptionsForTest()))
 	targetUn = remarshal(targetUn, applyOptions(diffOptionsForTest()))
 
-	target, live, err := HideSecretData(targetUn, liveUn, hideAnnots...)
+	target, live, err := HideSecretData(targetUn, liveUn, hideAnnots)
 	require.NoError(t, err)
 
 	liveAnnots := live.GetAnnotations()
@@ -1204,7 +1210,7 @@ func TestHideSecretDataHandleEmptySecret(t *testing.T) {
 	liveSecret := bytesToUnstructured(t, getLiveSecretJsonBytes())
 
 	// when
-	target, live, err := HideSecretData(targetSecret, liveSecret)
+	target, live, err := HideSecretData(targetSecret, liveSecret, nil)
 
 	// then
 	assert.NoError(t, err)
@@ -1222,7 +1228,7 @@ func TestHideSecretDataLastAppliedConfig(t *testing.T) {
 	require.NoError(t, err)
 	liveSecret.SetAnnotations(map[string]string{corev1.LastAppliedConfigAnnotation: string(lastAppliedStr)})
 
-	target, live, err := HideSecretData(targetSecret, liveSecret)
+	target, live, err := HideSecretData(targetSecret, liveSecret, nil)
 	require.NoError(t, err)
 	err = json.Unmarshal([]byte(live.GetAnnotations()[corev1.LastAppliedConfigAnnotation]), &lastAppliedSecret)
 	require.NoError(t, err)
