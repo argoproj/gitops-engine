@@ -25,6 +25,7 @@ var kindOrder = map[string]int{}
 
 func init() {
 	kinds := []string{
+		"PriorityClass",
 		"Namespace",
 		"NetworkPolicy",
 		"ResourceQuota",
