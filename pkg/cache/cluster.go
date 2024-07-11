@@ -492,21 +492,24 @@ func (c *clusterCache) startMissingWatches() error {
 
 			err := c.processApi(client, api, func(resClient dynamic.ResourceInterface, ns string) error {
 				resourceVersion, err := c.loadInitialState(ctx, api, resClient, ns, false) // don't lock here, we are already in a lock before startMissingWatches is called inside watchEvents
-				if err != nil && c.isRestrictedResource(err) {
-					keep := false
-					if c.respectRBAC == RespectRbacStrict {
-						k, permErr := c.checkPermission(ctx, clientset.AuthorizationV1().SelfSubjectAccessReviews(), api)
-						if permErr != nil {
-							return fmt.Errorf("failed to check permissions for resource %s: %w, original error=%v", api.GroupKind.String(), permErr, err.Error())
+				if err != nil {
+					if c.isRestrictedResource(err) {
+						keep := false
+						if c.respectRBAC == RespectRbacStrict {
+							k, permErr := c.checkPermission(ctx, clientset.AuthorizationV1().SelfSubjectAccessReviews(), api)
+							if permErr != nil {
+								return fmt.Errorf("failed to check permissions for resource %s: %w, original error=%v", api.GroupKind.String(), permErr, err.Error())
+							}
+							keep = k
 						}
-						keep = k
+						// if we are not allowed to list the resource, remove it from the watch list
+						if !keep {
+							delete(c.apisMeta, api.GroupKind)
+							delete(namespacedResources, api.GroupKind)
+							return nil
+						}
 					}
-					// if we are not allowed to list the resource, remove it from the watch list
-					if !keep {
-						delete(c.apisMeta, api.GroupKind)
-						delete(namespacedResources, api.GroupKind)
-						return nil
-					}
+					return fmt.Errorf("failed to start watch %s: %w", api.GroupKind.String(), err)
 				}
 				go c.watchEvents(ctx, api, resClient, ns, resourceVersion)
 				return nil
