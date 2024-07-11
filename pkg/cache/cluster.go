@@ -492,21 +492,24 @@ func (c *clusterCache) startMissingWatches() error {
 
 			err := c.processApi(client, api, func(resClient dynamic.ResourceInterface, ns string) error {
 				resourceVersion, err := c.loadInitialState(ctx, api, resClient, ns, false) // don't lock here, we are already in a lock before startMissingWatches is called inside watchEvents
-				if err != nil && c.isRestrictedResource(err) {
-					keep := false
-					if c.respectRBAC == RespectRbacStrict {
-						k, permErr := c.checkPermission(ctx, clientset.AuthorizationV1().SelfSubjectAccessReviews(), api)
-						if permErr != nil {
-							return fmt.Errorf("failed to check permissions for resource %s: %w, original error=%v", api.GroupKind.String(), permErr, err.Error())
+				if err != nil {
+					if c.isRestrictedResource(err) {
+						keep := false
+						if c.respectRBAC == RespectRbacStrict {
+							k, permErr := c.checkPermission(ctx, clientset.AuthorizationV1().SelfSubjectAccessReviews(), api)
+							if permErr != nil {
+								return fmt.Errorf("failed to check permissions for resource %s: %w, original error=%v", api.GroupKind.String(), permErr, err.Error())
+							}
+							keep = k
 						}
-						keep = k
+						// if we are not allowed to list the resource, remove it from the watch list
+						if !keep {
+							delete(c.apisMeta, api.GroupKind)
+							delete(namespacedResources, api.GroupKind)
+							return nil
+						}
 					}
-					// if we are not allowed to list the resource, remove it from the watch list
-					if !keep {
-						delete(c.apisMeta, api.GroupKind)
-						delete(namespacedResources, api.GroupKind)
-						return nil
-					}
+					return fmt.Errorf("failed to start watch %s: %w", api.GroupKind.String(), err)
 				}
 				go c.watchEvents(ctx, api, resClient, ns, resourceVersion)
 				return nil
@@ -527,11 +530,13 @@ func runSynced(lock sync.Locker, action func() error) error {
 }
 
 // listResources creates list pager and enforces number of concurrent list requests
+// The callback should not wait on any locks that may be held by other callers.
 func (c *clusterCache) listResources(ctx context.Context, resClient dynamic.ResourceInterface, callback func(*pager.ListPager) error) (string, error) {
 	if err := c.listSemaphore.Acquire(ctx, 1); err != nil {
 		return "", err
 	}
 	defer c.listSemaphore.Release(1)
+
 	var retryCount int64 = 0
 	resourceVersion := ""
 	listPager := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
@@ -568,9 +573,9 @@ func (c *clusterCache) listResources(ctx context.Context, resClient dynamic.Reso
 }
 
 func (c *clusterCache) loadInitialState(ctx context.Context, api kube.APIResourceInfo, resClient dynamic.ResourceInterface, ns string, lock bool) (string, error) {
-	return c.listResources(ctx, resClient, func(listPager *pager.ListPager) error {
-		var items []*Resource
-		err := listPager.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
+	var items []*Resource
+	resourceVersion, err := c.listResources(ctx, resClient, func(listPager *pager.ListPager) error {
+		return listPager.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
 			if un, ok := obj.(*unstructured.Unstructured); !ok {
 				return fmt.Errorf("object %s/%s has an unexpected type", un.GroupVersionKind().String(), un.GetName())
 			} else {
@@ -578,20 +583,21 @@ func (c *clusterCache) loadInitialState(ctx context.Context, api kube.APIResourc
 			}
 			return nil
 		})
+	})
 
-		if err != nil {
-			return fmt.Errorf("failed to load initial state of resource %s: %w", api.GroupKind.String(), err)
-		}
-		if lock {
-			return runSynced(&c.lock, func() error {
-				c.replaceResourceCache(api.GroupKind, items, ns)
-				return nil
-			})
-		} else {
+	if err != nil {
+		return "", fmt.Errorf("failed to load initial state of resource %s: %w", api.GroupKind.String(), err)
+	}
+
+	if lock {
+		return resourceVersion, runSynced(&c.lock, func() error {
 			c.replaceResourceCache(api.GroupKind, items, ns)
 			return nil
-		}
-	})
+		})
+	} else {
+		c.replaceResourceCache(api.GroupKind, items, ns)
+		return resourceVersion, nil
+	}
 }
 
 func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo, resClient dynamic.ResourceInterface, ns string, resourceVersion string) {
