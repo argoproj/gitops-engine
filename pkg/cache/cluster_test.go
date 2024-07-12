@@ -1022,7 +1022,7 @@ func TestIterateHierachy(t *testing.T) {
 	})
 }
 
-// TestDeadlock_startMissingWatches validates that starting watches will not create a deadlock
+// Test_watchEvents_Deadlock validates that starting watches will not create a deadlock
 // caused by using improper locking in various callback methods when there is a high load on the
 // system.
 func Test_watchEvents_Deadlock(t *testing.T) {
