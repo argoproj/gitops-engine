@@ -1047,8 +1047,10 @@ func Test_watchEvents_Deadlock(t *testing.T) {
 				time.Sleep(2 * time.Second)
 			}
 
-			//// Uncommenting the following code will simulate a deadlock caused by client code holding a lock and
-			//// trying to acquire the same lock in the event callback
+			//// Uncommenting the following code will simulate a different deadlock on purpose caused by
+			//// client code holding a lock and trying to acquire the same lock in the event callback.
+			//// It provides an easy way to validate if the test detect deadlocks as expected.
+			//// If the test fails with this code commented, a deadlock do exist in the codebase.
 			// deadlock.RLock()
 			// defer deadlock.RUnlock()
 
