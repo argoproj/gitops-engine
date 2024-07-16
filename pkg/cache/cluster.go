@@ -1064,11 +1064,11 @@ func buildGraph(nsNodes map[kube.ResourceKey]*Resource) (map[kube.ResourceKey][]
 	// Prepare to construct a childrenByParent
 	nodesByUID := make(map[types.UID][]*Resource, len(nsNodes))
 	nodeByGraphKey := make(map[graphKey]*Resource, len(nsNodes))
-	childrenByUID := make(map[kube.ResourceKey]map[types.UID][]*Resource, len(nsNodes))
+	graph := make(map[kube.ResourceKey]map[types.UID][]*Resource, len(nsNodes))
 	for _, node := range nsNodes {
 		nodesByUID[node.Ref.UID] = append(nodesByUID[node.Ref.UID], node)
 		nodeByGraphKey[graphKey{node.Ref.Kind, node.Ref.APIVersion, node.Ref.Name}] = node
-		childrenByUID[node.ResourceKey()] = make(map[types.UID][]*Resource)
+		graph[node.ResourceKey()] = make(map[types.UID][]*Resource)
 	}
 
 	// In childrenByParent, they key is the parent and the value is a list of children.
@@ -1089,18 +1089,18 @@ func buildGraph(nsNodes map[kube.ResourceKey]*Resource) (map[kube.ResourceKey][]
 				}
 			}
 
-			// Now that we have the UID of the parent, update the childrenByParent and the childrenByUID map.
+			// Now that we have the UID of the parent, update the childrenByParent and the graph map.
 			uidNodes, ok := nodesByUID[ownerRef.UID]
 			if ok {
 				for _, uidNode := range uidNodes {
 					// Update the childrenByParent for this owner to include the child.
 					childrenByParent[uidNode.ResourceKey()] = append(childrenByParent[uidNode.ResourceKey()], childNode.ResourceKey())
-					childrenByUID[uidNode.ResourceKey()][childNode.Ref.UID] = append(childrenByUID[uidNode.ResourceKey()][childNode.Ref.UID], childNode)
+					graph[uidNode.ResourceKey()][childNode.Ref.UID] = append(graph[uidNode.ResourceKey()][childNode.Ref.UID], childNode)
 				}
 			}
 		}
 	}
-	return childrenByParent, childrenByUID
+	return childrenByParent, graph
 }
 
 // IsNamespaced answers if specified group/kind is a namespaced resource API or not
