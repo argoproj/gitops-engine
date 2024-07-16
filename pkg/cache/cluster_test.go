@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"fmt"
+	"github.com/google/uuid"
 	"sort"
 	"strings"
 	"testing"
@@ -1159,4 +1160,53 @@ func TestIterateHierachyV2(t *testing.T) {
 				kube.GetResourceKey(mustToUnstructured(testExtensionsRS()))},
 			keys)
 	})
+}
+
+var testResources = map[kube.ResourceKey]*Resource{}
+
+func init() {
+	testResources = buildTestResourceMap()
+}
+
+func buildTestResourceMap() map[kube.ResourceKey]*Resource {
+	ns := make(map[kube.ResourceKey]*Resource)
+	for i := 0; i < 100000; i++ {
+		name := fmt.Sprintf("test-%d", i)
+		ownerName := fmt.Sprintf("test-%d", i/10)
+		uid := uuid.New().String()
+		key := kube.ResourceKey{
+			Namespace: "default",
+			Name:      name,
+			Kind:      "Pod",
+		}
+		resourceYaml := fmt.Sprintf(`
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: default
+  name: %s
+  uid: %s`, name, uid)
+		if i/10 != 0 {
+			owner := ns[kube.ResourceKey{
+				Namespace: "default",
+				Name:      ownerName,
+				Kind:      "Pod",
+			}]
+			ownerUid := owner.Ref.UID
+			resourceYaml += fmt.Sprintf(`
+  ownerReferences:
+  - apiVersion: v1
+    kind: Pod
+    name: %s
+    uid: %s`, ownerName, ownerUid)
+		}
+		ns[key] = c.newResource(strToUnstructured(resourceYaml))
+	}
+	return ns
+}
+
+func BenchmarkBuildGraph(b *testing.B) {
+	for n := 0; n < b.N; n++ {
+		buildGraph(testResources)
+	}
 }

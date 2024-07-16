@@ -1013,44 +1013,7 @@ func (c *clusterCache) IterateHierarchyV2(keys []kube.ResourceKey, action func(r
 	}
 	for namespace, namespaceKeys := range keysPerNamespace {
 		nsNodes := c.nsIndex[namespace]
-		// Prepare to construct a graph
-		nodesByUID := make(map[types.UID][]*Resource)
-		nodeByGraphKey := make(map[string]*Resource)
-		for _, node := range nsNodes {
-			nodesByUID[node.Ref.UID] = append(nodesByUID[node.Ref.UID], node)
-			// Based on what's used by isParentOf
-			graphKey := fmt.Sprintf("%s/%s/%s", node.Ref.Kind, node.Ref.APIVersion, node.Ref.Name)
-			nodeByGraphKey[graphKey] = node
-		}
-		// Construct a graph using a logic similar to isParentOf but more optimal
-		graph := make(map[kube.ResourceKey][]kube.ResourceKey)
-		childrenByUID := make(map[kube.ResourceKey]map[types.UID][]*Resource)
-		for _, node := range nsNodes {
-			childrenByUID[node.ResourceKey()] = make(map[types.UID][]*Resource)
-		}
-		for _, node := range nsNodes {
-			for i, ownerRef := range node.OwnerRefs {
-				// backfill UID of inferred owner child references
-				if ownerRef.UID == "" {
-					graphKey := fmt.Sprintf("%s/%s/%s", ownerRef.Kind, ownerRef.APIVersion, ownerRef.Name)
-					graphKeyNode, ok := nodeByGraphKey[graphKey]
-					if ok {
-						ownerRef.UID = graphKeyNode.Ref.UID
-						node.OwnerRefs[i] = ownerRef
-					} else {
-						continue
-					}
-				}
-
-				uidNodes, ok := nodesByUID[ownerRef.UID]
-				if ok {
-					for _, uidNode := range uidNodes {
-						graph[uidNode.ResourceKey()] = append(graph[uidNode.ResourceKey()], node.ResourceKey())
-						childrenByUID[uidNode.ResourceKey()][node.Ref.UID] = append(childrenByUID[uidNode.ResourceKey()][node.Ref.UID], node)
-					}
-				}
-			}
-		}
+		graph, childrenByUID := buildGraph(nsNodes)
 		visited := make(map[kube.ResourceKey]int)
 		for _, key := range namespaceKeys {
 			visited[key] = 0
@@ -1089,6 +1052,55 @@ func (c *clusterCache) IterateHierarchyV2(keys []kube.ResourceKey, action func(r
 			visited[key] = 2
 		}
 	}
+}
+
+type graphKey struct {
+	kind       string
+	apiVersion string
+	name       string
+}
+
+func buildGraph(nsNodes map[kube.ResourceKey]*Resource) (map[kube.ResourceKey][]kube.ResourceKey, map[kube.ResourceKey]map[types.UID][]*Resource) {
+	// Prepare to construct a childrenByParent
+	nodesByUID := make(map[types.UID][]*Resource, len(nsNodes))
+	nodeByGraphKey := make(map[graphKey]*Resource, len(nsNodes))
+	childrenByUID := make(map[kube.ResourceKey]map[types.UID][]*Resource, len(nsNodes))
+	for _, node := range nsNodes {
+		nodesByUID[node.Ref.UID] = append(nodesByUID[node.Ref.UID], node)
+		nodeByGraphKey[graphKey{node.Ref.Kind, node.Ref.APIVersion, node.Ref.Name}] = node
+		childrenByUID[node.ResourceKey()] = make(map[types.UID][]*Resource)
+	}
+
+	// In childrenByParent, they key is the parent and the value is a list of children.
+	childrenByParent := make(map[kube.ResourceKey][]kube.ResourceKey)
+
+	// Loop through all nodes, calling each one "childNode," because we're only bothering with it if it has a parent.
+	for _, childNode := range nsNodes {
+		for i, ownerRef := range childNode.OwnerRefs {
+			// First, backfill UID of inferred owner child references.
+			if ownerRef.UID == "" {
+				graphKeyNode, ok := nodeByGraphKey[graphKey{ownerRef.Kind, ownerRef.APIVersion, ownerRef.Name}]
+				if ok {
+					ownerRef.UID = graphKeyNode.Ref.UID
+					childNode.OwnerRefs[i] = ownerRef
+				} else {
+					// No resource found with the given childrenByParent key, so move on.
+					continue
+				}
+			}
+
+			// Now that we have the UID of the parent, update the childrenByParent and the childrenByUID map.
+			uidNodes, ok := nodesByUID[ownerRef.UID]
+			if ok {
+				for _, uidNode := range uidNodes {
+					// Update the childrenByParent for this owner to include the child.
+					childrenByParent[uidNode.ResourceKey()] = append(childrenByParent[uidNode.ResourceKey()], childNode.ResourceKey())
+					childrenByUID[uidNode.ResourceKey()][childNode.Ref.UID] = append(childrenByUID[uidNode.ResourceKey()][childNode.Ref.UID], childNode)
+				}
+			}
+		}
+	}
+	return childrenByParent, childrenByUID
 }
 
 // IsNamespaced answers if specified group/kind is a namespaced resource API or not
