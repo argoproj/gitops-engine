@@ -1013,6 +1013,10 @@ func (c *clusterCache) IterateHierarchyV2(keys []kube.ResourceKey, action func(r
 	defer c.lock.RUnlock()
 	keysPerNamespace := make(map[string][]kube.ResourceKey)
 	for _, key := range keys {
+		_, ok := c.resources[key]
+		if !ok {
+			continue
+		}
 		keysPerNamespace[key.Namespace] = append(keysPerNamespace[key.Namespace], key)
 	}
 	for namespace, namespaceKeys := range keysPerNamespace {
@@ -1023,10 +1027,8 @@ func (c *clusterCache) IterateHierarchyV2(keys []kube.ResourceKey, action func(r
 			visited[key] = 0
 		}
 		for _, key := range namespaceKeys {
-			res, ok := c.resources[key]
-			if !ok {
-				continue
-			}
+			// The check for existence of key is done above.
+			res := c.resources[key]
 			if visited[key] == 2 || !action(res, nsNodes) {
 				continue
 			}
