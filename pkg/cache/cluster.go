@@ -510,6 +510,7 @@ func (c *clusterCache) startMissingWatches() error {
 						delete(namespacedResources, api.GroupKind)
 						return nil
 					}
+
 				}
 				go c.watchEvents(ctx, api, resClient, ns, resourceVersion)
 				return nil
@@ -530,11 +531,13 @@ func runSynced(lock sync.Locker, action func() error) error {
 }
 
 // listResources creates list pager and enforces number of concurrent list requests
+// The callback should not wait on any locks that may be held by other callers.
 func (c *clusterCache) listResources(ctx context.Context, resClient dynamic.ResourceInterface, callback func(*pager.ListPager) error) (string, error) {
 	if err := c.listSemaphore.Acquire(ctx, 1); err != nil {
 		return "", err
 	}
 	defer c.listSemaphore.Release(1)
+
 	var retryCount int64 = 0
 	resourceVersion := ""
 	listPager := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
@@ -571,9 +574,9 @@ func (c *clusterCache) listResources(ctx context.Context, resClient dynamic.Reso
 }
 
 func (c *clusterCache) loadInitialState(ctx context.Context, api kube.APIResourceInfo, resClient dynamic.ResourceInterface, ns string, lock bool) (string, error) {
-	return c.listResources(ctx, resClient, func(listPager *pager.ListPager) error {
-		var items []*Resource
-		err := listPager.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
+	var items []*Resource
+	resourceVersion, err := c.listResources(ctx, resClient, func(listPager *pager.ListPager) error {
+		return listPager.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
 			if un, ok := obj.(*unstructured.Unstructured); !ok {
 				return fmt.Errorf("object %s/%s has an unexpected type", un.GroupVersionKind().String(), un.GetName())
 			} else {
@@ -581,20 +584,21 @@ func (c *clusterCache) loadInitialState(ctx context.Context, api kube.APIResourc
 			}
 			return nil
 		})
+	})
 
-		if err != nil {
-			return fmt.Errorf("failed to load initial state of resource %s: %w", api.GroupKind.String(), err)
-		}
-		if lock {
-			return runSynced(&c.lock, func() error {
-				c.replaceResourceCache(api.GroupKind, items, ns)
-				return nil
-			})
-		} else {
+	if err != nil {
+		return "", fmt.Errorf("failed to load initial state of resource %s: %w", api.GroupKind.String(), err)
+	}
+
+	if lock {
+		return resourceVersion, runSynced(&c.lock, func() error {
 			c.replaceResourceCache(api.GroupKind, items, ns)
 			return nil
-		}
-	})
+		})
+	} else {
+		c.replaceResourceCache(api.GroupKind, items, ns)
+		return resourceVersion, nil
+	}
 }
 
 func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo, resClient dynamic.ResourceInterface, ns string, resourceVersion string) {
@@ -1101,6 +1105,94 @@ func buildGraph(nsNodes map[kube.ResourceKey]*Resource) (map[kube.ResourceKey][]
 		}
 	}
 	return childrenByParent, graph
+}
+
+// IterateHierarchy iterates resource tree starting from the specified top level resources and executes callback for each resource in the tree
+func (c *clusterCache) IterateHierarchyV2(keys []kube.ResourceKey, action func(resource *Resource, namespaceResources map[kube.ResourceKey]*Resource) bool) {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	keysPerNamespace := make(map[string][]kube.ResourceKey)
+	for _, key := range keys {
+		keysPerNamespace[key.Namespace] = append(keysPerNamespace[key.Namespace], key)
+	}
+	for namespace, namespaceKeys := range keysPerNamespace {
+		nsNodes := c.nsIndex[namespace]
+		// Prepare to construct a graph
+		nodesByUID := make(map[types.UID][]*Resource)
+		nodeByGraphKey := make(map[string]*Resource)
+		for _, node := range nsNodes {
+			nodesByUID[node.Ref.UID] = append(nodesByUID[node.Ref.UID], node)
+			// Based on what's used by isParentOf
+			graphKey := fmt.Sprintf("%s/%s/%s", node.Ref.Kind, node.Ref.APIVersion, node.Ref.Name)
+			nodeByGraphKey[graphKey] = node
+		}
+		// Construct a graph using a logic similar to isParentOf but more optimal
+		graph := make(map[kube.ResourceKey][]kube.ResourceKey)
+		childrenByUID := make(map[kube.ResourceKey]map[types.UID][]*Resource)
+		for _, node := range nsNodes {
+			childrenByUID[node.ResourceKey()] = make(map[types.UID][]*Resource)
+		}
+		for _, node := range nsNodes {
+			for i, ownerRef := range node.OwnerRefs {
+				// backfill UID of inferred owner child references
+				if ownerRef.UID == "" {
+					graphKey := fmt.Sprintf("%s/%s/%s", ownerRef.Kind, ownerRef.APIVersion, ownerRef.Name)
+					graphKeyNode, ok := nodeByGraphKey[graphKey]
+					if ok {
+						ownerRef.UID = graphKeyNode.Ref.UID
+						node.OwnerRefs[i] = ownerRef
+					} else {
+						continue
+					}
+				}
+
+				uidNodes, ok := nodesByUID[ownerRef.UID]
+				if ok {
+					for _, uidNode := range uidNodes {
+						graph[uidNode.ResourceKey()] = append(graph[uidNode.ResourceKey()], node.ResourceKey())
+						childrenByUID[uidNode.ResourceKey()][node.Ref.UID] = append(childrenByUID[uidNode.ResourceKey()][node.Ref.UID], node)
+					}
+				}
+			}
+		}
+		visited := make(map[kube.ResourceKey]int)
+		for _, key := range namespaceKeys {
+			visited[key] = 0
+		}
+		for _, key := range namespaceKeys {
+			res, ok := c.resources[key]
+			if !ok {
+				continue
+			}
+			if visited[key] == 2 || !action(res, nsNodes) {
+				continue
+			}
+			visited[key] = 1
+			// make sure children has no duplicates
+			for _, children := range childrenByUID[key] {
+				if len(children) > 0 {
+					// The object might have multiple children with the same UID (e.g. replicaset from apps and extensions group). It is ok to pick any object but we need to make sure
+					// we pick the same child after every refresh.
+					sort.Slice(children, func(i, j int) bool {
+						key1 := children[i].ResourceKey()
+						key2 := children[j].ResourceKey()
+						return strings.Compare(key1.String(), key2.String()) < 0
+					})
+					child := children[0]
+					if visited[child.ResourceKey()] == 0 && action(child, nsNodes) {
+						child.iterateChildrenV2(graph, nsNodes, visited, func(err error, child *Resource, namespaceResources map[kube.ResourceKey]*Resource) bool {
+							if err != nil {
+								c.log.V(2).Info(err.Error())
+								return false
+							}
+							return action(child, namespaceResources)
+						})
+					}
+				}
+			}
+			visited[key] = 2
+		}
+	}
 }
 
 // IsNamespaced answers if specified group/kind is a namespaced resource API or not
