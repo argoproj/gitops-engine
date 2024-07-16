@@ -1290,7 +1290,7 @@ metadata:
     name: %s
     uid: %s`, ownerName, ownerUid)
 		}
-		ns[key] = c.newResource(strToUnstructured(resourceYaml))
+		ns[key] = cacheTest.newResource(strToUnstructured(resourceYaml))
 	}
 	return ns
 }
