@@ -2,6 +2,7 @@ package cache
 
 import (
 	"fmt"
+	"k8s.io/apimachinery/pkg/types"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -101,7 +102,7 @@ func (r *Resource) iterateChildren(ns map[kube.ResourceKey]*Resource, parents ma
 }
 
 // iterateChildrenV2 is a depth-first traversal of the graph of resources starting from the current resource.
-func (r *Resource) iterateChildrenV2(graph map[kube.ResourceKey][]kube.ResourceKey, ns map[kube.ResourceKey]*Resource, visited map[kube.ResourceKey]int, action func(err error, child *Resource, namespaceResources map[kube.ResourceKey]*Resource) bool) {
+func (r *Resource) iterateChildrenV2(graph map[kube.ResourceKey]map[types.UID]*Resource, ns map[kube.ResourceKey]*Resource, visited map[kube.ResourceKey]int, action func(err error, child *Resource, namespaceResources map[kube.ResourceKey]*Resource) bool) {
 	key := r.ResourceKey()
 	if visited[key] == 2 {
 		return
@@ -112,11 +113,12 @@ func (r *Resource) iterateChildrenV2(graph map[kube.ResourceKey][]kube.ResourceK
 		// this indicates that we've finished processing this node's children
 		visited[key] = 2
 	}()
-	childKeys, ok := graph[key]
-	if !ok || childKeys == nil {
+	children, ok := graph[key]
+	if !ok || children == nil {
 		return
 	}
-	for _, childKey := range childKeys {
+	for _, c := range children {
+		childKey := c.ResourceKey()
 		child := ns[childKey]
 		if visited[childKey] == 1 {
 			// Since we encountered a node that we're currently processing, we know we have a circular dependency.
