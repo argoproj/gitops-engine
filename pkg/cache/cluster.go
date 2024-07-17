@@ -1021,7 +1021,7 @@ func (c *clusterCache) IterateHierarchyV2(keys []kube.ResourceKey, action func(r
 	}
 	for namespace, namespaceKeys := range keysPerNamespace {
 		nsNodes := c.nsIndex[namespace]
-		graph, childrenByUID := buildGraph(nsNodes)
+		graph := buildGraph(nsNodes)
 		visited := make(map[kube.ResourceKey]int)
 		for _, key := range namespaceKeys {
 			visited[key] = 0
@@ -1033,15 +1033,17 @@ func (c *clusterCache) IterateHierarchyV2(keys []kube.ResourceKey, action func(r
 				continue
 			}
 			visited[key] = 1
-			for _, child := range childrenByUID[key] {
-				if visited[child.ResourceKey()] == 0 && action(child, nsNodes) {
-					child.iterateChildrenV2(graph, nsNodes, visited, func(err error, child *Resource, namespaceResources map[kube.ResourceKey]*Resource) bool {
-						if err != nil {
-							c.log.V(2).Info(err.Error())
-							return false
-						}
-						return action(child, namespaceResources)
-					})
+			if _, ok := graph[key]; ok {
+				for _, child := range graph[key] {
+					if visited[child.ResourceKey()] == 0 && action(child, nsNodes) {
+						child.iterateChildrenV2(graph, nsNodes, visited, func(err error, child *Resource, namespaceResources map[kube.ResourceKey]*Resource) bool {
+							if err != nil {
+								c.log.V(2).Info(err.Error())
+								return false
+							}
+							return action(child, namespaceResources)
+						})
+					}
 				}
 			}
 			visited[key] = 2
@@ -1055,19 +1057,17 @@ type graphKey struct {
 	name       string
 }
 
-func buildGraph(nsNodes map[kube.ResourceKey]*Resource) (map[kube.ResourceKey][]kube.ResourceKey, map[kube.ResourceKey]map[types.UID]*Resource) {
+func buildGraph(nsNodes map[kube.ResourceKey]*Resource) map[kube.ResourceKey]map[types.UID]*Resource {
 	// Prepare to construct a graph
 	nodesByUID := make(map[types.UID][]*Resource, len(nsNodes))
 	nodeByGraphKey := make(map[graphKey]*Resource, len(nsNodes))
-	childrenByUID := make(map[kube.ResourceKey]map[types.UID]*Resource, len(nsNodes))
 	for _, node := range nsNodes {
 		nodesByUID[node.Ref.UID] = append(nodesByUID[node.Ref.UID], node)
 		nodeByGraphKey[graphKey{node.Ref.Kind, node.Ref.APIVersion, node.Ref.Name}] = node
-		childrenByUID[node.ResourceKey()] = make(map[types.UID]*Resource)
 	}
 
 	// In graph, they key is the parent and the value is a list of children.
-	graph := make(map[kube.ResourceKey][]kube.ResourceKey)
+	graph := make(map[kube.ResourceKey]map[types.UID]*Resource)
 
 	// Loop through all nodes, calling each one "childNode," because we're only bothering with it if it has a parent.
 	for _, childNode := range nsNodes {
@@ -1084,30 +1084,31 @@ func buildGraph(nsNodes map[kube.ResourceKey]*Resource) (map[kube.ResourceKey][]
 				}
 			}
 
-			// Now that we have the UID of the parent, update the graph and the childrenByUID map.
+			// Now that we have the UID of the parent, update the graph.
 			uidNodes, ok := nodesByUID[ownerRef.UID]
 			if ok {
 				for _, uidNode := range uidNodes {
 					// Update the graph for this owner to include the child.
-					graph[uidNode.ResourceKey()] = append(graph[uidNode.ResourceKey()], childNode.ResourceKey())
-
-					r, ok := childrenByUID[uidNode.ResourceKey()][childNode.Ref.UID]
+					if _, ok := graph[uidNode.ResourceKey()]; !ok {
+						graph[uidNode.ResourceKey()] = make(map[types.UID]*Resource)
+					}
+					r, ok := graph[uidNode.ResourceKey()][childNode.Ref.UID]
 					if !ok {
-						childrenByUID[uidNode.ResourceKey()][childNode.Ref.UID] = childNode
+						graph[uidNode.ResourceKey()][childNode.Ref.UID] = childNode
 					} else if r != nil {
 						// The object might have multiple children with the same UID (e.g. replicaset from apps and extensions group).
 						// It is ok to pick any object, but we need to make sure we pick the same child after every refresh.
 						key1 := r.ResourceKey()
 						key2 := childNode.ResourceKey()
 						if strings.Compare(key1.String(), key2.String()) > 0 {
-							childrenByUID[uidNode.ResourceKey()][childNode.Ref.UID] = childNode
+							graph[uidNode.ResourceKey()][childNode.Ref.UID] = childNode
 						}
 					}
 				}
 			}
 		}
 	}
-	return graph, childrenByUID
+	return graph
 }
 
 // IsNamespaced answers if specified group/kind is a namespaced resource API or not
