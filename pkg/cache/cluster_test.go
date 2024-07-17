@@ -74,7 +74,7 @@ var (
       - hostname: localhost`, testCreationTime.UTC().Format(time.RFC3339)))
 )
 
-func newCluster(t *testing.T, objs ...runtime.Object) *clusterCache {
+func newCluster(t testing.TB, objs ...runtime.Object) *clusterCache {
 	cache := newClusterWithOptions(t, []UpdateSettingsFunc{}, objs...)
 
 	t.Cleanup(func() {
@@ -84,7 +84,7 @@ func newCluster(t *testing.T, objs ...runtime.Object) *clusterCache {
 	return cache
 }
 
-func newClusterWithOptions(t *testing.T, opts []UpdateSettingsFunc, objs ...runtime.Object) *clusterCache {
+func newClusterWithOptions(t testing.TB, opts []UpdateSettingsFunc, objs ...runtime.Object) *clusterCache {
 	client := fake.NewSimpleDynamicClient(scheme.Scheme, objs...)
 	reactor := client.ReactionChain[0]
 	client.PrependReactor("list", "*", func(action testcore.Action) (handled bool, ret runtime.Object, err error) {
@@ -1252,12 +1252,6 @@ func Test_watchEvents_Deadlock(t *testing.T) {
 	}
 }
 
-var testResources = map[kube.ResourceKey]*Resource{}
-
-func init() {
-	testResources = buildTestResourceMap()
-}
-
 func buildTestResourceMap() map[kube.ResourceKey]*Resource {
 	ns := make(map[kube.ResourceKey]*Resource)
 	for i := 0; i < 100000; i++ {
@@ -1296,7 +1290,40 @@ metadata:
 }
 
 func BenchmarkBuildGraph(b *testing.B) {
+	testResources := buildTestResourceMap()
+	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		buildGraph(testResources)
 	}
 }
+
+func BenchmarkIterateHierarchyV2(b *testing.B) {
+	cluster := newCluster(b)
+	testResources := buildTestResourceMap()
+	for _, resource := range testResources {
+		cluster.setNode(resource)
+	}
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		cluster.IterateHierarchyV2([]kube.ResourceKey{
+			{Namespace: "default", Name: "test-1", Kind: "Pod"},
+		}, func(child *Resource, _ map[kube.ResourceKey]*Resource) bool {
+			return true
+		})
+	}
+}
+
+//func BenchmarkIterateHierarchy(b *testing.B) {
+//	cluster := newCluster(b)
+//	for _, resource := range testResources {
+//		cluster.setNode(resource)
+//	}
+//	b.ResetTimer()
+//	for n := 0; n < b.N; n++ {
+//		cluster.IterateHierarchy(kube.ResourceKey{
+//			Namespace: "default", Name: "test-1", Kind: "Pod",
+//		}, func(child *Resource, _ map[kube.ResourceKey]*Resource) bool {
+//			return true
+//		})
+//	}
+//}
