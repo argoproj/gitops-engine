@@ -1033,7 +1033,6 @@ func (c *clusterCache) IterateHierarchyV2(keys []kube.ResourceKey, action func(r
 				continue
 			}
 			visited[key] = 1
-			// make sure children has no duplicates
 			for _, child := range childrenByUID[key] {
 				if visited[child.ResourceKey()] == 0 && action(child, nsNodes) {
 					child.iterateChildrenV2(graph, nsNodes, visited, func(err error, child *Resource, namespaceResources map[kube.ResourceKey]*Resource) bool {
