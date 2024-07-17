@@ -1034,25 +1034,15 @@ func (c *clusterCache) IterateHierarchyV2(keys []kube.ResourceKey, action func(r
 			}
 			visited[key] = 1
 			// make sure children has no duplicates
-			for _, children := range childrenByUID[key] {
-				if len(children) > 0 {
-					// The object might have multiple children with the same UID (e.g. replicaset from apps and extensions group). It is ok to pick any object but we need to make sure
-					// we pick the same child after every refresh.
-					sort.Slice(children, func(i, j int) bool {
-						key1 := children[i].ResourceKey()
-						key2 := children[j].ResourceKey()
-						return strings.Compare(key1.String(), key2.String()) < 0
+			for _, child := range childrenByUID[key] {
+				if visited[child.ResourceKey()] == 0 && action(child, nsNodes) {
+					child.iterateChildrenV2(graph, nsNodes, visited, func(err error, child *Resource, namespaceResources map[kube.ResourceKey]*Resource) bool {
+						if err != nil {
+							c.log.V(2).Info(err.Error())
+							return false
+						}
+						return action(child, namespaceResources)
 					})
-					child := children[0]
-					if visited[child.ResourceKey()] == 0 && action(child, nsNodes) {
-						child.iterateChildrenV2(graph, nsNodes, visited, func(err error, child *Resource, namespaceResources map[kube.ResourceKey]*Resource) bool {
-							if err != nil {
-								c.log.V(2).Info(err.Error())
-								return false
-							}
-							return action(child, namespaceResources)
-						})
-					}
 				}
 			}
 			visited[key] = 2
@@ -1066,19 +1056,19 @@ type graphKey struct {
 	name       string
 }
 
-func buildGraph(nsNodes map[kube.ResourceKey]*Resource) (map[kube.ResourceKey][]kube.ResourceKey, map[kube.ResourceKey]map[types.UID][]*Resource) {
-	// Prepare to construct a childrenByParent
+func buildGraph(nsNodes map[kube.ResourceKey]*Resource) (map[kube.ResourceKey][]kube.ResourceKey, map[kube.ResourceKey]map[types.UID]*Resource) {
+	// Prepare to construct a graph
 	nodesByUID := make(map[types.UID][]*Resource, len(nsNodes))
 	nodeByGraphKey := make(map[graphKey]*Resource, len(nsNodes))
-	graph := make(map[kube.ResourceKey]map[types.UID][]*Resource, len(nsNodes))
+	childrenByUID := make(map[kube.ResourceKey]map[types.UID]*Resource, len(nsNodes))
 	for _, node := range nsNodes {
 		nodesByUID[node.Ref.UID] = append(nodesByUID[node.Ref.UID], node)
 		nodeByGraphKey[graphKey{node.Ref.Kind, node.Ref.APIVersion, node.Ref.Name}] = node
-		graph[node.ResourceKey()] = make(map[types.UID][]*Resource)
+		childrenByUID[node.ResourceKey()] = make(map[types.UID]*Resource)
 	}
 
-	// In childrenByParent, they key is the parent and the value is a list of children.
-	childrenByParent := make(map[kube.ResourceKey][]kube.ResourceKey)
+	// In graph, they key is the parent and the value is a list of children.
+	graph := make(map[kube.ResourceKey][]kube.ResourceKey)
 
 	// Loop through all nodes, calling each one "childNode," because we're only bothering with it if it has a parent.
 	for _, childNode := range nsNodes {
@@ -1090,23 +1080,35 @@ func buildGraph(nsNodes map[kube.ResourceKey]*Resource) (map[kube.ResourceKey][]
 					ownerRef.UID = graphKeyNode.Ref.UID
 					childNode.OwnerRefs[i] = ownerRef
 				} else {
-					// No resource found with the given childrenByParent key, so move on.
+					// No resource found with the given graph key, so move on.
 					continue
 				}
 			}
 
-			// Now that we have the UID of the parent, update the childrenByParent and the graph map.
+			// Now that we have the UID of the parent, update the graph and the childrenByUID map.
 			uidNodes, ok := nodesByUID[ownerRef.UID]
 			if ok {
 				for _, uidNode := range uidNodes {
-					// Update the childrenByParent for this owner to include the child.
-					childrenByParent[uidNode.ResourceKey()] = append(childrenByParent[uidNode.ResourceKey()], childNode.ResourceKey())
-					graph[uidNode.ResourceKey()][childNode.Ref.UID] = append(graph[uidNode.ResourceKey()][childNode.Ref.UID], childNode)
+					// Update the graph for this owner to include the child.
+					graph[uidNode.ResourceKey()] = append(graph[uidNode.ResourceKey()], childNode.ResourceKey())
+
+					r, ok := childrenByUID[uidNode.ResourceKey()][childNode.Ref.UID]
+					if !ok {
+						childrenByUID[uidNode.ResourceKey()][childNode.Ref.UID] = childNode
+					} else if r != nil {
+						// The object might have multiple children with the same UID (e.g. replicaset from apps and extensions group).
+						// It is ok to pick any object, but we need to make sure we pick the same child after every refresh.
+						key1 := r.ResourceKey()
+						key2 := childNode.ResourceKey()
+						if strings.Compare(key1.String(), key2.String()) > 0 {
+							childrenByUID[uidNode.ResourceKey()][childNode.Ref.UID] = childNode
+						}
+					}
 				}
 			}
 		}
 	}
-	return childrenByParent, graph
+	return graph, childrenByUID
 }
 
 // IsNamespaced answers if specified group/kind is a namespaced resource API or not
