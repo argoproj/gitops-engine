@@ -100,13 +100,16 @@ func (r *Resource) iterateChildren(ns map[kube.ResourceKey]*Resource, parents ma
 	}
 }
 
+// iterateChildrenV2 is a depth-first traversal of the graph of resources starting from the current resource.
 func (r *Resource) iterateChildrenV2(graph map[kube.ResourceKey][]kube.ResourceKey, ns map[kube.ResourceKey]*Resource, visited map[kube.ResourceKey]int, action func(err error, child *Resource, namespaceResources map[kube.ResourceKey]*Resource) bool) {
 	key := r.ResourceKey()
 	if visited[key] == 2 {
 		return
 	}
+	// this indicates that we've started processing this node's children
 	visited[key] = 1
 	defer func() {
+		// this indicates that we've finished processing this node's children
 		visited[key] = 2
 	}()
 	childKeys, ok := graph[key]
@@ -116,6 +119,7 @@ func (r *Resource) iterateChildrenV2(graph map[kube.ResourceKey][]kube.ResourceK
 	for _, childKey := range childKeys {
 		child := ns[childKey]
 		if visited[childKey] == 1 {
+			// Since we encountered a node that we're currently processing, we know we have a circular dependency.
 			_ = action(fmt.Errorf("circular dependency detected. %s is child and parent of %s", childKey.String(), key.String()), child, ns)
 		} else if visited[childKey] == 0 {
 			if action(nil, child, ns) {

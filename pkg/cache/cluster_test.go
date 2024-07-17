@@ -12,6 +12,7 @@ import (
 	"golang.org/x/sync/semaphore"
 	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
@@ -1248,5 +1249,54 @@ func Test_watchEvents_Deadlock(t *testing.T) {
 			// This will make the test panic with the goroutines information
 			t.FailNow()
 		}
+	}
+}
+
+var testResources = map[kube.ResourceKey]*Resource{}
+
+func init() {
+	testResources = buildTestResourceMap()
+}
+
+func buildTestResourceMap() map[kube.ResourceKey]*Resource {
+	ns := make(map[kube.ResourceKey]*Resource)
+	for i := 0; i < 100000; i++ {
+		name := fmt.Sprintf("test-%d", i)
+		ownerName := fmt.Sprintf("test-%d", i/10)
+		uid := uuid.New().String()
+		key := kube.ResourceKey{
+			Namespace: "default",
+			Name:      name,
+			Kind:      "Pod",
+		}
+		resourceYaml := fmt.Sprintf(`
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: default
+  name: %s
+  uid: %s`, name, uid)
+		if i/10 != 0 {
+			owner := ns[kube.ResourceKey{
+				Namespace: "default",
+				Name:      ownerName,
+				Kind:      "Pod",
+			}]
+			ownerUid := owner.Ref.UID
+			resourceYaml += fmt.Sprintf(`
+  ownerReferences:
+  - apiVersion: v1
+    kind: Pod
+    name: %s
+    uid: %s`, ownerName, ownerUid)
+		}
+		ns[key] = cacheTest.newResource(strToUnstructured(resourceYaml))
+	}
+	return ns
+}
+
+func BenchmarkBuildGraph(b *testing.B) {
+	for n := 0; n < b.N; n++ {
+		buildGraph(testResources)
 	}
 }
