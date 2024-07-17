@@ -1033,15 +1033,17 @@ func (c *clusterCache) IterateHierarchyV2(keys []kube.ResourceKey, action func(r
 				continue
 			}
 			visited[key] = 1
-			for _, child := range childrenByUID[key] {
-				if visited[child.ResourceKey()] == 0 && action(child, nsNodes) {
-					child.iterateChildrenV2(graph, nsNodes, visited, func(err error, child *Resource, namespaceResources map[kube.ResourceKey]*Resource) bool {
-						if err != nil {
-							c.log.V(2).Info(err.Error())
-							return false
-						}
-						return action(child, namespaceResources)
-					})
+			if _, ok := childrenByUID[key]; ok {
+				for _, child := range childrenByUID[key] {
+					if visited[child.ResourceKey()] == 0 && action(child, nsNodes) {
+						child.iterateChildrenV2(graph, nsNodes, visited, func(err error, child *Resource, namespaceResources map[kube.ResourceKey]*Resource) bool {
+							if err != nil {
+								c.log.V(2).Info(err.Error())
+								return false
+							}
+							return action(child, namespaceResources)
+						})
+					}
 				}
 			}
 			visited[key] = 2
@@ -1059,15 +1061,15 @@ func buildGraph(nsNodes map[kube.ResourceKey]*Resource) (map[kube.ResourceKey][]
 	// Prepare to construct a graph
 	nodesByUID := make(map[types.UID][]*Resource, len(nsNodes))
 	nodeByGraphKey := make(map[graphKey]*Resource, len(nsNodes))
-	childrenByUID := make(map[kube.ResourceKey]map[types.UID]*Resource, len(nsNodes))
 	for _, node := range nsNodes {
 		nodesByUID[node.Ref.UID] = append(nodesByUID[node.Ref.UID], node)
 		nodeByGraphKey[graphKey{node.Ref.Kind, node.Ref.APIVersion, node.Ref.Name}] = node
-		childrenByUID[node.ResourceKey()] = make(map[types.UID]*Resource)
 	}
 
 	// In graph, they key is the parent and the value is a list of children.
 	graph := make(map[kube.ResourceKey][]kube.ResourceKey)
+
+	childrenByUID := make(map[kube.ResourceKey]map[types.UID]*Resource)
 
 	// Loop through all nodes, calling each one "childNode," because we're only bothering with it if it has a parent.
 	for _, childNode := range nsNodes {
@@ -1091,6 +1093,9 @@ func buildGraph(nsNodes map[kube.ResourceKey]*Resource) (map[kube.ResourceKey][]
 					// Update the graph for this owner to include the child.
 					graph[uidNode.ResourceKey()] = append(graph[uidNode.ResourceKey()], childNode.ResourceKey())
 
+					if _, ok := childrenByUID[uidNode.ResourceKey()]; !ok {
+						childrenByUID[uidNode.ResourceKey()] = make(map[types.UID]*Resource)
+					}
 					r, ok := childrenByUID[uidNode.ResourceKey()][childNode.Ref.UID]
 					if !ok {
 						childrenByUID[uidNode.ResourceKey()][childNode.Ref.UID] = childNode
