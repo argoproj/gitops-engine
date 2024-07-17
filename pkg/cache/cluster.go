@@ -1088,6 +1088,7 @@ func buildGraph(nsNodes map[kube.ResourceKey]*Resource) map[kube.ResourceKey]map
 			uidNodes, ok := nodesByUID[ownerRef.UID]
 			if ok {
 				for _, uidNode := range uidNodes {
+					// Update the graph for this owner to include the child.
 					if _, ok := graph[uidNode.ResourceKey()]; !ok {
 						graph[uidNode.ResourceKey()] = make(map[types.UID]*Resource)
 					}
