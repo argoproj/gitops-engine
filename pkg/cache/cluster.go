@@ -1060,10 +1060,8 @@ type graphKey struct {
 func buildGraph(nsNodes map[kube.ResourceKey]*Resource) map[kube.ResourceKey]map[types.UID]*Resource {
 	// Prepare to construct a graph
 	nodesByUID := make(map[types.UID][]*Resource, len(nsNodes))
-	nodeByGraphKey := make(map[graphKey]*Resource, len(nsNodes))
 	for _, node := range nsNodes {
 		nodesByUID[node.Ref.UID] = append(nodesByUID[node.Ref.UID], node)
-		nodeByGraphKey[graphKey{node.Ref.Kind, node.Ref.APIVersion, node.Ref.Name}] = node
 	}
 
 	// In graph, they key is the parent and the value is a list of children.
@@ -1074,7 +1072,8 @@ func buildGraph(nsNodes map[kube.ResourceKey]*Resource) map[kube.ResourceKey]map
 		for i, ownerRef := range childNode.OwnerRefs {
 			// First, backfill UID of inferred owner child references.
 			if ownerRef.UID == "" {
-				graphKeyNode, ok := nodeByGraphKey[graphKey{ownerRef.Kind, ownerRef.APIVersion, ownerRef.Name}]
+				group, _ := schema.ParseGroupVersion(ownerRef.APIVersion)
+				graphKeyNode, ok := nsNodes[kube.ResourceKey{Group: group.Group, Kind: ownerRef.Kind, Namespace: childNode.Ref.Namespace, Name: ownerRef.Name}]
 				if ok {
 					ownerRef.UID = graphKeyNode.Ref.UID
 					childNode.OwnerRefs[i] = ownerRef
