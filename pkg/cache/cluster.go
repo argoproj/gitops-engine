@@ -1066,7 +1066,11 @@ func buildGraph(nsNodes map[kube.ResourceKey]*Resource) map[kube.ResourceKey]map
 		for i, ownerRef := range childNode.OwnerRefs {
 			// First, backfill UID of inferred owner child references.
 			if ownerRef.UID == "" {
-				group, _ := schema.ParseGroupVersion(ownerRef.APIVersion)
+				group, err := schema.ParseGroupVersion(ownerRef.APIVersion)
+				if err != nil {
+					// APIVersion is invalid, so we couldn't find the parent.
+					continue
+				}
 				graphKeyNode, ok := nsNodes[kube.ResourceKey{Group: group.Group, Kind: ownerRef.Kind, Namespace: childNode.Ref.Namespace, Name: ownerRef.Name}]
 				if ok {
 					ownerRef.UID = graphKeyNode.Ref.UID
