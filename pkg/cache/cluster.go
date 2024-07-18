@@ -1232,16 +1232,32 @@ func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructure
 }
 
 func (c *clusterCache) processEvent(event watch.EventType, un *unstructured.Unstructured) {
+	log := c.log.WithValues(
+		"fn", "processEvent",
+		"event", event,
+		"kind", un.GetKind(),
+		"namespace", un.GetNamespace(),
+		"name", un.GetName(),
+	)
+
+	log.Info("Process event")
+
 	for _, h := range c.getEventHandlers() {
 		h(event, un)
 	}
 	key := kube.GetResourceKey(un)
 	if event == watch.Modified && skipAppRequeuing(key) {
+		log.Info("Skipping requeue for resource")
 		return
 	}
 
+	start := time.Now()
 	c.lock.Lock()
 	defer c.lock.Unlock()
+	lockAcquired := time.Now()
+
+	log.Info(fmt.Sprintf("Lock acquired in %v", lockAcquired.Sub(start)))
+
 	existingNode, exists := c.resources[key]
 	if event == watch.Deleted {
 		if exists {
