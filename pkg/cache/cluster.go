@@ -101,6 +101,9 @@ type OnPopulateResourceInfoHandler func(un *unstructured.Unstructured, isRoot bo
 
 // OnResourceUpdatedHandler handlers resource update event
 type OnResourceUpdatedHandler func(newRes *Resource, oldRes *Resource, namespaceResources map[kube.ResourceKey]*Resource)
+
+// OnResourceLockAcquireHandler handlers resource lock acquire event
+type OnResourceLockAcquireHandler func(event watch.EventType, un *unstructured.Unstructured, duration time.Duration)
 type Unsubscribe func()
 
 type ClusterCache interface {
@@ -137,6 +140,8 @@ type ClusterCache interface {
 	OnResourceUpdated(handler OnResourceUpdatedHandler) Unsubscribe
 	// OnEvent register event handler that is executed every time when new K8S event received
 	OnEvent(handler OnEventHandler) Unsubscribe
+	// OnResourceLockAcquire register event handler that is executed every time when resource lock is acquired by goroutine
+	OnResourceLockAcquire(handler OnResourceLockAcquireHandler) Unsubscribe
 }
 
 type WeightedSemaphore interface {
@@ -224,6 +229,7 @@ type clusterCache struct {
 	populateResourceInfoHandler OnPopulateResourceInfoHandler
 	resourceUpdatedHandlers     map[uint64]OnResourceUpdatedHandler
 	eventHandlers               map[uint64]OnEventHandler
+	resourceLockAcquireHandler  map[uint64]OnResourceLockAcquireHandler
 	openAPISchema               openapi.Resources
 	gvkParser                   *managedfields.GvkParser
 
@@ -294,6 +300,30 @@ func (c *clusterCache) getEventHandlers() []OnEventHandler {
 	defer c.handlersLock.Unlock()
 	handlers := make([]OnEventHandler, 0, len(c.eventHandlers))
 	for _, h := range c.eventHandlers {
+		handlers = append(handlers, h)
+	}
+	return handlers
+}
+
+// OnResourceLockAcquire register event handler that is executed every time when resource lock is acquired by goroutine
+func (c *clusterCache) OnResourceLockAcquire(handler OnResourceLockAcquireHandler) Unsubscribe {
+	c.handlersLock.Lock()
+	defer c.handlersLock.Unlock()
+	key := c.handlerKey
+	c.handlerKey++
+	c.resourceLockAcquireHandler[key] = handler
+	return func() {
+		c.handlersLock.Lock()
+		defer c.handlersLock.Unlock()
+		delete(c.resourceLockAcquireHandler, key)
+	}
+}
+
+func (c *clusterCache) getResourceLockAcquireHandlers() []OnResourceLockAcquireHandler {
+	c.handlersLock.Lock()
+	defer c.handlersLock.Unlock()
+	handlers := make([]OnResourceLockAcquireHandler, 0, len(c.resourceLockAcquireHandler))
+	for _, h := range c.resourceLockAcquireHandler {
 		handlers = append(handlers, h)
 	}
 	return handlers
@@ -1256,7 +1286,11 @@ func (c *clusterCache) processEvent(event watch.EventType, un *unstructured.Unst
 	defer c.lock.Unlock()
 	lockAcquired := time.Now()
 
-	log.Info(fmt.Sprintf("Lock acquired in %v", lockAcquired.Sub(start)))
+	duration := lockAcquired.Sub(start)
+	log.Info(fmt.Sprintf("Lock acquired in %v", duration))
+	for _, h := range c.getResourceLockAcquireHandlers() {
+		h(event, un, duration)
+	}
 
 	existingNode, exists := c.resources[key]
 	if event == watch.Deleted {
@@ -1266,6 +1300,9 @@ func (c *clusterCache) processEvent(event watch.EventType, un *unstructured.Unst
 	} else if event != watch.Deleted {
 		c.onNodeUpdated(existingNode, c.newResource(un))
 	}
+
+	lockReleased := time.Now()
+	log.Info(fmt.Sprintf("Lock released in %v", lockReleased.Sub(lockAcquired)))
 }
 
 func (c *clusterCache) onNodeUpdated(oldRes *Resource, newRes *Resource) {
