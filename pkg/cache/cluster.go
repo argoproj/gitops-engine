@@ -1270,7 +1270,7 @@ func (c *clusterCache) processEvent(event watch.EventType, un *unstructured.Unst
 		"name", un.GetName(),
 	)
 
-	log.Info("Process event")
+	log.V(5).Info("Process event")
 
 	for _, h := range c.getEventHandlers() {
 		h(event, un)
@@ -1287,7 +1287,7 @@ func (c *clusterCache) processEvent(event watch.EventType, un *unstructured.Unst
 	lockAcquired := time.Now()
 
 	duration := lockAcquired.Sub(start)
-	log.Info(fmt.Sprintf("Lock acquired in %v", duration))
+	log.V(5).Info(fmt.Sprintf("Lock acquired in %v", duration))
 	for _, h := range c.getResourceLockAcquireHandlers() {
 		h(event, un, duration)
 	}
@@ -1302,7 +1302,7 @@ func (c *clusterCache) processEvent(event watch.EventType, un *unstructured.Unst
 	}
 
 	lockReleased := time.Now()
-	log.Info(fmt.Sprintf("Lock released in %v", lockReleased.Sub(lockAcquired)))
+	log.V(5).Info(fmt.Sprintf("Lock released in %v", lockReleased.Sub(lockAcquired)))
 }
 
 func (c *clusterCache) onNodeUpdated(oldRes *Resource, newRes *Resource) {
