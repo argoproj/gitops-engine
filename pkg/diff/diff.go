@@ -991,10 +991,10 @@ func CreateTwoWayMergePatch(orig, new, dataStruct interface{}) ([]byte, bool, er
 	return patch, string(patch) != "{}", nil
 }
 
-// HideSecretData replaces secret data values in specified target, live secrets and in last applied configuration of live secret with stars. Also preserves differences between
+// HideSecretData replaces secret data & optional annotations values in specified target, live secrets and in last applied configuration of live secret with stars. Also preserves differences between
 // target, live and last applied config values. E.g. if all three are equal the values would be replaced with same number of stars. If all the are different then number of stars
 // in replacement should be different.
-func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstructured) (*unstructured.Unstructured, *unstructured.Unstructured, error) {
+func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstructured, hideAnnots map[string]bool) (*unstructured.Unstructured, *unstructured.Unstructured, error) {
 	var orig *unstructured.Unstructured
 	if live != nil {
 		orig, _ = GetLastAppliedConfigAnnotation(live)
@@ -1017,6 +1017,36 @@ func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstru
 		}
 	}
 
+	var err error
+	// hide data
+	target, live, orig, err = hide(target, live, orig, keys, "data")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// hide annotations
+	target, live, orig, err = hide(target, live, orig, hideAnnots, "metadata", "annotations")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// hide last-applied-config annotation
+	if live != nil && orig != nil {
+		annotations := live.GetAnnotations()
+		if annotations == nil {
+			annotations = make(map[string]string)
+		}
+		lastAppliedData, err := json.Marshal(orig)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error marshaling json: %s", err)
+		}
+		annotations[corev1.LastAppliedConfigAnnotation] = string(lastAppliedData)
+		live.SetAnnotations(annotations)
+	}
+	return target, live, nil
+}
+
+func hide(target, live, orig *unstructured.Unstructured, keys map[string]bool, fields ...string) (*unstructured.Unstructured, *unstructured.Unstructured, *unstructured.Unstructured, error) {
 	for k := range keys {
 		// we use "+" rather than the more common "*"
 		nextReplacement := "++++++++"
@@ -1026,16 +1056,14 @@ func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstru
 			if obj != nil {
 				// handles an edge case when secret data has nil value
 				// https://github.com/argoproj/argo-cd/issues/5584
-				dataValue, ok := obj.Object["data"]
-				if ok {
-					if dataValue == nil {
-						continue
-					}
+				dataValue, ok, _ := unstructured.NestedFieldCopy(obj.Object, fields...)
+				if !ok || dataValue == nil {
+					continue
 				}
 				var err error
-				data, _, err = unstructured.NestedMap(obj.Object, "data")
+				data, _, err = unstructured.NestedMap(obj.Object, fields...)
 				if err != nil {
-					return nil, nil, fmt.Errorf("unstructured.NestedMap error: %s", err)
+					return nil, nil, nil, fmt.Errorf("unstructured.NestedMap error: %s", err)
 				}
 			}
 			if data == nil {
@@ -1053,25 +1081,13 @@ func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstru
 				valToReplacement[val] = replacement
 			}
 			data[k] = replacement
-			err := unstructured.SetNestedField(obj.Object, data, "data")
+			err := unstructured.SetNestedField(obj.Object, data, fields...)
 			if err != nil {
-				return nil, nil, fmt.Errorf("unstructured.SetNestedField error: %s", err)
+				return nil, nil, nil, fmt.Errorf("unstructured.SetNestedField error: %s", err)
 			}
 		}
 	}
-	if live != nil && orig != nil {
-		annotations := live.GetAnnotations()
-		if annotations == nil {
-			annotations = make(map[string]string)
-		}
-		lastAppliedData, err := json.Marshal(orig)
-		if err != nil {
-			return nil, nil, fmt.Errorf("error marshaling json: %s", err)
-		}
-		annotations[corev1.LastAppliedConfigAnnotation] = string(lastAppliedData)
-		live.SetAnnotations(annotations)
-	}
-	return target, live, nil
+	return target, live, orig, nil
 }
 
 func toString(val interface{}) string {
