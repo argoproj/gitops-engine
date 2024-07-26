@@ -170,3 +170,12 @@ func SetRespectRBAC(respectRBAC int) UpdateSettingsFunc {
 		}
 	}
 }
+
+// SetTmpPath sets the path used to store temporary files that are passed to kubectl code. These temporary files are usually cluster credentials or kubernetes manifests. See 'utils/io/io.go' for details.
+func SetTmpPath(tmpPath string) UpdateSettingsFunc {
+	return func(cache *clusterCache) {
+		if kcmd, ok := cache.kubectl.(*kube.KubectlCmd); ok {
+			kcmd.TmpPath = tmpPath
+		}
+	}
+}

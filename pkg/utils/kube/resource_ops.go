@@ -52,6 +52,8 @@ type kubectlResourceOperations struct {
 	onKubectlRun  OnKubectlRunFunc
 	fact          cmdutil.Factory
 	openAPISchema openapi.Resources
+	// tmpPath is used to store temporary files that are passed to kubectl code. These temporary files are usually cluster credentials or kubernetes manifests. See 'utils/io/io.go' for details.
+	tmpPath string
 }
 
 type commandExecutor func(f cmdutil.Factory, ioStreams genericclioptions.IOStreams, fileName string) error
@@ -61,16 +63,16 @@ func (k *kubectlResourceOperations) runResourceCommand(ctx context.Context, obj 
 	if err != nil {
 		return "", err
 	}
-	manifestFile, err := os.CreateTemp(io.TempDir, "")
+	manifestFile, err := os.CreateTemp(k.tmpPath, "")
 	if err != nil {
-		return "", fmt.Errorf("Failed to generate temp file for manifest: %v", err)
+		return "", fmt.Errorf("failed to generate temp file for manifest: %v", err)
 	}
 	defer io.DeleteFile(manifestFile.Name())
 	if _, err = manifestFile.Write(manifestBytes); err != nil {
-		return "", fmt.Errorf("Failed to write manifest: %v", err)
+		return "", fmt.Errorf("failed to write manifest: %v", err)
 	}
 	if err = manifestFile.Close(); err != nil {
-		return "", fmt.Errorf("Failed to close manifest: %v", err)
+		return "", fmt.Errorf("failed to close manifest: %v", err)
 	}
 
 	// log manifest

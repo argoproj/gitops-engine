@@ -45,6 +45,8 @@ type KubectlCmd struct {
 	Log          logr.Logger
 	Tracer       tracing.Tracer
 	OnKubectlRun OnKubectlRunFunc
+	// TmpPath is used to store temporary files that are passed to kubectl code. These temporary files are usually cluster credentials or kubernetes manifests. See 'utils/io/io.go' for details.
+	TmpPath string
 }
 
 type APIResourceInfo struct {
@@ -272,7 +274,7 @@ func (k *KubectlCmd) DeleteResource(ctx context.Context, config *rest.Config, gv
 }
 
 func (k *KubectlCmd) ManageResources(config *rest.Config, openAPISchema openapi.Resources) (ResourceOperations, func(), error) {
-	f, err := os.CreateTemp(utils.TempDir, "")
+	f, err := os.CreateTemp(k.TmpPath, "")
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to generate temp file for kubeconfig: %v", err)
 	}
@@ -293,6 +295,7 @@ func (k *KubectlCmd) ManageResources(config *rest.Config, openAPISchema openapi.
 		tracer:        k.Tracer,
 		log:           k.Log,
 		onKubectlRun:  k.OnKubectlRun,
+		tmpPath:       k.TmpPath,
 	}, cleanup, nil
 }
 

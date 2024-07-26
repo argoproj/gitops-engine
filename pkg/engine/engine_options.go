@@ -4,6 +4,7 @@ import (
 	"github.com/go-logr/logr"
 	"k8s.io/klog/v2/textlogger"
 
+	"github.com/argoproj/gitops-engine/pkg/utils/io"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 	"github.com/argoproj/gitops-engine/pkg/utils/tracing"
 )
@@ -20,8 +21,9 @@ func applyOptions(opts []Option) options {
 	o := options{
 		log: log,
 		kubectl: &kube.KubectlCmd{
-			Log:    log,
-			Tracer: tracing.NopTracer{},
+			Log:     log,
+			Tracer:  tracing.NopTracer{},
+			TmpPath: io.TempPathUseDevShmIfAvailable(),
 		},
 	}
 	for _, opt := range opts {
