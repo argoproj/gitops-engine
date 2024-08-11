@@ -629,30 +629,184 @@ func (sc *syncContext) containsResource(resource reconciledResource) bool {
 
 // generates the list of sync tasks we will be performing during this sync.
 func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
-	resourceTasks := syncTasks{}
+
 	successful = true
+	resourceTasks := sc.createResourceTasks()
+	hookTasks := sc.createHookTasks()
 
-	for k, resource := range sc.resources {
-		if !sc.containsResource(resource) {
-			sc.log.WithValues("group", k.Group, "kind", k.Kind, "name", k.Name).V(1).Info("Skipping")
-			continue
+	tasks := resourceTasks
+	tasks = append(tasks, hookTasks...)
+
+	// enrich target objects with the namespace
+	sc.enrichTargetObjectsWithNamespace(tasks)
+	tasks = sc.addAutoCreateNamespaceTask(tasks)
+
+	// enrich task with live obj
+	sc.enrichTasksWithLiveObjects(tasks)
+
+	isRetryable := func(err error) bool {
+		return apierr.IsUnauthorized(err)
+	}
+
+	serverResCache := make(map[schema.GroupVersionKind]*metav1.APIResource)
+
+	cachedServerResourceForGroupVersionKind := func(sc *syncContext, task *syncTask) (serverRes *metav1.APIResource, err error) {
+
+		if val, ok := serverResCache[task.groupVersionKind()]; ok {
+			serverRes = val
+			err = nil
+		} else {
+			err = retry.OnError(retry.DefaultRetry, isRetryable, func() error {
+				serverRes, err = kube.ServerResourceForGroupVersionKind(sc.disco, task.groupVersionKind(), "get")
+				return err
+			})
+			if serverRes != nil {
+				serverResCache[task.groupVersionKind()] = serverRes
+			}
 		}
+		return serverRes, err
+	}
 
-		obj := obj(resource.Target, resource.Live)
+	// check permissions
+	for _, task := range tasks {
 
-		// this creates garbage tasks
-		if hook.IsHook(obj) {
-			sc.log.WithValues("group", obj.GroupVersionKind().Group, "kind", obj.GetKind(), "namespace", obj.GetNamespace(), "name", obj.GetName()).V(1).Info("Skipping hook")
-			continue
-		}
+		serverRes, err := cachedServerResourceForGroupVersionKind(sc, task)
 
-		for _, phase := range syncPhases(obj) {
-			resourceTasks = append(resourceTasks, &syncTask{phase: phase, targetObj: resource.Target, liveObj: resource.Live})
+		if err != nil {
+			// Special case for custom resources: if CRD is not yet known by the K8s API server,
+			// and the CRD is part of this sync or the resource is annotated with SkipDryRunOnMissingResource=true,
+			// then skip verification during `kubectl apply --dry-run` since we expect the CRD
+			// to be created during app synchronization.
+			if apierr.IsNotFound(err) &&
+				((task.targetObj != nil && resourceutil.HasAnnotationOption(task.targetObj, common.AnnotationSyncOptions, common.SyncOptionSkipDryRunOnMissingResource)) ||
+					sc.hasCRDOfGroupKind(task.group(), task.kind())) {
+				sc.log.WithValues("task", task).V(1).Info("Skip dry-run for custom resource")
+				task.skipDryRun = true
+			} else {
+				sc.setResourceResult(task, common.ResultCodeSyncFailed, "", err.Error())
+				successful = false
+			}
+		} else {
+			if err := sc.permissionValidator(task.obj(), serverRes); err != nil {
+				sc.setResourceResult(task, common.ResultCodeSyncFailed, "", err.Error())
+				successful = false
+			}
 		}
 	}
 
-	sc.log.WithValues("resourceTasks", resourceTasks).V(1).Info("Tasks from managed resources")
+	// for prune tasks, modify the waves for proper cleanup i.e reverse of sync wave (creation order)
+	pruneTasksByWave := sc.groupPruneTasksIntoWaves(tasks)
 
+	// reorder waves for pruning tasks using symmetric swap on prune waves
+	// waves to swap
+	sc.reorderPruneTaskWaves(pruneTasksByWave)
+
+	// for pruneLast tasks, modify the wave to sync phase last wave of tasks + 1
+	// to ensure proper cleanup, syncPhaseLastWave should also consider prune tasks to determine last wave
+	sc.reorderPruneLastTaskWaves(tasks)
+	tasks.Sort()
+	sc.enrichTasksWithResult(tasks)
+
+	return tasks, successful
+}
+
+func (sc *syncContext) enrichTasksWithResult(tasks syncTasks) {
+	for _, task := range tasks {
+		result, ok := sc.syncRes[task.resultKey()]
+		if ok {
+			task.syncStatus = result.Status
+			task.operationState = result.HookPhase
+			task.message = result.Message
+		}
+	}
+}
+
+func (sc *syncContext) reorderPruneLastTaskWaves(tasks syncTasks) {
+	syncPhaseLastWave := 0
+	for _, task := range tasks {
+		if task.phase == common.SyncPhaseSync {
+			if task.wave() > syncPhaseLastWave {
+				syncPhaseLastWave = task.wave()
+			}
+		}
+	}
+	syncPhaseLastWave = syncPhaseLastWave + 1
+
+	for _, task := range tasks {
+		if task.isPrune() &&
+			(sc.pruneLast || resourceutil.HasAnnotationOption(task.liveObj, common.AnnotationSyncOptions, common.SyncOptionPruneLast)) {
+			task.waveOverride = &syncPhaseLastWave
+		}
+	}
+}
+
+func (*syncContext) reorderPruneTaskWaves(pruneTasks map[int][]*syncTask) {
+	var uniquePruneWaves []int
+	for k := range pruneTasks {
+		uniquePruneWaves = append(uniquePruneWaves, k)
+	}
+	sort.Ints(uniquePruneWaves)
+
+	n := len(uniquePruneWaves)
+	for i := 0; i < n/2; i++ {
+
+		startWave := uniquePruneWaves[i]
+		endWave := uniquePruneWaves[n-1-i]
+
+		for _, task := range pruneTasks[startWave] {
+			task.waveOverride = &endWave
+		}
+
+		for _, task := range pruneTasks[endWave] {
+			task.waveOverride = &startWave
+		}
+	}
+}
+
+func (*syncContext) groupPruneTasksIntoWaves(tasks syncTasks) map[int][]*syncTask {
+	pruneTasks := make(map[int][]*syncTask)
+	for _, task := range tasks {
+		if task.isPrune() {
+			pruneTasks[task.wave()] = append(pruneTasks[task.wave()], task)
+		}
+	}
+	return pruneTasks
+}
+
+func (sc *syncContext) enrichTasksWithLiveObjects(tasks syncTasks) {
+	for _, task := range tasks {
+		if task.targetObj == nil || task.liveObj != nil {
+			continue
+		}
+		task.liveObj = sc.liveObj(task.targetObj)
+	}
+}
+
+func (sc *syncContext) addAutoCreateNamespaceTask(tasks syncTasks) syncTasks {
+	if sc.syncNamespace != nil && sc.namespace != "" {
+		tasks = sc.autoCreateNamespace(tasks)
+	}
+	return tasks
+}
+
+func (sc *syncContext) enrichTargetObjectsWithNamespace(tasks syncTasks) {
+	for _, task := range tasks {
+		if task.targetObj == nil {
+			continue
+		}
+
+		if task.targetObj.GetNamespace() == "" {
+			// If target object's namespace is empty, we set namespace in the object. We do
+			// this even though it might be a cluster-scoped resource. This prevents any
+			// possibility of the resource from unintentionally becoming created in the
+			// namespace during the `kubectl apply`
+			task.targetObj = task.targetObj.DeepCopy()
+			task.targetObj.SetNamespace(sc.namespace)
+		}
+	}
+}
+
+func (sc *syncContext) createHookTasks() syncTasks {
 	hookTasks := syncTasks{}
 	if !sc.skipHooks {
 		for _, obj := range sc.hooks {
@@ -679,147 +833,31 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	}
 
 	sc.log.WithValues("hookTasks", hookTasks).V(1).Info("tasks from hooks")
+	return hookTasks
+}
 
-	tasks := resourceTasks
-	tasks = append(tasks, hookTasks...)
-
-	// enrich target objects with the namespace
-	for _, task := range tasks {
-		if task.targetObj == nil {
+func (sc *syncContext) createResourceTasks() syncTasks {
+	resourceTasks := syncTasks{}
+	for k, resource := range sc.resources {
+		if !sc.containsResource(resource) {
+			sc.log.WithValues("group", k.Group, "kind", k.Kind, "name", k.Name).V(1).Info("Skipping")
 			continue
 		}
 
-		if task.targetObj.GetNamespace() == "" {
-			// If target object's namespace is empty, we set namespace in the object. We do
-			// this even though it might be a cluster-scoped resource. This prevents any
-			// possibility of the resource from unintentionally becoming created in the
-			// namespace during the `kubectl apply`
-			task.targetObj = task.targetObj.DeepCopy()
-			task.targetObj.SetNamespace(sc.namespace)
-		}
-	}
+		obj := obj(resource.Target, resource.Live)
 
-	if sc.syncNamespace != nil && sc.namespace != "" {
-		tasks = sc.autoCreateNamespace(tasks)
-	}
-
-	// enrich task with live obj
-	for _, task := range tasks {
-		if task.targetObj == nil || task.liveObj != nil {
+		// this creates garbage tasks
+		if hook.IsHook(obj) {
+			sc.log.WithValues("group", obj.GroupVersionKind().Group, "kind", obj.GetKind(), "namespace", obj.GetNamespace(), "name", obj.GetName()).V(1).Info("Skipping hook")
 			continue
 		}
-		task.liveObj = sc.liveObj(task.targetObj)
-	}
 
-	isRetryable := func(err error) bool {
-		return apierr.IsUnauthorized(err)
-	}
-
-	serverResCache := make(map[schema.GroupVersionKind]*metav1.APIResource)
-
-	// check permissions
-	for _, task := range tasks {
-
-		var serverRes *metav1.APIResource
-		var err error
-
-		if val, ok := serverResCache[task.groupVersionKind()]; ok {
-			serverRes = val
-			err = nil
-		} else {
-			err = retry.OnError(retry.DefaultRetry, isRetryable, func() error {
-				serverRes, err = kube.ServerResourceForGroupVersionKind(sc.disco, task.groupVersionKind(), "get")
-				return err
-			})
-			if serverRes != nil {
-				serverResCache[task.groupVersionKind()] = serverRes
-			}
-		}
-
-		if err != nil {
-			// Special case for custom resources: if CRD is not yet known by the K8s API server,
-			// and the CRD is part of this sync or the resource is annotated with SkipDryRunOnMissingResource=true,
-			// then skip verification during `kubectl apply --dry-run` since we expect the CRD
-			// to be created during app synchronization.
-			if apierr.IsNotFound(err) &&
-				((task.targetObj != nil && resourceutil.HasAnnotationOption(task.targetObj, common.AnnotationSyncOptions, common.SyncOptionSkipDryRunOnMissingResource)) ||
-					sc.hasCRDOfGroupKind(task.group(), task.kind())) {
-				sc.log.WithValues("task", task).V(1).Info("Skip dry-run for custom resource")
-				task.skipDryRun = true
-			} else {
-				sc.setResourceResult(task, common.ResultCodeSyncFailed, "", err.Error())
-				successful = false
-			}
-		} else {
-			if err := sc.permissionValidator(task.obj(), serverRes); err != nil {
-				sc.setResourceResult(task, common.ResultCodeSyncFailed, "", err.Error())
-				successful = false
-			}
+		for _, phase := range syncPhases(obj) {
+			resourceTasks = append(resourceTasks, &syncTask{phase: phase, targetObj: resource.Target, liveObj: resource.Live})
 		}
 	}
-
-	// for prune tasks, modify the waves for proper cleanup i.e reverse of sync wave (creation order)
-	pruneTasks := make(map[int][]*syncTask)
-	for _, task := range tasks {
-		if task.isPrune() {
-			pruneTasks[task.wave()] = append(pruneTasks[task.wave()], task)
-		}
-	}
-
-	var uniquePruneWaves []int
-	for k := range pruneTasks {
-		uniquePruneWaves = append(uniquePruneWaves, k)
-	}
-	sort.Ints(uniquePruneWaves)
-
-	// reorder waves for pruning tasks using symmetric swap on prune waves
-	n := len(uniquePruneWaves)
-	for i := 0; i < n/2; i++ {
-		// waves to swap
-		startWave := uniquePruneWaves[i]
-		endWave := uniquePruneWaves[n-1-i]
-
-		for _, task := range pruneTasks[startWave] {
-			task.waveOverride = &endWave
-		}
-
-		for _, task := range pruneTasks[endWave] {
-			task.waveOverride = &startWave
-		}
-	}
-
-	// for pruneLast tasks, modify the wave to sync phase last wave of tasks + 1
-	// to ensure proper cleanup, syncPhaseLastWave should also consider prune tasks to determine last wave
-	syncPhaseLastWave := 0
-	for _, task := range tasks {
-		if task.phase == common.SyncPhaseSync {
-			if task.wave() > syncPhaseLastWave {
-				syncPhaseLastWave = task.wave()
-			}
-		}
-	}
-	syncPhaseLastWave = syncPhaseLastWave + 1
-
-	for _, task := range tasks {
-		if task.isPrune() &&
-			(sc.pruneLast || resourceutil.HasAnnotationOption(task.liveObj, common.AnnotationSyncOptions, common.SyncOptionPruneLast)) {
-			task.waveOverride = &syncPhaseLastWave
-		}
-	}
-
-	tasks.Sort()
-
-	// finally enrich tasks with the result
-	for _, task := range tasks {
-		result, ok := sc.syncRes[task.resultKey()]
-		if ok {
-			task.syncStatus = result.Status
-			task.operationState = result.HookPhase
-			task.message = result.Message
-		}
-	}
-
-	return tasks, successful
+	sc.log.WithValues("resourceTasks", resourceTasks).V(1).Info("Tasks from managed resources")
+	return resourceTasks
 }
 
 func (sc *syncContext) autoCreateNamespace(tasks syncTasks) syncTasks {
