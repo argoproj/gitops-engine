@@ -650,7 +650,11 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 
 	serverResCache := make(map[schema.GroupVersionKind]*metav1.APIResource)
 
-	cachedServerResourceForGroupVersionKind := func(sc *syncContext, task *syncTask) (serverRes *metav1.APIResource, err error) {
+	// check permissions
+	for _, task := range tasks {
+
+		var serverRes *metav1.APIResource
+		var err error
 
 		if val, ok := serverResCache[task.groupVersionKind()]; ok {
 			serverRes = val
@@ -664,13 +668,6 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 				serverResCache[task.groupVersionKind()] = serverRes
 			}
 		}
-		return serverRes, err
-	}
-
-	// check permissions
-	for _, task := range tasks {
-
-		serverRes, err := cachedServerResourceForGroupVersionKind(sc, task)
 
 		if err != nil {
 			// Special case for custom resources: if CRD is not yet known by the K8s API server,
