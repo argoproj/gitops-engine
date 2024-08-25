@@ -155,6 +155,10 @@ func kubeCmdFactory(kubeconfig, ns string, config *rest.Config) cmdutil.Factory 
 	kubeConfigFlags.KubeConfig = &kubeconfig
 	kubeConfigFlags.WithDiscoveryBurst(config.Burst)
 	kubeConfigFlags.WithDiscoveryQPS(config.QPS)
+	kubeConfigFlags.WrapConfigFn = func(c *rest.Config) *rest.Config {
+		c.WrapTransport = config.WrapTransport
+		return c
+	}
 	matchVersionKubeConfigFlags := cmdutil.NewMatchVersionFlags(kubeConfigFlags)
 	return cmdutil.NewFactory(matchVersionKubeConfigFlags)
 }
