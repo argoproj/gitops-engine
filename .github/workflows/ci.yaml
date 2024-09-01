@@ -28,7 +28,7 @@ jobs:
         with:
           version:  v1.58.2
           args: --timeout 5m
-      - uses: codecov/codecov-action@v3.1.0
+      - uses: codecov/codecov-action@v3.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }} #required
           file: ./coverage.out
