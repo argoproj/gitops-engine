@@ -3,6 +3,7 @@ package health
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
@@ -132,6 +133,7 @@ func getAutoScalingV1HPAHealth(hpa *autoscalingv1.HorizontalPodAutoscaler) (*Hea
 }
 
 func checkConditions(conditions []hpaCondition, progressingStatus *HealthStatus) (*HealthStatus, error) {
+	healthyMessages := []string{}
 	for _, condition := range conditions {
 		if isDegraded(&condition) {
 			return &HealthStatus{
@@ -141,11 +143,12 @@ func checkConditions(conditions []hpaCondition, progressingStatus *HealthStatus)
 		}
 
 		if isHealthy(&condition) {
-			return &HealthStatus{
-				Status:  HealthStatusHealthy,
-				Message: condition.Message,
-			}, nil
+			healthyMessages = append(healthyMessages, condition.Message)
 		}
+	}
+
+	if len(conditions) == len(healthyMessages) {
+		return &HealthStatus{Status: HealthStatusHealthy, Message: strings.Join(healthyMessages, ",")}, nil
 	}
 
 	return progressingStatus, nil

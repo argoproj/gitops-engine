@@ -1,0 +1,40 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  creationTimestamp: "2022-01-17T14:22:27Z"
+  name: sample
+  uid: 0e6d855e-83ed-4ed5-b80a-461a750f14db
+spec:
+  maxReplicas: 2
+  minReplicas: 1
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: argocd-server
+  targetCPUUtilizationPercentage: 80
+status:
+  conditions:
+    - lastTransitionTime: '2024-09-05T20:20:41Z'
+      message: the HPA controller was able to get the target's current scale
+      reason: SucceededGetScale
+      status: 'True'
+      type: AbleToScale
+    - lastTransitionTime: '2024-09-05T20:20:56Z'
+      message: >-
+        the HPA was unable to compute the replica count: failed to get memory
+        utilization: unable to get metrics for resource memory: unable to fetch
+        metrics from resource metrics API: the server could not find the
+        requested resource (get pods.metrics.k8s.io)
+      reason: FailedGetResourceMetric
+      status: 'False'
+      type: ScalingActive
+    type: ScalingLimited
+  currentMetrics:
+  - resource:
+      current:
+        averageUtilization: 6
+        averageValue: 12m
+      name: cpu
+    type: Resource
+  currentReplicas: 1
+  desiredReplicas: 1
