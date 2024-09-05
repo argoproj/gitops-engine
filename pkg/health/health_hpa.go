@@ -147,7 +147,7 @@ func checkConditions(conditions []hpaCondition, progressingStatus *HealthStatus)
 		}
 	}
 
-	if len(conditions) == len(healthyMessages) {
+	if len(healthyMessages) > 0 {
 		return &HealthStatus{Status: HealthStatusHealthy, Message: strings.Join(healthyMessages, ",")}, nil
 	}
 
