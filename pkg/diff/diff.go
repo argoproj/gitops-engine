@@ -694,21 +694,33 @@ func stripTypeInformation(un *unstructured.Unstructured) *unstructured.Unstructu
 // config or last-applied. This results in a diff which we don't care about. We delete the two so
 // that the diff is more relevant.
 func removeNamespaceAnnotation(orig *unstructured.Unstructured) *unstructured.Unstructured {
-	orig = orig.DeepCopy()
 	if metadataIf, ok := orig.Object["metadata"]; ok {
 		metadata := metadataIf.(map[string]interface{})
-		delete(metadata, "namespace")
+
+		var deleteNamespace, deleteAnnotations bool
+
+		if _, ok := metadata["namespace"]; ok {
+			deleteNamespace = true
+		}
+
 		if annotationsIf, ok := metadata["annotations"]; ok {
-			shouldDelete := false
 			if annotationsIf == nil {
-				shouldDelete = true
+				deleteAnnotations = true
 			} else {
 				annotation, ok := annotationsIf.(map[string]interface{})
 				if ok && len(annotation) == 0 {
-					shouldDelete = true
+					deleteAnnotations = true
 				}
 			}
-			if shouldDelete {
+		}
+
+		// Only make a deep copy if there's something to mutate.
+		if deleteNamespace || deleteAnnotations {
+			orig = orig.DeepCopy()
+			if deleteNamespace {
+				delete(metadata, "namespace")
+			}
+			if deleteAnnotations {
 				delete(metadata, "annotations")
 			}
 		}
