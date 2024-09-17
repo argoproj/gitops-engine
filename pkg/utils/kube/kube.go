@@ -55,6 +55,11 @@ const (
 	HorizontalPodAutoscalerKind  = "HorizontalPodAutoscaler"
 )
 
+const (
+	ServiceDiscoveryGroup             = "discovery.k8s.io"
+	ServiceDiscoveryEndpointSliceKind = "EndpointSlice"
+)
+
 type ResourceInfoProvider interface {
 	IsNamespaced(gk schema.GroupKind) (bool, error)
 }
