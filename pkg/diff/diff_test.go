@@ -1150,6 +1150,28 @@ spec:
 	t.Log(requestsAfter)
 	assert.Equal(t, float64(0.2), requestsBefore["cpu"])
 	assert.Equal(t, "200m", requestsAfter["cpu"])
+
+	t.Run("from float", func(t *testing.T) {
+		// use a plain float, not float64
+		un.Object["spec"].(map[string]interface{})["containers"].([]interface{})[0].(map[string]interface{})["resources"].(map[string]interface{})["requests"].(map[string]interface{})["cpu"] = 0.2
+		newUn := remarshal(&un, applyOptions(diffOptionsForTest()))
+		requestsAfter := newUn.Object["spec"].(map[string]interface{})["containers"].([]interface{})[0].(map[string]interface{})["resources"].(map[string]interface{})["requests"].(map[string]interface{})
+		assert.Equal(t, "200m", requestsAfter["cpu"])
+	})
+
+	t.Run("from string", func(t *testing.T) {
+		un.Object["spec"].(map[string]interface{})["containers"].([]interface{})[0].(map[string]interface{})["resources"].(map[string]interface{})["requests"].(map[string]interface{})["cpu"] = "200m"
+		newUn := remarshal(&un, applyOptions(diffOptionsForTest()))
+		requestsAfter := newUn.Object["spec"].(map[string]interface{})["containers"].([]interface{})[0].(map[string]interface{})["resources"].(map[string]interface{})["requests"].(map[string]interface{})
+		assert.Equal(t, "200m", requestsAfter["cpu"])
+	})
+
+	t.Run("from invalid", func(t *testing.T) {
+		un.Object["spec"].(map[string]interface{})["containers"].([]interface{})[0].(map[string]interface{})["resources"].(map[string]interface{})["requests"].(map[string]interface{})["cpu"] = "invalid"
+		newUn := remarshal(&un, applyOptions(diffOptionsForTest()))
+		requestsAfter := newUn.Object["spec"].(map[string]interface{})["containers"].([]interface{})[0].(map[string]interface{})["resources"].(map[string]interface{})["requests"].(map[string]interface{})
+		assert.Equal(t, "invalid", requestsAfter["cpu"])
+	})
 }
 
 func ExampleDiff() {
