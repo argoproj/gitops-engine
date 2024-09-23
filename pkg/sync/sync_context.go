@@ -955,6 +955,19 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 	var message string
 	shouldReplace := sc.replace || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplace)
 	force := sc.force || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionForce)
+	// Default to foreground deletion, use sync context policy, then use object-level config
+	prunePropagationPolicy := metav1.DeletePropagationForeground
+	if sc.prunePropagationPolicy != nil {
+		prunePropagationPolicy = *sc.prunePropagationPolicy
+	}
+	switch {
+	case resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyBackground):
+		prunePropagationPolicy = metav1.DeletePropagationBackground
+	case resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyForeground):
+		prunePropagationPolicy = metav1.DeletePropagationForeground
+	case resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyOrphan):
+		prunePropagationPolicy = metav1.DeletePropagationOrphan
+	}
 	// if it is a dry run, disable server side apply, as the goal is to validate only the
 	// yaml correctness of the rendered manifests.
 	// running dry-run in server mode breaks the auto create namespace feature
@@ -975,13 +988,13 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 					message = fmt.Sprintf("error when updating: %v", err.Error())
 				}
 			} else {
-				message, err = sc.resourceOps.ReplaceResource(context.TODO(), t.targetObj, dryRunStrategy, force)
+				message, err = sc.resourceOps.ReplaceResource(context.TODO(), t.targetObj, dryRunStrategy, force, prunePropagationPolicy)
 			}
 		} else {
 			message, err = sc.resourceOps.CreateResource(context.TODO(), t.targetObj, dryRunStrategy, validate)
 		}
 	} else {
-		message, err = sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager, false)
+		message, err = sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager, false, prunePropagationPolicy)
 	}
 	if err != nil {
 		return common.ResultCodeSyncFailed, err.Error()
@@ -1008,7 +1021,21 @@ func (sc *syncContext) pruneObject(liveObj *unstructured.Unstructured, prune, dr
 			// Skip deletion if object is already marked for deletion, so we don't cause a resource update hotloop
 			deletionTimestamp := liveObj.GetDeletionTimestamp()
 			if deletionTimestamp == nil || deletionTimestamp.IsZero() {
-				err := sc.kubectl.DeleteResource(context.TODO(), sc.config, liveObj.GroupVersionKind(), liveObj.GetName(), liveObj.GetNamespace(), sc.getDeleteOptions())
+				propagationPolicy := metav1.DeletePropagationForeground
+				deleteOptions := sc.getDeleteOptions()
+				if deleteOptions.PropagationPolicy != nil {
+					propagationPolicy = *deleteOptions.PropagationPolicy
+				}
+				switch {
+				case resourceutil.HasAnnotationOption(liveObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyBackground):
+					propagationPolicy = metav1.DeletePropagationBackground
+				case resourceutil.HasAnnotationOption(liveObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyForeground):
+					propagationPolicy = metav1.DeletePropagationForeground
+				case resourceutil.HasAnnotationOption(liveObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyOrphan):
+					propagationPolicy = metav1.DeletePropagationOrphan
+				}
+				deleteOptions.PropagationPolicy = &propagationPolicy
+				err := sc.kubectl.DeleteResource(context.TODO(), sc.config, liveObj.GroupVersionKind(), liveObj.GetName(), liveObj.GetNamespace(), deleteOptions)
 				if err != nil {
 					return common.ResultCodeSyncFailed, err.Error()
 				}
