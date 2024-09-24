@@ -1055,6 +1055,20 @@ func TestHideSecretAnnotations(t *testing.T) {
 			targetNil: true,
 		},
 		{
+			name:       "special case: hide last-applied-config annotation",
+			hideAnnots: map[string]bool{"kubectl.kubernetes.io/last-applied-configuration": true},
+			annots: map[string]interface{}{
+				"token/value": replacement1,
+				"app":         "test",
+				"kubectl.kubernetes.io/last-applied-configuration": `{"apiVersion":"v1","kind":"Secret","metadata":{"annotations":{"app":"test","token/value":"secret","key":"secret-key"},"labels":{"app.kubernetes.io/instance":"test"},"name":"my-secret","namespace":"default"},"type":"Opaque"}`,
+			},
+			expectedAnnots: map[string]interface{}{
+				"app": "test",
+				"kubectl.kubernetes.io/last-applied-configuration": replacement1,
+			},
+			targetNil: true,
+		},
+		{
 			name:           "hide annotations for malformed annotations",
 			hideAnnots:     map[string]bool{"token/value": true, "key": true},
 			annots:         map[string]interface{}{"token/value": 0, "key": "secret", "app": true},

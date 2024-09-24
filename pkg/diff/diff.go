@@ -35,6 +35,7 @@ import (
 const (
 	couldNotMarshalErrMsg       = "Could not unmarshal to object of type %s: %v"
 	AnnotationLastAppliedConfig = "kubectl.kubernetes.io/last-applied-configuration"
+	replacement                 = "++++++++"
 )
 
 // Holds diffing result of two resources
@@ -973,9 +974,9 @@ func CreateTwoWayMergePatch(orig, new, dataStruct interface{}) ([]byte, bool, er
 // target, live and last applied config values. E.g. if all three are equal the values would be replaced with same number of plus(+). If all are different then number of plus(+)
 // in replacement should be different.
 func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstructured, hideAnnotations map[string]bool) (*unstructured.Unstructured, *unstructured.Unstructured, error) {
-	var orig *unstructured.Unstructured
+	var liveLastAppliedAnnotation *unstructured.Unstructured
 	if live != nil {
-		orig, _ = GetLastAppliedConfigAnnotation(live)
+		liveLastAppliedAnnotation, _ = GetLastAppliedConfigAnnotation(live)
 		live = live.DeepCopy()
 	}
 	if target != nil {
@@ -983,7 +984,7 @@ func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstru
 	}
 
 	keys := map[string]bool{}
-	for _, obj := range []*unstructured.Unstructured{target, live, orig} {
+	for _, obj := range []*unstructured.Unstructured{target, live, liveLastAppliedAnnotation} {
 		if obj == nil {
 			continue
 		}
@@ -997,39 +998,44 @@ func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstru
 
 	var err error
 	// hide data
-	target, live, orig, err = hide(target, live, orig, keys, "data")
+	target, live, liveLastAppliedAnnotation, err = hide(target, live, liveLastAppliedAnnotation, keys, "data")
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// hide annotations
-	target, live, orig, err = hide(target, live, orig, hideAnnotations, "metadata", "annotations")
+	target, live, liveLastAppliedAnnotation, err = hide(target, live, liveLastAppliedAnnotation, hideAnnotations, "metadata", "annotations")
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// hide last-applied-config annotation
-	if live != nil && orig != nil {
+	if live != nil && liveLastAppliedAnnotation != nil {
 		annotations := live.GetAnnotations()
 		if annotations == nil {
 			annotations = make(map[string]string)
 		}
-		lastAppliedData, err := json.Marshal(orig)
-		if err != nil {
-			return nil, nil, fmt.Errorf("error marshaling json: %s", err)
+		// special case: hide "kubectl.kubernetes.io/last-applied-configuration" annotation
+		if _, ok := hideAnnotations[corev1.LastAppliedConfigAnnotation]; ok {
+			annotations[corev1.LastAppliedConfigAnnotation] = replacement
+		} else {
+			lastAppliedData, err := json.Marshal(liveLastAppliedAnnotation)
+			if err != nil {
+				return nil, nil, fmt.Errorf("error marshaling json: %s", err)
+			}
+			annotations[corev1.LastAppliedConfigAnnotation] = string(lastAppliedData)
 		}
-		annotations[corev1.LastAppliedConfigAnnotation] = string(lastAppliedData)
 		live.SetAnnotations(annotations)
 	}
 	return target, live, nil
 }
 
-func hide(target, live, orig *unstructured.Unstructured, keys map[string]bool, fields ...string) (*unstructured.Unstructured, *unstructured.Unstructured, *unstructured.Unstructured, error) {
+func hide(target, live, liveLastAppliedAnnotation *unstructured.Unstructured, keys map[string]bool, fields ...string) (*unstructured.Unstructured, *unstructured.Unstructured, *unstructured.Unstructured, error) {
 	for k := range keys {
 		// we use "+" rather than the more common "*"
-		nextReplacement := "++++++++"
+		nextReplacement := replacement
 		valToReplacement := make(map[string]string)
-		for _, obj := range []*unstructured.Unstructured{target, live, orig} {
+		for _, obj := range []*unstructured.Unstructured{target, live, liveLastAppliedAnnotation} {
 			var data map[string]interface{}
 			if obj != nil {
 				// handles an edge case when secret data has nil value
@@ -1065,7 +1071,7 @@ func hide(target, live, orig *unstructured.Unstructured, keys map[string]bool, f
 			}
 		}
 	}
-	return target, live, orig, nil
+	return target, live, liveLastAppliedAnnotation, nil
 }
 
 func toString(val interface{}) string {
