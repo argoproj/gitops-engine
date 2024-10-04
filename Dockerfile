@@ -12,5 +12,10 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o /dist/gitops ./agent
 
 
-FROM alpine/git:v2.24.3
+FROM alpine/git:v2.36.3
+
+RUN apk upgrade -U -a \
+    libcurl \
+    && rm -rf /var/cache/apk/*
+
 COPY --from=builder /dist/gitops /usr/local/bin/gitops
