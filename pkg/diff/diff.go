@@ -997,19 +997,16 @@ func HideSecretData(target *unstructured.Unstructured, live *unstructured.Unstru
 	}
 
 	var err error
-	// hide data
 	target, live, liveLastAppliedAnnotation, err = hide(target, live, liveLastAppliedAnnotation, keys, "data")
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// hide annotations
 	target, live, liveLastAppliedAnnotation, err = hide(target, live, liveLastAppliedAnnotation, hideAnnotations, "metadata", "annotations")
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// hide last-applied-config annotation
 	if live != nil && liveLastAppliedAnnotation != nil {
 		annotations := live.GetAnnotations()
 		if annotations == nil {
@@ -1041,8 +1038,10 @@ func hide(target, live, liveLastAppliedAnnotation *unstructured.Unstructured, ke
 				// handles an edge case when secret data has nil value
 				// https://github.com/argoproj/argo-cd/issues/5584
 				dataValue, ok, _ := unstructured.NestedFieldCopy(obj.Object, fields...)
-				if !ok || dataValue == nil {
-					continue
+				if ok {
+					if dataValue == nil {
+						continue
+					}
 				}
 				var err error
 				data, _, err = unstructured.NestedMap(obj.Object, fields...)
