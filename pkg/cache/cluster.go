@@ -34,6 +34,7 @@ import (
 	"k8s.io/klog/v2/textlogger"
 	"k8s.io/kubectl/pkg/util/openapi"
 
+	"github.com/argoproj/gitops-engine/pkg/utils/io"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 	"github.com/argoproj/gitops-engine/pkg/utils/tracing"
 )
@@ -160,8 +161,9 @@ func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCa
 		nsIndex:            make(map[string]map[kube.ResourceKey]*Resource),
 		config:             config,
 		kubectl: &kube.KubectlCmd{
-			Log:    log,
-			Tracer: tracing.NopTracer{},
+			Log:     log,
+			Tracer:  tracing.NopTracer{},
+			TmpPath: io.TempPathUseDevShmIfAvailable(),
 		},
 		syncStatus: clusterCacheSync{
 			resyncTimeout: defaultClusterResyncTimeout,
