@@ -75,7 +75,11 @@ var (
 )
 
 func newCluster(t testing.TB, objs ...runtime.Object) *clusterCache {
-	cache := newClusterWithOptions(t, []UpdateSettingsFunc{}, objs...)
+	var opts []UpdateSettingsFunc
+	opts = append(opts, func(c *clusterCache) {
+		c.eventProcessingInterval = 1 * time.Millisecond
+	})
+	cache := newClusterWithOptions(t, opts, objs...)
 
 	t.Cleanup(func() {
 		cache.Invalidate()
@@ -205,34 +209,15 @@ func TestStatefulSetOwnershipInferred(t *testing.T) {
 			TypeMeta:   metav1.TypeMeta{Kind: kube.PersistentVolumeClaimKind},
 			ObjectMeta: metav1.ObjectMeta{Name: "www1-web-0", Namespace: "default"},
 		})
+		cluster.recordEvent(watch.Added, pvc)
 
-		cluster.processEvent(watch.Added, pvc)
+		require.Eventually(t, func() bool {
+			cluster.lock.Lock()
+			defer cluster.lock.Unlock()
 
-		cluster.lock.Lock()
-		defer cluster.lock.Unlock()
-
-		refs := cluster.resources[kube.GetResourceKey(pvc)].OwnerRefs
-
-		assert.Len(t, refs, 0)
-	})
-
-	t.Run("STSTemplateNameNotMatching", func(t *testing.T) {
-		cluster := newCluster(t, sts)
-		err := cluster.EnsureSynced()
-		require.NoError(t, err)
-
-		pvc := mustToUnstructured(&v1.PersistentVolumeClaim{
-			TypeMeta:   metav1.TypeMeta{Kind: kube.PersistentVolumeClaimKind},
-			ObjectMeta: metav1.ObjectMeta{Name: "www1-web-0", Namespace: "default"},
-		})
-		cluster.processEvent(watch.Added, pvc)
-
-		cluster.lock.Lock()
-		defer cluster.lock.Unlock()
-
-		refs := cluster.resources[kube.GetResourceKey(pvc)].OwnerRefs
-
-		assert.Len(t, refs, 0)
+			refs := cluster.resources[kube.GetResourceKey(pvc)].OwnerRefs
+			return len(refs) == 0
+		}, 5*time.Second, 10*time.Millisecond, "Expected PVC to not have owner reference")
 	})
 
 	t.Run("MatchingSTSExists", func(t *testing.T) {
@@ -244,14 +229,15 @@ func TestStatefulSetOwnershipInferred(t *testing.T) {
 			TypeMeta:   metav1.TypeMeta{Kind: kube.PersistentVolumeClaimKind},
 			ObjectMeta: metav1.ObjectMeta{Name: "www-web-0", Namespace: "default"},
 		})
-		cluster.processEvent(watch.Added, pvc)
+		cluster.recordEvent(watch.Added, pvc)
 
-		cluster.lock.Lock()
-		defer cluster.lock.Unlock()
+		require.Eventually(t, func() bool {
+			cluster.lock.Lock()
+			defer cluster.lock.Unlock()
 
-		refs := cluster.resources[kube.GetResourceKey(pvc)].OwnerRefs
-
-		assert.ElementsMatch(t, refs, []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: kube.StatefulSetKind, Name: "web", UID: "123"}})
+			refs := cluster.resources[kube.GetResourceKey(pvc)].OwnerRefs
+			return assert.ElementsMatch(t, refs, []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: kube.StatefulSetKind, Name: "web", UID: "123"}})
+		}, 5*time.Second, 10*time.Millisecond, "Expected PVC to have owner reference")
 	})
 }
 
@@ -596,10 +582,12 @@ func TestChildDeletedEvent(t *testing.T) {
 	err := cluster.EnsureSynced()
 	require.NoError(t, err)
 
-	cluster.processEvent(watch.Deleted, mustToUnstructured(testPod1()))
+	cluster.recordEvent(watch.Deleted, mustToUnstructured(testPod1()))
 
-	rsChildren := getChildren(cluster, mustToUnstructured(testRS()))
-	assert.Equal(t, []*Resource{}, rsChildren)
+	require.Eventually(t, func() bool {
+		rsChildren := getChildren(cluster, mustToUnstructured(testRS()))
+		return assert.Equal(t, []*Resource{}, rsChildren)
+	}, 5*time.Second, 10*time.Millisecond, "Expected no children for ReplicaSet")
 }
 
 func TestProcessNewChildEvent(t *testing.T) {
@@ -620,46 +608,49 @@ func TestProcessNewChildEvent(t *testing.T) {
       uid: "2"
     resourceVersion: "123"`)
 
-	cluster.processEvent(watch.Added, newPod)
+	cluster.recordEvent(watch.Added, newPod)
 
-	rsChildren := getChildren(cluster, mustToUnstructured(testRS()))
-	sort.Slice(rsChildren, func(i, j int) bool {
-		return strings.Compare(rsChildren[i].Ref.Name, rsChildren[j].Ref.Name) < 0
-	})
-	assert.Equal(t, []*Resource{{
-		Ref: corev1.ObjectReference{
-			Kind:       "Pod",
-			Namespace:  "default",
-			Name:       "helm-guestbook-pod-1",
-			APIVersion: "v1",
-			UID:        "1",
-		},
-		OwnerRefs: []metav1.OwnerReference{{
-			APIVersion: "apps/v1",
-			Kind:       "ReplicaSet",
-			Name:       "helm-guestbook-rs",
-			UID:        "2",
-		}},
-		ResourceVersion: "123",
-		CreationTimestamp: &metav1.Time{
-			Time: testCreationTime.Local(),
-		},
-	}, {
-		Ref: corev1.ObjectReference{
-			Kind:       "Pod",
-			Namespace:  "default",
-			Name:       "helm-guestbook-pod-1-new",
-			APIVersion: "v1",
-			UID:        "5",
-		},
-		OwnerRefs: []metav1.OwnerReference{{
-			APIVersion: "apps/v1",
-			Kind:       "ReplicaSet",
-			Name:       "helm-guestbook-rs",
-			UID:        "2",
-		}},
-		ResourceVersion: "123",
-	}}, rsChildren)
+	require.Eventually(t, func() bool {
+		rsChildren := getChildren(cluster, mustToUnstructured(testRS()))
+		sort.Slice(rsChildren, func(i, j int) bool {
+			return strings.Compare(rsChildren[i].Ref.Name, rsChildren[j].Ref.Name) < 0
+		})
+		return assert.Equal(t, []*Resource{{
+			Ref: corev1.ObjectReference{
+				Kind:       "Pod",
+				Namespace:  "default",
+				Name:       "helm-guestbook-pod-1",
+				APIVersion: "v1",
+				UID:        "1",
+			},
+			OwnerRefs: []metav1.OwnerReference{{
+				APIVersion: "apps/v1",
+				Kind:       "ReplicaSet",
+				Name:       "helm-guestbook-rs",
+				UID:        "2",
+			}},
+			ResourceVersion: "123",
+			CreationTimestamp: &metav1.Time{
+				Time: testCreationTime.Local(),
+			},
+		}, {
+			Ref: corev1.ObjectReference{
+				Kind:       "Pod",
+				Namespace:  "default",
+				Name:       "helm-guestbook-pod-1-new",
+				APIVersion: "v1",
+				UID:        "5",
+			},
+			OwnerRefs: []metav1.OwnerReference{{
+				APIVersion: "apps/v1",
+				Kind:       "ReplicaSet",
+				Name:       "helm-guestbook-rs",
+				UID:        "2",
+			}},
+			ResourceVersion: "123",
+		}}, rsChildren)
+	}, 5*time.Second, 10*time.Millisecond, "Expected new child to be added to ReplicaSet")
+
 }
 
 func TestWatchCacheUpdated(t *testing.T) {
