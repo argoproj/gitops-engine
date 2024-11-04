@@ -27,6 +27,7 @@ import (
 	"k8s.io/client-go/rest"
 	testcore "k8s.io/client-go/testing"
 	"k8s.io/klog/v2/textlogger"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/argoproj/gitops-engine/pkg/diff"
 	"github.com/argoproj/gitops-engine/pkg/health"
@@ -102,7 +103,7 @@ func TestSyncValidate(t *testing.T) {
 
 	// kubectl := syncCtx.kubectl.(*kubetest.MockKubectlCmd)
 	resourceOps, _ := syncCtx.resourceOps.(*kubetest.MockResourceOps)
-	assert.False(t, resourceOps.GetLastValidate())
+	assert.False(t, resourceOps.GetLastValidate(kube.GetResourceKey(pod)))
 }
 
 func TestSyncNotPermittedNamespace(t *testing.T) {
@@ -743,7 +744,7 @@ func TestSyncOptionValidate(t *testing.T) {
 
 			// kubectl, _ := syncCtx.kubectl.(*kubetest.MockKubectlCmd)
 			resourceOps, _ := syncCtx.resourceOps.(*kubetest.MockResourceOps)
-			assert.Equal(t, tt.want, resourceOps.GetLastValidate())
+			assert.Equal(t, tt.want, resourceOps.GetLastValidate(kube.GetResourceKey(pod)))
 		})
 	}
 }
@@ -834,8 +835,8 @@ func TestSync_ServerSideApply(t *testing.T) {
 			// kubectl, _ := syncCtx.kubectl.(*kubetest.MockKubectlCmd)
 			resourceOps, _ := syncCtx.resourceOps.(*kubetest.MockResourceOps)
 			assert.Equal(t, tc.commandUsed, resourceOps.GetLastResourceCommand(kube.GetResourceKey(tc.target)))
-			assert.Equal(t, tc.serverSideApply, resourceOps.GetLastServerSideApply())
-			assert.Equal(t, tc.manager, resourceOps.GetLastServerSideApplyManager())
+			assert.Equal(t, tc.serverSideApply, resourceOps.GetLastServerSideApply(kube.GetResourceKey(tc.target)))
+			assert.Equal(t, tc.manager, resourceOps.GetLastServerSideApplyManager(kube.GetResourceKey(tc.target)))
 		})
 	}
 }
@@ -880,8 +881,17 @@ func TestSync_Force(t *testing.T) {
 			syncCtx.Sync()
 
 			resourceOps, _ := syncCtx.resourceOps.(*kubetest.MockResourceOps)
+			registeredCommands := resourceOps.RegisteredCommands(kube.GetResourceKey(tc.target))
+			assert.Len(t, registeredCommands, 2)
+			dryRunCommand := registeredCommands[0]
+			command := registeredCommands[1]
 			assert.Equal(t, tc.commandUsed, resourceOps.GetLastResourceCommand(kube.GetResourceKey(tc.target)))
-			assert.Equal(t, tc.force, resourceOps.GetLastForce())
+			
+			assert.Equal(t, false, dryRunCommand.Force)
+			assert.Equal(t, cmdutil.DryRunClient, dryRunCommand.DryRunStrategy)
+
+			assert.Equal(t, tc.force, command.Force)
+			assert.Equal(t, cmdutil.DryRunNone, command.DryRunStrategy)
 		})
 	}
 }

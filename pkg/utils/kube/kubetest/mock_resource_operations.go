@@ -13,16 +13,21 @@ import (
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 )
 
+type RegisteredCommand struct {
+	Command                string
+	Validate               bool
+	ServerSideApply        bool
+	ServerSideApplyManager string
+	Force                  bool
+	DryRunStrategy         cmdutil.DryRunStrategy
+}
+
 type MockResourceOps struct {
 	Commands      map[string]KubectlOutput
 	Events        chan watch.Event
 	DynamicClient dynamic.Interface
 
-	lastCommandPerResource map[kube.ResourceKey]string
-	lastValidate           bool
-	serverSideApply        bool
-	serverSideApplyManager string
-	lastForce              bool
+	commandsPerResource map[kube.ResourceKey][]RegisteredCommand
 
 	recordLock sync.RWMutex
 
@@ -35,82 +40,59 @@ func (r *MockResourceOps) WithGetResourceFunc(getResourcefunc func(context.Conte
 	return r
 }
 
-func (r *MockResourceOps) SetLastValidate(validate bool) {
-	r.recordLock.Lock()
-	r.lastValidate = validate
-	r.recordLock.Unlock()
-}
-
-func (r *MockResourceOps) GetLastValidate() bool {
+func (r *MockResourceOps) GetLastValidate(key kube.ResourceKey) bool {
 	r.recordLock.RLock()
-	validate := r.lastValidate
+	validate := r.lastCommand(key).Validate
 	r.recordLock.RUnlock()
 	return validate
 }
 
-func (r *MockResourceOps) SetLastServerSideApply(serverSideApply bool) {
+func (r *MockResourceOps) GetLastServerSideApplyManager(key kube.ResourceKey) string {
 	r.recordLock.Lock()
-	r.serverSideApply = serverSideApply
-	r.recordLock.Unlock()
-}
-
-func (r *MockResourceOps) GetLastServerSideApplyManager() string {
-	r.recordLock.Lock()
-	manager := r.serverSideApplyManager
+	manager := r.lastCommand(key).ServerSideApplyManager
 	r.recordLock.Unlock()
 	return manager
 }
 
-func (r *MockResourceOps) GetLastServerSideApply() bool {
+func (r *MockResourceOps) GetLastServerSideApply(key kube.ResourceKey) bool {
 	r.recordLock.RLock()
-	serverSideApply := r.serverSideApply
+	serverSideApply := r.lastCommand(key).ServerSideApply
 	r.recordLock.RUnlock()
 	return serverSideApply
 }
 
-func (r *MockResourceOps) SetLastServerSideApplyManager(manager string) {
-	r.recordLock.Lock()
-	r.serverSideApplyManager = manager
-	r.recordLock.Unlock()
-}
-
-func (r *MockResourceOps) SetLastForce(force bool) {
-	r.recordLock.Lock()
-	r.lastForce = force
-	r.recordLock.Unlock()
-}
-
-func (r *MockResourceOps) GetLastForce() bool {
+func (r *MockResourceOps) GetLastForce(key kube.ResourceKey) bool {
 	r.recordLock.RLock()
-	force := r.lastForce
+	force := r.lastCommand(key).Force
 	r.recordLock.RUnlock()
 	return force
-}
-
-func (r *MockResourceOps) SetLastResourceCommand(key kube.ResourceKey, cmd string) {
-	r.recordLock.Lock()
-	if r.lastCommandPerResource == nil {
-		r.lastCommandPerResource = map[kube.ResourceKey]string{}
-	}
-	r.lastCommandPerResource[key] = cmd
-	r.recordLock.Unlock()
 }
 
 func (r *MockResourceOps) GetLastResourceCommand(key kube.ResourceKey) string {
 	r.recordLock.Lock()
 	defer r.recordLock.Unlock()
-	if r.lastCommandPerResource == nil {
+	if r.commandsPerResource == nil {
 		return ""
 	}
-	return r.lastCommandPerResource[key]
+	return r.lastCommand(key).Command
+}
+
+func (r *MockResourceOps) RegisteredCommands(key kube.ResourceKey) []RegisteredCommand {
+	r.recordLock.RLock()
+	registeredCommands := r.commandsPerResource[key]
+	r.recordLock.RUnlock()
+	return registeredCommands
 }
 
 func (r *MockResourceOps) ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string, serverSideDiff bool) (string, error) {
-	r.SetLastValidate(validate)
-	r.SetLastServerSideApply(serverSideApply)
-	r.SetLastServerSideApplyManager(manager)
-	r.SetLastForce(force)
-	r.SetLastResourceCommand(kube.GetResourceKey(obj), "apply")
+	r.registerCommand(kube.GetResourceKey(obj), RegisteredCommand{
+		Command: "apply",
+		Validate: validate,
+		ServerSideApply: serverSideApply,
+		ServerSideApplyManager: manager,
+		Force: force,
+		DryRunStrategy: dryRunStrategy,
+	})
 	command, ok := r.Commands[obj.GetName()]
 	if !ok {
 		return "", nil
@@ -120,9 +102,12 @@ func (r *MockResourceOps) ApplyResource(ctx context.Context, obj *unstructured.U
 }
 
 func (r *MockResourceOps) ReplaceResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force bool) (string, error) {
-	r.SetLastForce(force)
+	r.registerCommand(kube.GetResourceKey(obj), RegisteredCommand{
+		Command: "replace",
+		Force: force,
+		DryRunStrategy: dryRunStrategy,
+	})
 	command, ok := r.Commands[obj.GetName()]
-	r.SetLastResourceCommand(kube.GetResourceKey(obj), "replace")
 	if !ok {
 		return "", nil
 	}
@@ -131,7 +116,10 @@ func (r *MockResourceOps) ReplaceResource(ctx context.Context, obj *unstructured
 }
 
 func (r *MockResourceOps) UpdateResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy) (*unstructured.Unstructured, error) {
-	r.SetLastResourceCommand(kube.GetResourceKey(obj), "update")
+	r.registerCommand(kube.GetResourceKey(obj), RegisteredCommand{
+		Command: "update",
+		DryRunStrategy: dryRunStrategy,
+	})
 	command, ok := r.Commands[obj.GetName()]
 	if !ok {
 		return obj, nil
@@ -141,13 +129,29 @@ func (r *MockResourceOps) UpdateResource(ctx context.Context, obj *unstructured.
 }
 
 func (r *MockResourceOps) CreateResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, validate bool) (string, error) {
-
-	r.SetLastResourceCommand(kube.GetResourceKey(obj), "create")
+	r.registerCommand(kube.GetResourceKey(obj), RegisteredCommand{
+		Command: "create",
+		Validate: validate,
+		DryRunStrategy: dryRunStrategy,
+	})
 	command, ok := r.Commands[obj.GetName()]
 	if !ok {
 		return "", nil
 	}
 	return command.Output, command.Err
+}
+
+func (r *MockResourceOps) registerCommand(key kube.ResourceKey, cmd RegisteredCommand) {
+	r.recordLock.Lock()
+	if r.commandsPerResource == nil {
+		r.commandsPerResource = map[kube.ResourceKey][]RegisteredCommand{}
+	}
+	r.commandsPerResource[key] = append(r.commandsPerResource[key], cmd)
+	r.recordLock.Unlock()
+}
+
+func (r *MockResourceOps) lastCommand(key kube.ResourceKey) RegisteredCommand {
+	return r.commandsPerResource[key][len(r.commandsPerResource[key])-1]
 }
 
 /*func (r *MockResourceOps) ConvertToVersion(obj *unstructured.Unstructured, group, version string) (*unstructured.Unstructured, error) {

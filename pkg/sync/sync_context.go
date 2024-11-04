@@ -962,7 +962,8 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 	var err error
 	var message string
 	shouldReplace := sc.replace || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplace)
-	force := sc.force || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionForce)
+	// force is not required when running dry-run in client mode
+	shouldForce := !dryRun && (sc.force || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionForce))
 	// if it is a dry run, disable server side apply, as the goal is to validate only the
 	// yaml correctness of the rendered manifests.
 	// running dry-run in server mode breaks the auto create namespace feature
@@ -983,13 +984,13 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 					message = fmt.Sprintf("error when updating: %v", err.Error())
 				}
 			} else {
-				message, err = sc.resourceOps.ReplaceResource(context.TODO(), t.targetObj, dryRunStrategy, force)
+				message, err = sc.resourceOps.ReplaceResource(context.TODO(), t.targetObj, dryRunStrategy, shouldForce)
 			}
 		} else {
 			message, err = sc.resourceOps.CreateResource(context.TODO(), t.targetObj, dryRunStrategy, validate)
 		}
 	} else {
-		message, err = sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager, false)
+		message, err = sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, shouldForce, validate, serverSideApply, sc.serverSideApplyManager, false)
 	}
 	if err != nil {
 		return common.ResultCodeSyncFailed, err.Error()
