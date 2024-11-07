@@ -32,7 +32,7 @@ const (
 	SyncOptionForce = "Force=true"
 	// Sync option that enables use of --server-side flag instead of client-side
 	SyncOptionServerSideApply = "ServerSideApply=true"
-	// Sync option that enables use of --server-side flag instead of client-side
+	// Sync option that disables use of --server-side flag instead of client-side
 	SyncOptionDisableServerSideApply = "ServerSideApply=false"
 	// Sync option that disables resource deletion
 	SyncOptionDisableDeletion = "Delete=false"
