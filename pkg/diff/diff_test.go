@@ -28,6 +28,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/managedfields"
 	"k8s.io/klog/v2/textlogger"
 	openapiproto "k8s.io/kube-openapi/pkg/util/proto"
+	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
+	"sigs.k8s.io/structured-merge-diff/v4/value"
 	"sigs.k8s.io/yaml"
 )
 
@@ -933,6 +935,31 @@ func TestServerSideDiff(t *testing.T) {
 		assert.Empty(t, liveSVC.Annotations[AnnotationLastAppliedConfig])
 		assert.Empty(t, predictedSVC.Labels["event"])
 	})
+
+	t.Run("will test removing some field with undoing changes done by webhook", func(t *testing.T) {
+		// given
+		t.Parallel()
+		liveState := StrToUnstructured(testdata.Deployment2LiveYAML)
+		desiredState := StrToUnstructured(testdata.Deployment2ConfigYAML)
+		opts := buildOpts(testdata.Deployment2PredictedLiveJSONSSD)
+
+		// when
+		result, err := serverSideDiff(desiredState, liveState, opts...)
+
+		// then
+		require.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.True(t, result.Modified)
+		predictedDeploy := YamlToDeploy(t, result.PredictedLive)
+		liveDeploy := YamlToDeploy(t, result.NormalizedLive)
+		assert.Len(t, predictedDeploy.Spec.Template.Spec.Containers, 1)
+		assert.Len(t, liveDeploy.Spec.Template.Spec.Containers, 1)
+		assert.Equal(t, "500m", predictedDeploy.Spec.Template.Spec.Containers[0].Resources.Requests.Cpu().String())
+		assert.Equal(t, "512Mi", predictedDeploy.Spec.Template.Spec.Containers[0].Resources.Requests.Memory().String())
+		assert.Equal(t, "500m", liveDeploy.Spec.Template.Spec.Containers[0].Resources.Requests.Cpu().String())
+		assert.Equal(t, "512Mi", liveDeploy.Spec.Template.Spec.Containers[0].Resources.Requests.Memory().String())
+	})
+
 	t.Run("will include mutation webhook modifications", func(t *testing.T) {
 		// given
 		t.Parallel()
@@ -1317,6 +1344,73 @@ spec:
 			assert.Equal(t, tc.expectedCPU, requestsAfter["cpu"])
 		})
 	}
+}
+
+func TestAppendKeyFieldsToRhs(t *testing.T) {
+	// Paths for the key field "name", simulating a key field with no default value.
+	lhsPath1, err := fieldpath.MakePath(
+		"spec",
+		"containers",
+		&value.FieldList{value.Field{Name: "name", Value: value.NewValueInterface("test1")}},
+		"name",
+	)
+	assert.NoError(t, err)
+	lhsPath2, err := fieldpath.MakePath(
+		"spec",
+		"containers",
+		&value.FieldList{value.Field{Name: "name", Value: value.NewValueInterface("test2")}},
+		"name",
+	)
+	assert.NoError(t, err)
+	lhs := fieldpath.NewSet(lhsPath1, lhsPath2)
+
+	rhsPath1, err := fieldpath.MakePath(
+		"spec",
+		"containers",
+		&value.FieldList{value.Field{Name: "name", Value: value.NewValueInterface("test1")}},
+		"resources",
+	)
+	assert.NoError(t, err)
+	// Has some key fields which are assumed to have default values like "protocol"
+	rhsPath2, err := fieldpath.MakePath(
+		"spec",
+		"containers",
+		&value.FieldList{value.Field{Name: "name", Value: value.NewValueInterface("test2")}},
+		"ports",
+		&value.FieldList{
+			value.Field{Name: "containerPort", Value: value.NewValueInterface(8080)},
+			value.Field{Name: "protocol", Value: value.NewValueInterface("TCP")},
+		},
+		"containerPort",
+	)
+	assert.NoError(t, err)
+
+	rhs := fieldpath.NewSet(rhsPath1, rhsPath2)
+
+	appendKeyFieldsToRhs(lhs, rhs)
+
+	assert.Equal(t, rhs.Size(), 4)
+	assert.True(t, rhs.Has(rhsPath1))
+	assert.True(t, rhs.Has(rhsPath2))
+
+	// The paths for the field "name" should be added, but not "protocol".
+	rhsPath3, err := fieldpath.MakePath(
+		"spec",
+		"containers",
+		&value.FieldList{value.Field{Name: "name", Value: value.NewValueInterface("test1")}},
+		"name",
+	)
+	assert.NoError(t, err)
+	rhsPath4, err := fieldpath.MakePath(
+		"spec",
+		"containers",
+		&value.FieldList{value.Field{Name: "name", Value: value.NewValueInterface("test2")}},
+		"name",
+	)
+	assert.NoError(t, err)
+
+	assert.True(t, rhs.Has(rhsPath3))
+	assert.True(t, rhs.Has(rhsPath4))
 }
 
 func ExampleDiff() {
