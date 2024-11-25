@@ -196,7 +196,7 @@ spec:
 	require.NoError(t, err)
 
 	images := GetResourceImages(&deployment)
-	assert.Equal(t, expected, images)
+	require.Equal(t, expected, images)
 }
 
 func TestGetResourceImagesForPod(t *testing.T) {
@@ -224,7 +224,7 @@ spec:
 	require.NoError(t, err)
 
 	images := GetResourceImages(&pod)
-	assert.Equal(t, expected, images)
+	require.Equal(t, expected, images)
 }
 
 func TestSplitYAML_SingleObject(t *testing.T) {
