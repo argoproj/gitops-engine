@@ -404,6 +404,34 @@ func GetDeploymentReplicas(u *unstructured.Unstructured) *int64 {
 	return &val
 }
 
+func GetResourceImages(u *unstructured.Unstructured) []string {
+	var images []string
+
+	// Extract containers for resources like pods, without template
+	containers, found, err := unstructured.NestedSlice(u.Object, "spec", "containers")
+	if !found || err != nil {
+		// Extract containers for other resources that have template
+		containers, found, err = unstructured.NestedSlice(u.Object, "spec", "template", "spec", "containers")
+		if !found || err != nil {
+			return nil
+		}
+	}
+
+	for _, container := range containers {
+		containerMap, ok := container.(map[string]interface{})
+		if !ok {
+			return nil
+		}
+		image, found, err := unstructured.NestedString(containerMap, "image")
+		if !found || err != nil {
+			continue
+		}
+		images = append(images, image)
+	}
+
+	return images
+}
+
 // RetryUntilSucceed keep retrying given action with specified interval until action succeed or specified context is done.
 func RetryUntilSucceed(ctx context.Context, interval time.Duration, desc string, log logr.Logger, action func() error) {
 	pollErr := wait.PollUntilContextCancel(ctx, interval, true, func(ctx context.Context) (bool /*done*/, error) {
