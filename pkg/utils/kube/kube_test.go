@@ -178,6 +178,67 @@ spec:
 	assert.Nil(t, GetDeploymentReplicas(&noDeployment))
 }
 
+func TestGetResourceImagesForResourcesWithTemplate(t *testing.T) {
+	manifest := []byte(`
+apiVersion: extensions/v1beta2
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  labels:
+    foo: bar
+spec:
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.7.9
+        ports:
+          - containerPort: 80
+      - name: agent
+        image: agent:1.0.0
+`)
+
+	expected := []string{"nginx:1.7.9", "agent:1.0.0"}
+
+	deployment := unstructured.Unstructured{}
+	err := yaml.Unmarshal([]byte(manifest), &deployment)
+	require.NoError(t, err)
+
+	images := GetResourceImages(&deployment)
+	assert.Equal(t, expected, images)
+}
+
+func TestGetResourceImagesForPod(t *testing.T) {
+	manifest := []byte(`
+apiVersion: v1
+kind: Pod
+metadata:
+  name: example-pod
+  labels:
+    app: my-app
+spec:
+  containers:
+  - name: nginx-container
+    image: nginx:1.21
+    ports:
+    - containerPort: 80
+  - name: sidecar-container
+    image: busybox:1.35
+    command: ["sh", "-c", "echo Hello from the sidecar; sleep 3600"]
+`)
+	expected := []string{"nginx:1.21", "busybox:1.35"}
+
+	pod := unstructured.Unstructured{}
+	err := yaml.Unmarshal([]byte(manifest), &pod)
+	require.NoError(t, err)
+
+	images := GetResourceImages(&pod)
+	assert.Equal(t, expected, images)
+}
+
 func TestSplitYAML_SingleObject(t *testing.T) {
 	objs, err := SplitYAML([]byte(depWithLabel))
 	require.NoError(t, err)
