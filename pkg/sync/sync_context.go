@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -965,6 +966,46 @@ func (sc *syncContext) shouldUseServerSideApply(targetObj *unstructured.Unstruct
 	return sc.serverSideApply || resourceutil.HasAnnotationOption(targetObj, common.AnnotationSyncOptions, common.SyncOptionServerSideApply)
 }
 
+//===============================================================================================================
+
+func FormatStatefulSetError(err error, targetObj *unstructured.Unstructured, liveObj *unstructured.Unstructured) error {
+	if err == nil {
+		return nil
+	}
+
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "updates to statefulset spec for fields other than") {
+		return err
+	}
+
+	// Get the specs to compare
+	targetSpec, _, _ := unstructured.NestedMap(targetObj.Object, "spec")
+	liveSpec, _, _ := unstructured.NestedMap(liveObj.Object, "spec")
+	if targetSpec == nil || liveSpec == nil {
+		return err
+	}
+
+	// Known immutable StatefulSet fields
+	immutableFields := []string{"serviceName", "podManagementPolicy", "volumeClaimTemplates", "selector"}
+
+	// Find which field changed
+	for _, field := range immutableFields {
+		targetVal, targetExists := targetSpec[field]
+		liveVal, liveExists := liveSpec[field]
+
+		if targetExists && liveExists && !reflect.DeepEqual(targetVal, liveVal) {
+			// Return exact Kubernetes error with field information appended
+			return fmt.Errorf("The StatefulSet \"%s\" is invalid: spec: Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden (field: spec.%s was modified)",
+				targetObj.GetName(),
+				field)
+		}
+	}
+
+	return err
+}
+
+//===============================================================================================================
+
 func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.ResultCode, string) {
 	dryRunStrategy := cmdutil.DryRunNone
 	if dryRun {
@@ -1005,6 +1046,9 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 		message, err = sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager, false)
 	}
 	if err != nil {
+		if t.targetObj != nil && t.targetObj.GetKind() == "StatefulSet" && t.liveObj != nil {
+			err = FormatStatefulSetError(err, t.targetObj, t.liveObj)
+		}
 		return common.ResultCodeSyncFailed, err.Error()
 	}
 	if kube.IsCRD(t.targetObj) && !dryRun {
