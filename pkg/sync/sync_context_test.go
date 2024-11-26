@@ -2039,3 +2039,68 @@ func TestWaitForCleanUpBeforeNextWave(t *testing.T) {
 	assert.Equal(t, synccommon.ResultCodePruned, result[2].Status)
 
 }
+
+func TestFormatStatefulSetError(t *testing.T) {
+	tests := []struct {
+		name      string
+		err       error
+		liveObj   *unstructured.Unstructured
+		targetObj *unstructured.Unstructured
+		wantErr   string
+	}{
+		{
+			name: "service name change",
+			err:  fmt.Errorf("The StatefulSet \"test-sts\" is invalid: spec: Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden"),
+			liveObj: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"apiVersion": "apps/v1",
+					"kind":       "StatefulSet",
+					"metadata": map[string]interface{}{
+						"name": "test-sts",
+					},
+					"spec": map[string]interface{}{
+						"serviceName": "old-service",
+					},
+				},
+			},
+			targetObj: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"apiVersion": "apps/v1",
+					"kind":       "StatefulSet",
+					"metadata": map[string]interface{}{
+						"name": "test-sts",
+					},
+					"spec": map[string]interface{}{
+						"serviceName": "new-service",
+					},
+				},
+			},
+			wantErr: "The StatefulSet \"test-sts\" is invalid: spec: Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden (field: spec.serviceName was modified)",
+		},
+		{
+			name: "non-statefulset error",
+			err:  fmt.Errorf("some other error"),
+			liveObj: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"apiVersion": "apps/v1",
+					"kind":       "StatefulSet",
+				},
+			},
+			targetObj: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"apiVersion": "apps/v1",
+					"kind":       "StatefulSet",
+				},
+			},
+			wantErr: "some other error",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := FormatStatefulSetError(tt.err, tt.targetObj, tt.liveObj)
+			if err.Error() != tt.wantErr {
+				t.Errorf("FormatStatefulSetError() error = %v, want %v", err, tt.wantErr)
+			}
+		})
+	}
+}
