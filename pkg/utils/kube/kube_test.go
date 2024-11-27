@@ -167,13 +167,11 @@ spec:
 }
 
 func TestGetResourceImages(t *testing.T) {
-	type testCase struct {
+	testCases := []struct {
 		manifest    []byte
 		expected    []string
 		description string
-	}
-
-	testCases := []testCase{
+	}{
 		{
 			manifest: []byte(`
 apiVersion: extensions/v1beta2
