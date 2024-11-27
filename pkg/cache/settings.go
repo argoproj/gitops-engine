@@ -170,3 +170,9 @@ func SetRespectRBAC(respectRBAC int) UpdateSettingsFunc {
 		}
 	}
 }
+
+func SetBatchEventsProcessing(batchProcessing bool) UpdateSettingsFunc {
+	return func(cache *clusterCache) {
+		cache.batchEventsProcessing = batchProcessing
+	}
+}
