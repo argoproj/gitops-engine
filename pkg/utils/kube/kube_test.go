@@ -239,6 +239,85 @@ spec:
 	require.Equal(t, expected, images)
 }
 
+func TestGetImages_NoImagesPresent(t *testing.T) {
+	manifests := [][]byte{
+		[]byte(`
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: example-config
+  namespace: default
+  labels:
+    app: my-app
+data:
+  app.properties: |
+    key1=value1
+    key2=value2
+    key3=value3
+  log.level: debug
+`),
+		[]byte(`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deployment-no-containers
+  labels:
+    foo: bar
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agent
+  template:
+    metadata:
+      labels:
+        app: agent
+    spec:
+      volumes:
+      - name: config-volume
+        configMap:
+          name: config
+`),
+		[]byte(`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deployment-without-image
+spec:
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: text-service
+          command: ["echo", "hello"]
+`),
+		[]byte(`
+apiVersion: v1
+kind: Pod
+metadata:
+  name: example-pod
+  labels:
+    app: my-app
+spec:
+  containers:
+  - name: no-image-container
+    command: ["echo", "hello"]
+`,
+		),
+	}
+
+	for _, manifest := range manifests {
+		resource := unstructured.Unstructured{}
+		err := yaml.Unmarshal([]byte(manifest), &resource)
+		require.NoError(t, err)
+
+		images := GetResourceImages(&resource)
+		require.Empty(t, images)
+	}
+}
+
 func TestSplitYAML_SingleObject(t *testing.T) {
 	objs, err := SplitYAML([]byte(depWithLabel))
 	require.NoError(t, err)
