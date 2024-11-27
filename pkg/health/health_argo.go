@@ -26,6 +26,15 @@ type argoWorkflow struct {
 	}
 }
 
+type argoApplication struct {
+	Status struct {
+		Health struct {
+			Status  HealthStatusCode
+			Message string
+		}
+	}
+}
+
 func getArgoWorkflowHealth(obj *unstructured.Unstructured) (*HealthStatus, error) {
 	var wf argoWorkflow
 	err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &wf)
@@ -41,4 +50,13 @@ func getArgoWorkflowHealth(obj *unstructured.Unstructured) (*HealthStatus, error
 		return &HealthStatus{Status: HealthStatusDegraded, Message: wf.Status.Message}, nil
 	}
 	return &HealthStatus{Status: HealthStatusUnknown, Message: wf.Status.Message}, nil
+}
+
+func getArgoApplicationHealth(obj *unstructured.Unstructured) (*HealthStatus, error) {
+	var app argoApplication
+	err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &app)
+	if err != nil {
+		return nil, err
+	}
+	return &HealthStatus{Status: app.Status.Health.Status, Message: app.Status.Health.Message}, nil
 }
