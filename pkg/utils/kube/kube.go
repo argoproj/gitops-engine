@@ -433,7 +433,7 @@ func GetResourceImages(u *unstructured.Unstructured) []string {
 	for _, container := range containers {
 		containerMap, ok := container.(map[string]interface{})
 		if !ok {
-			return nil
+			continue
 		}
 		image, found, err := unstructured.NestedString(containerMap, "image")
 		if !found || err != nil {
