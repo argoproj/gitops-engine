@@ -238,22 +238,8 @@ spec:
 			expected:    []string{"busybox:1.28"},
 			description: "cronjob with containers",
 		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.description, func(t *testing.T) {
-			resource := unstructured.Unstructured{}
-			err := yaml.Unmarshal(tc.manifest, &resource)
-			require.NoError(t, err)
-			images := GetResourceImages(&resource)
-			require.Equal(t, tc.expected, images)
-		})
-	}
-}
-
-func TestGetImagesNoImagesPresent(t *testing.T) {
-	manifests := [][]byte{
-		[]byte(`
+		{
+			manifest: []byte(`
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -268,7 +254,11 @@ data:
     key3=value3
   log.level: debug
 `),
-		[]byte(`
+			expected:    nil,
+			description: "configmap without containers",
+		},
+		{
+			manifest: []byte(`
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -290,7 +280,11 @@ spec:
         configMap:
           name: config
 `),
-		[]byte(`
+			expected:    nil,
+			description: "deployment without containers",
+		},
+		{
+			manifest: []byte(`
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -305,7 +299,11 @@ spec:
         - name: text-service
           command: ["echo", "hello"]
 `),
-		[]byte(`
+			expected:    nil,
+			description: "deployment with container without image",
+		},
+		{
+			manifest: []byte(`
 apiVersion: v1
 kind: Pod
 metadata:
@@ -316,17 +314,20 @@ spec:
   containers:
   - name: no-image-container
     command: ["echo", "hello"]
-`,
-		),
+`),
+			expected:    nil,
+			description: "pod with container without image",
+		},
 	}
 
-	for _, manifest := range manifests {
-		resource := unstructured.Unstructured{}
-		err := yaml.Unmarshal([]byte(manifest), &resource)
-		require.NoError(t, err)
-
-		images := GetResourceImages(&resource)
-		require.Empty(t, images)
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			resource := unstructured.Unstructured{}
+			err := yaml.Unmarshal(tc.manifest, &resource)
+			require.NoError(t, err)
+			images := GetResourceImages(&resource)
+			require.Equal(t, tc.expected, images)
+		})
 	}
 }
 
