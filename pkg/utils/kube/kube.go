@@ -405,16 +405,29 @@ func GetDeploymentReplicas(u *unstructured.Unstructured) *int64 {
 }
 
 func GetResourceImages(u *unstructured.Unstructured) []string {
+	var containers []interface{}
+	var found bool
+	var err error
 	var images []string
 
-	// Extract containers for resources like pods, without template
-	containers, found, err := unstructured.NestedSlice(u.Object, "spec", "containers")
-	if !found || err != nil {
-		// Extract containers for other resources that have template
-		containers, found, err = unstructured.NestedSlice(u.Object, "spec", "template", "spec", "containers")
-		if !found || err != nil {
-			return nil
+	containerPaths := [][]string{
+		// Resources without template, like pods
+		{"spec", "containers"},
+		// Resources with template, like deployments
+		{"spec", "template", "spec", "containers"},
+		// Cronjobs
+		{"spec", "jobTemplate", "spec", "template", "spec", "containers"},
+	}
+
+	for _, path := range containerPaths {
+		containers, found, err = unstructured.NestedSlice(u.Object, path...)
+		if found && err == nil {
+			break
 		}
+	}
+
+	if !found || err != nil {
+		return nil
 	}
 
 	for _, container := range containers {
