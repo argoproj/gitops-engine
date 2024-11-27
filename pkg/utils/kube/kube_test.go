@@ -227,7 +227,7 @@ spec:
 	require.Equal(t, expected, images)
 }
 
-func TestGetImages_NoImagesPresent(t *testing.T) {
+func TestGetImagesNoImagesPresent(t *testing.T) {
 	manifests := [][]byte{
 		[]byte(`
 apiVersion: v1
