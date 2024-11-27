@@ -178,8 +178,16 @@ spec:
 	assert.Nil(t, GetDeploymentReplicas(&noDeployment))
 }
 
-func TestGetResourceImagesForResourcesWithTemplate(t *testing.T) {
-	manifest := []byte(`
+func TestGetResourceImages(t *testing.T) {
+	type testCase struct {
+		manifest    []byte
+		expected    []string
+		description string
+	}
+
+	testCases := []testCase{
+		{
+			manifest: []byte(`
 apiVersion: extensions/v1beta2
 kind: Deployment
 metadata:
@@ -198,21 +206,12 @@ spec:
         ports:
           - containerPort: 80
       - name: agent
-        image: agent:1.0.0
-`)
-
-	expected := []string{"nginx:1.7.9", "agent:1.0.0"}
-
-	deployment := unstructured.Unstructured{}
-	err := yaml.Unmarshal([]byte(manifest), &deployment)
-	require.NoError(t, err)
-
-	images := GetResourceImages(&deployment)
-	require.Equal(t, expected, images)
-}
-
-func TestGetResourceImagesForPod(t *testing.T) {
-	manifest := []byte(`
+        image: agent:1.0.0`),
+			expected:    []string{"nginx:1.7.9", "agent:1.0.0"},
+			description: "deployment with two containers",
+		},
+		{
+			manifest: []byte(`
 apiVersion: v1
 kind: Pod
 metadata:
@@ -228,15 +227,40 @@ spec:
   - name: sidecar-container
     image: busybox:1.35
     command: ["sh", "-c", "echo Hello from the sidecar; sleep 3600"]
-`)
-	expected := []string{"nginx:1.21", "busybox:1.35"}
+`),
+			expected:    []string{"nginx:1.21", "busybox:1.35"},
+			description: "pod with containers",
+		},
+		{
+			manifest: []byte(`
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: hello
+spec:
+  schedule: "* * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: hello
+            image: busybox:1.28
+`),
+			expected:    []string{"busybox:1.28"},
+			description: "cronjob with containers",
+		},
+	}
 
-	pod := unstructured.Unstructured{}
-	err := yaml.Unmarshal([]byte(manifest), &pod)
-	require.NoError(t, err)
-
-	images := GetResourceImages(&pod)
-	require.Equal(t, expected, images)
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			resource := unstructured.Unstructured{}
+			err := yaml.Unmarshal(tc.manifest, &resource)
+			require.NoError(t, err)
+			images := GetResourceImages(&resource)
+			require.Equal(t, tc.expected, images)
+		})
+	}
 }
 
 func TestGetImagesNoImagesPresent(t *testing.T) {
