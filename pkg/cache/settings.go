@@ -170,3 +170,10 @@ func SetRespectRBAC(respectRBAC int) UpdateSettingsFunc {
 		}
 	}
 }
+
+// SetBatchEventsProcessing allows to set whether to process events in batch
+func SetBatchEventsProcessing(batchProcessing bool) UpdateSettingsFunc {
+	return func(cache *clusterCache) {
+		cache.batchEventsProcessing = batchProcessing
+	}
+}
