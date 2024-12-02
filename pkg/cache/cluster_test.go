@@ -206,7 +206,7 @@ func TestStatefulSetOwnershipInferred(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "www1-web-0", Namespace: "default"},
 		})
 
-		cluster.processEvent(watch.Added, pvc)
+		cluster.recordEvent(watch.Added, pvc)
 
 		cluster.lock.Lock()
 		defer cluster.lock.Unlock()
@@ -225,7 +225,7 @@ func TestStatefulSetOwnershipInferred(t *testing.T) {
 			TypeMeta:   metav1.TypeMeta{Kind: kube.PersistentVolumeClaimKind},
 			ObjectMeta: metav1.ObjectMeta{Name: "www1-web-0", Namespace: "default"},
 		})
-		cluster.processEvent(watch.Added, pvc)
+		cluster.recordEvent(watch.Added, pvc)
 
 		cluster.lock.Lock()
 		defer cluster.lock.Unlock()
@@ -244,7 +244,7 @@ func TestStatefulSetOwnershipInferred(t *testing.T) {
 			TypeMeta:   metav1.TypeMeta{Kind: kube.PersistentVolumeClaimKind},
 			ObjectMeta: metav1.ObjectMeta{Name: "www-web-0", Namespace: "default"},
 		})
-		cluster.processEvent(watch.Added, pvc)
+		cluster.recordEvent(watch.Added, pvc)
 
 		cluster.lock.Lock()
 		defer cluster.lock.Unlock()
@@ -596,7 +596,7 @@ func TestChildDeletedEvent(t *testing.T) {
 	err := cluster.EnsureSynced()
 	require.NoError(t, err)
 
-	cluster.processEvent(watch.Deleted, mustToUnstructured(testPod1()))
+	cluster.recordEvent(watch.Deleted, mustToUnstructured(testPod1()))
 
 	rsChildren := getChildren(cluster, mustToUnstructured(testRS()))
 	assert.Equal(t, []*Resource{}, rsChildren)
@@ -620,7 +620,7 @@ func TestProcessNewChildEvent(t *testing.T) {
       uid: "2"
     resourceVersion: "123"`)
 
-	cluster.processEvent(watch.Added, newPod)
+	cluster.recordEvent(watch.Added, newPod)
 
 	rsChildren := getChildren(cluster, mustToUnstructured(testRS()))
 	sort.Slice(rsChildren, func(i, j int) bool {
