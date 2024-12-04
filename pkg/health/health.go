@@ -64,7 +64,7 @@ func IsWorse(current, new HealthStatusCode) bool {
 
 // GetResourceHealth returns the health of a k8s resource
 func GetResourceHealth(obj *unstructured.Unstructured, healthOverride HealthOverride) (health *HealthStatus, err error) {
-	if obj.GetDeletionTimestamp() != nil {
+	if obj.GetDeletionTimestamp() != nil && !hasHookFinalizer(obj) {
 		return &HealthStatus{
 			Status:  HealthStatusProgressing,
 			Message: "Pending deletion",
@@ -95,6 +95,17 @@ func GetResourceHealth(obj *unstructured.Unstructured, healthOverride HealthOver
 	}
 	return health, err
 
+}
+
+func hasHookFinalizer(obj *unstructured.Unstructured) bool {
+	hookFinalizer := "argoproj.io/hook-finalizer"
+	finalizers := obj.GetFinalizers()
+	for _, finalizer := range finalizers {
+		if finalizer == hookFinalizer {
+			return true
+		}
+	}
+	return false
 }
 
 // GetHealthCheckFunc returns built-in health check function or nil if health check is not supported
