@@ -24,8 +24,6 @@ type syncTask struct {
 	operationState common.OperationPhase
 	message        string
 	waveOverride   *int
-	postprocess    func() error
-	cleanup        func() error
 }
 
 func ternary(val bool, a, b string) string {
