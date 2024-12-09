@@ -1,6 +1,7 @@
 package health
 
 import (
+	"github.com/argoproj/gitops-engine/pkg/sync/hook"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -64,7 +65,7 @@ func IsWorse(current, new HealthStatusCode) bool {
 
 // GetResourceHealth returns the health of a k8s resource
 func GetResourceHealth(obj *unstructured.Unstructured, healthOverride HealthOverride) (health *HealthStatus, err error) {
-	if obj.GetDeletionTimestamp() != nil && !hasHookFinalizer(obj) {
+	if obj.GetDeletionTimestamp() != nil && !hook.HasHookFinalizer(obj) {
 		return &HealthStatus{
 			Status:  HealthStatusProgressing,
 			Message: "Pending deletion",
@@ -95,17 +96,6 @@ func GetResourceHealth(obj *unstructured.Unstructured, healthOverride HealthOver
 	}
 	return health, err
 
-}
-
-func hasHookFinalizer(obj *unstructured.Unstructured) bool {
-	hookFinalizer := "argoproj.io/hook-finalizer"
-	finalizers := obj.GetFinalizers()
-	for _, finalizer := range finalizers {
-		if finalizer == hookFinalizer {
-			return true
-		}
-	}
-	return false
 }
 
 // GetHealthCheckFunc returns built-in health check function or nil if health check is not supported

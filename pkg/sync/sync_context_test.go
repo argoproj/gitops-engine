@@ -1362,6 +1362,12 @@ func TestRunSync_HooksDeletedAfterPhaseCompleted(t *testing.T) {
 		))
 	fakeDynamicClient := fake.NewSimpleDynamicClient(runtime.NewScheme())
 	syncCtx.dynamicIf = fakeDynamicClient
+	// Each completed hook needs to have its hook finalizer removed in an Update call to the dynamic client.
+	updatedCount := 0
+	fakeDynamicClient.PrependReactor("update", "*", func(action testcore.Action) (handled bool, ret runtime.Object, err error) {
+		updatedCount += 1
+		return true, nil, nil
+	})
 	deletedCount := 0
 	fakeDynamicClient.PrependReactor("delete", "*", func(action testcore.Action) (handled bool, ret runtime.Object, err error) {
 		deletedCount += 1
@@ -1381,6 +1387,7 @@ func TestRunSync_HooksDeletedAfterPhaseCompleted(t *testing.T) {
 
 	assert.Equal(t, synccommon.OperationSucceeded, syncCtx.phase)
 	assert.Equal(t, 2, deletedCount)
+	assert.Equal(t, 2, updatedCount)
 }
 
 func TestRunSync_HooksDeletedAfterPhaseCompletedFailed(t *testing.T) {
