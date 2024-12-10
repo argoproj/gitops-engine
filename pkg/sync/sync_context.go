@@ -499,7 +499,7 @@ func (sc *syncContext) Sync() {
 
 	sc.log.WithValues("tasks", tasks).V(1).Info("Filtering out non-pending tasks")
 	// remove tasks that are completed, we can assume that there are no running tasks
-	tasks = tasks.Filter(func(t *syncTask) bool { return t.pending() })
+	completedTasks, tasks := tasks.Split(func(t *syncTask) bool { return t.completed() })
 
 	if sc.applyOutOfSyncOnly {
 		tasks = sc.filterOutOfSyncTasks(tasks)
@@ -519,15 +519,22 @@ func (sc *syncContext) Sync() {
 	wave := tasks.wave()
 	finalWave := phase == tasks.lastPhase() && wave == tasks.lastWave()
 
-	// if it is the last phase/wave and the only remaining tasks are non-hooks, the we are successful
-	// EVEN if those objects subsequently degraded
-	// This handles the common case where neither hooks or waves are used and a sync equates to simply an (asynchronous) kubectl apply of manifests, which succeeds immediately.
-	remainingTasks := tasks.Filter(func(t *syncTask) bool { return t.phase != phase || wave != t.wave() || t.isHook() })
+	hasIncompleteDependency := func(t *syncTask) bool {
+		for _, dep := range t.dependencies() {
+			if !completedTasks.Any(func(t *syncTask) bool { return dep.match(t.obj()) }) {
+				return true
+			}
+		}
+		return false
+	}
 
-	sc.log.WithValues("phase", phase, "wave", wave, "tasks", tasks, "syncFailTasks", syncFailTasks).V(1).Info("Filtering tasks in correct phase and wave")
-	tasks = tasks.Filter(func(t *syncTask) bool { return t.phase == phase && t.wave() == wave })
+	tasks, waitingTasks := tasks.Split(func(t *syncTask) bool {
+		return t.phase == phase && t.wave() == wave && !hasIncompleteDependency(t)
+	})
 
-	sc.setOperationPhase(common.OperationRunning, "one or more tasks are running")
+	sc.log.WithValues("phase", phase, "wave", wave, "tasks", tasks, "waitingTasks", waitingTasks, "syncFailTasks", syncFailTasks).V(1).Info("Filtering tasks in correct phase and wave")
+
+	sc.setOperationPhase(common.OperationRunning, fmt.Sprintf("%d task(s) are running", len(tasks)))
 
 	sc.log.WithValues("tasks", tasks).V(1).Info("Wet-run")
 	runState := sc.runTasks(tasks, false)
@@ -548,12 +555,19 @@ func (sc *syncContext) Sync() {
 		sc.deleteHooks(hooksPendingDeletionFailed)
 		sc.setOperationFailed(syncFailTasks, syncFailedTasks, "one or more objects failed to apply")
 	case successful:
-		if remainingTasks.Len() == 0 {
+
+		// if it is the last phase/wave and the only remaining tasks are non-hooks, then the sync is complete
+		// EVEN if those objects subsequently degraded
+		// This handles the case where neither hooks or waves are used and a sync equates to an
+		// (asynchronous) kubectl apply of manifests, which succeeds immediately.
+		anyHooks := tasks.Any(func(task *syncTask) bool { return task.isHook() })
+
+		if len(waitingTasks) == 0 && !anyHooks {
 			// delete all completed hooks which have appropriate delete policy
 			sc.deleteHooks(hooksPendingDeletionSuccessful)
 			sc.setOperationPhase(common.OperationSucceeded, "successfully synced (all tasks run)")
 		} else {
-			sc.setRunningPhase(remainingTasks, false)
+			sc.setRunningPhase(tasks, false)
 		}
 	default:
 		sc.setRunningPhase(tasks.Filter(func(task *syncTask) bool {
@@ -816,6 +830,8 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	}
 
 	tasks.Sort()
+
+	sc.log.WithValues("tasks", tasks).V(1).Info("tasks after sorting")
 
 	// finally enrich tasks with the result
 	for _, task := range tasks {
