@@ -476,6 +476,16 @@ func (sc *syncContext) Sync() {
 		return
 	}
 
+	hooksCompleted := tasks.Filter(func(task *syncTask) bool {
+		return task.isHook() && task.completed()
+	})
+	for _, task := range hooksCompleted {
+		if err := sc.removeHookFinalizer(task); err != nil {
+			sc.setResourceResult(task, task.syncStatus, common.OperationError, err.Error())
+			sc.log.Error(err, "failed to remove hook finalizer", "task", task)
+		}
+	}
+
 	// collect all completed hooks which have appropriate delete policy
 	hooksPendingDeletionSuccessful := tasks.Filter(func(task *syncTask) bool {
 		return task.isHook() && task.liveObj != nil && !task.running() && task.deleteOnPhaseSuccessful()
@@ -575,6 +585,29 @@ func (sc *syncContext) filterOutOfSyncTasks(tasks syncTasks) syncTasks {
 		}
 		return true
 	})
+}
+
+func (sc *syncContext) removeHookFinalizer(task *syncTask) error {
+	if task.liveObj == nil {
+		return nil
+	}
+	finalizers := task.targetObj.GetFinalizers()
+	var mutated bool
+	for i, finalizer := range finalizers {
+		if finalizer == hook.HookFinalizer {
+			finalizers = append(finalizers[:i], finalizers[i+1:]...)
+			mutated = true
+			break
+		}
+	}
+	if mutated {
+		task.targetObj.SetFinalizers(finalizers)
+		task.liveObj.SetFinalizers(finalizers)
+		if err := sc.updateResource(task); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (sc *syncContext) deleteHooks(hooksPendingDeletion syncTasks) {
@@ -680,6 +713,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 					generateName := obj.GetGenerateName()
 					targetObj.SetName(fmt.Sprintf("%s%s", generateName, postfix))
 				}
+				targetObj.SetFinalizers(append(targetObj.GetFinalizers(), hook.HookFinalizer))
 
 				hookTasks = append(hookTasks, &syncTask{phase: phase, targetObj: targetObj})
 			}
@@ -1124,6 +1158,16 @@ func (sc *syncContext) deleteResource(task *syncTask) error {
 		return err
 	}
 	return resIf.Delete(context.TODO(), task.name(), sc.getDeleteOptions())
+}
+
+func (sc *syncContext) updateResource(task *syncTask) error {
+	sc.log.WithValues("task", task).V(1).Info("Updating resource")
+	resIf, err := sc.getResourceIf(task, "update")
+	if err != nil {
+		return err
+	}
+	_, err = resIf.Update(context.TODO(), task.liveObj, metav1.UpdateOptions{})
+	return err
 }
 
 func (sc *syncContext) getResourceIf(task *syncTask, verb string) (dynamic.ResourceInterface, error) {
