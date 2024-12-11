@@ -28,8 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/managedfields"
 	"k8s.io/klog/v2/textlogger"
 	openapiproto "k8s.io/kube-openapi/pkg/util/proto"
-	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
-	"sigs.k8s.io/structured-merge-diff/v4/value"
 	"sigs.k8s.io/yaml"
 )
 
@@ -1344,73 +1342,6 @@ spec:
 			assert.Equal(t, tc.expectedCPU, requestsAfter["cpu"])
 		})
 	}
-}
-
-func TestAppendKeyFieldsToRhs(t *testing.T) {
-	// Paths for the key field "name", simulating a key field with no default value.
-	lhsPath1, err := fieldpath.MakePath(
-		"spec",
-		"containers",
-		&value.FieldList{value.Field{Name: "name", Value: value.NewValueInterface("test1")}},
-		"name",
-	)
-	assert.NoError(t, err)
-	lhsPath2, err := fieldpath.MakePath(
-		"spec",
-		"containers",
-		&value.FieldList{value.Field{Name: "name", Value: value.NewValueInterface("test2")}},
-		"name",
-	)
-	assert.NoError(t, err)
-	lhs := fieldpath.NewSet(lhsPath1, lhsPath2)
-
-	rhsPath1, err := fieldpath.MakePath(
-		"spec",
-		"containers",
-		&value.FieldList{value.Field{Name: "name", Value: value.NewValueInterface("test1")}},
-		"resources",
-	)
-	assert.NoError(t, err)
-	// Has some key fields which are assumed to have default values like "protocol"
-	rhsPath2, err := fieldpath.MakePath(
-		"spec",
-		"containers",
-		&value.FieldList{value.Field{Name: "name", Value: value.NewValueInterface("test2")}},
-		"ports",
-		&value.FieldList{
-			value.Field{Name: "containerPort", Value: value.NewValueInterface(8080)},
-			value.Field{Name: "protocol", Value: value.NewValueInterface("TCP")},
-		},
-		"containerPort",
-	)
-	assert.NoError(t, err)
-
-	rhs := fieldpath.NewSet(rhsPath1, rhsPath2)
-
-	appendKeyFieldsToRhs(lhs, rhs)
-
-	assert.Equal(t, rhs.Size(), 4)
-	assert.True(t, rhs.Has(rhsPath1))
-	assert.True(t, rhs.Has(rhsPath2))
-
-	// The paths for the field "name" should be added, but not "protocol".
-	rhsPath3, err := fieldpath.MakePath(
-		"spec",
-		"containers",
-		&value.FieldList{value.Field{Name: "name", Value: value.NewValueInterface("test1")}},
-		"name",
-	)
-	assert.NoError(t, err)
-	rhsPath4, err := fieldpath.MakePath(
-		"spec",
-		"containers",
-		&value.FieldList{value.Field{Name: "name", Value: value.NewValueInterface("test2")}},
-		"name",
-	)
-	assert.NoError(t, err)
-
-	assert.True(t, rhs.Has(rhsPath3))
-	assert.True(t, rhs.Has(rhsPath4))
 }
 
 func ExampleDiff() {

@@ -258,13 +258,7 @@ func removeWebhookMutation(predictedLive, live *unstructured.Unstructured, gvkPa
 	}
 
 	if comparison.Modified != nil && !comparison.Modified.Empty() {
-		comparisonModifiedForMerge := comparison.Modified
-		typedPredictedLiveFieldSet, err := typedPredictedLive.ToFieldSet()
-		if err != nil {
-			return nil, fmt.Errorf("error reverting webhook modified fields in predicted live resource: %s", err)
-		}
-		appendKeyFieldsToRhs(typedPredictedLiveFieldSet, comparisonModifiedForMerge)
-		liveModValues := typedLive.ExtractItems(comparisonModifiedForMerge)
+		liveModValues := typedLive.ExtractItems(comparison.Modified, typed.WithAppendKeyFields())
 		// revert modified fields not owned by any manager
 		typedPredictedLive, err = typedPredictedLive.Merge(liveModValues)
 		if err != nil {
@@ -273,13 +267,7 @@ func removeWebhookMutation(predictedLive, live *unstructured.Unstructured, gvkPa
 	}
 
 	if comparison.Removed != nil && !comparison.Removed.Empty() {
-		comparisonRemovedForMerge := comparison.Removed
-		typedPredictedLiveFieldSet, err := typedPredictedLive.ToFieldSet()
-		if err != nil {
-			return nil, fmt.Errorf("error reverting webhook removed fields in predicted live resource: %s", err)
-		}
-		appendKeyFieldsToRhs(typedPredictedLiveFieldSet, comparisonRemovedForMerge)
-		liveRmValues := typedLive.ExtractItems(comparisonRemovedForMerge)
+		liveRmValues := typedLive.ExtractItems(comparison.Removed, typed.WithAppendKeyFields())
 		// revert removed fields not owned by any manager
 		typedPredictedLive, err = typedPredictedLive.Merge(liveRmValues)
 		if err != nil {
@@ -293,31 +281,6 @@ func removeWebhookMutation(predictedLive, live *unstructured.Unstructured, gvkPa
 		return nil, fmt.Errorf("error converting live typedValue: expected map got %T", plu)
 	}
 	return &unstructured.Unstructured{Object: pl}, nil
-}
-
-// appendKeyFieldsToRhs appends the key fields like "name" to the rhs elements which have some entries keyed by those fields.
-// The fields are only appended if they are present in lhs as well, otherwise assuming they have a default value not needed
-// to be specified explicitly.
-// This is needed to merge properly, see https://github.com/argoproj/argo-cd/issues/20792.
-func appendKeyFieldsToRhs(lhs *fieldpath.Set, rhs *fieldpath.Set) {
-	keyFieldPaths := []fieldpath.Path{}
-	rhs.Iterate(func(path fieldpath.Path) {
-		for i := 0; i < len(path); i++ {
-			if path[i].Key != nil {
-				for _, keyField := range *path[i].Key {
-					pathPartCopy := make([]fieldpath.PathElement, i+1)
-					copy(pathPartCopy, path[:i+1])
-					newPath := append(pathPartCopy, fieldpath.PathElement{FieldName: &keyField.Name})
-					keyFieldPaths = append(keyFieldPaths, newPath)
-				}
-			}
-		}
-	})
-	for _, path := range keyFieldPaths {
-		if !rhs.Has(path) && lhs.Has(path) {
-			rhs.Insert(path)
-		}
-	}
 }
 
 func jsonStrToUnstructured(jsonString string) (*unstructured.Unstructured, error) {
