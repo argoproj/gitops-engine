@@ -1,1 +1,10 @@
-* @alexmt @crenshaw-dev @pasha-codefresh @ishitasequeira
+# All
+** @argoproj/argocd-approvers
+
+# Docs
+/docs/**     @argoproj/argocd-approvers @argoproj/argocd-approvers-docs
+/README.md   @argoproj/argocd-approvers @argoproj/argocd-approvers-docs
+
+# CI
+/.codecov.yml             @argoproj/argocd-approvers @argoproj/argocd-approvers-ci
+/.github/**               @argoproj/argocd-approvers @argoproj/argocd-approvers-ci
