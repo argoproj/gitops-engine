@@ -58,7 +58,7 @@ const (
 	// The default limit of 50 is chosen based on experiments.
 	defaultListSemaphoreWeight = 50
 	// defaultEventProcessingInterval is the default interval for processing events
-	defaultEventProcessingInterval = 1 * time.Second
+	defaultEventProcessingInterval = 100 * time.Millisecond
 )
 
 const (

@@ -177,3 +177,10 @@ func SetBatchEventsProcessing(batchProcessing bool) UpdateSettingsFunc {
 		cache.batchEventsProcessing = batchProcessing
 	}
 }
+
+// SetEventProcessingInterval allows to set the interval for processing events
+func SetEventProcessingInterval(interval time.Duration) UpdateSettingsFunc {
+	return func(cache *clusterCache) {
+		cache.eventProcessingInterval = interval
+	}
+}
