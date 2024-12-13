@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"k8s.io/klog/v2/textlogger"
 
+	"github.com/argoproj/gitops-engine/pkg/utils/io"
 	testingutils "github.com/argoproj/gitops-engine/pkg/utils/testing"
 	"github.com/argoproj/gitops-engine/pkg/utils/tracing"
 )
@@ -20,8 +21,9 @@ var (
 
 func TestConvertToVersion(t *testing.T) {
 	kubectl := KubectlCmd{
-		Log:    textlogger.NewLogger(textlogger.NewConfig()),
-		Tracer: tracing.NopTracer{},
+		Log:     textlogger.NewLogger(textlogger.NewConfig()),
+		Tracer:  tracing.NopTracer{},
+		TmpPath: io.TempPathUseDevShmIfAvailable(),
 	}
 	t.Run("AppsDeployment", func(t *testing.T) {
 		newObj, err := kubectl.ConvertToVersion(testingutils.UnstructuredFromFile("testdata/appsdeployment.yaml"), "apps", "v1")
