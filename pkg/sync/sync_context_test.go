@@ -38,6 +38,12 @@ import (
 	testingutils "github.com/argoproj/gitops-engine/pkg/utils/testing"
 )
 
+const (
+	testAPIVersion  = "apps/v1"
+	testStatefulSet = "test-statefulset"
+	testNamespace   = "default"
+)
+
 var standardVerbs = v1.Verbs{"create", "delete", "deletecollection", "get", "list", "patch", "update", "watch"}
 
 func newTestSyncCtx(getResourceFunc *func(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string) (*unstructured.Unstructured, error), opts ...SyncOpt) *syncContext {
@@ -52,7 +58,7 @@ func newTestSyncCtx(getResourceFunc *func(ctx context.Context, config *rest.Conf
 			},
 		},
 		&v1.APIResourceList{
-			GroupVersion: "apps/v1",
+			GroupVersion: testAPIVersion,
 			APIResources: []v1.APIResource{
 				{Kind: "Deployment", Group: "apps", Version: "v1", Namespaced: true, Verbs: standardVerbs},
 			},
@@ -2038,4 +2044,292 @@ func TestWaitForCleanUpBeforeNextWave(t *testing.T) {
 	assert.Equal(t, synccommon.ResultCodePruned, result[1].Status)
 	assert.Equal(t, synccommon.ResultCodePruned, result[2].Status)
 
+}
+
+func templateWithStorage(name, storage string) map[string]interface{} {
+	return map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"name": name,
+		},
+		"spec": map[string]interface{}{
+			"resources": map[string]interface{}{
+				"requests": map[string]interface{}{
+					"storage": storage,
+				},
+			},
+		},
+	}
+}
+
+func TestStatefulSetImmutableFieldErrors(t *testing.T) {
+	tests := []struct {
+		name            string
+		currentSpec     map[string]interface{}
+		desiredSpec     map[string]interface{}
+		expectedMessage string
+	}{
+		{
+			name: "single field change - serviceName",
+			currentSpec: map[string]interface{}{
+				"serviceName": "old-svc",
+			},
+			desiredSpec: map[string]interface{}{
+				"serviceName": "new-svc",
+			},
+			expectedMessage: `attempting to change immutable fields:
+   - serviceName:
+      from: "old-svc"
+      to:   "new-svc"
+
+Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden`,
+		},
+		{
+			name: "volumeClaimTemplates change with storage size",
+			currentSpec: map[string]interface{}{
+				"volumeClaimTemplates": []interface{}{
+					map[string]interface{}{
+						"metadata": map[string]interface{}{
+							"name": "data",
+						},
+						"spec": map[string]interface{}{
+							"resources": map[string]interface{}{
+								"requests": map[string]interface{}{
+									"storage": "1Gi",
+								},
+							},
+						},
+					},
+				},
+			},
+			desiredSpec: map[string]interface{}{
+				"volumeClaimTemplates": []interface{}{
+					map[string]interface{}{
+						"metadata": map[string]interface{}{
+							"name": "data",
+						},
+						"spec": map[string]interface{}{
+							"resources": map[string]interface{}{
+								"requests": map[string]interface{}{
+									"storage": "2Gi",
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedMessage: `attempting to change immutable fields:
+   - volumeClaimTemplates.data:
+      from: "1Gi"
+      to:   "2Gi"
+
+Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden`,
+		},
+		{
+			name: "selector change",
+			currentSpec: map[string]interface{}{
+				"selector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{
+						"app": "old-app",
+					},
+				},
+			},
+			desiredSpec: map[string]interface{}{
+				"selector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{
+						"app": "new-app",
+					},
+				},
+			},
+			expectedMessage: `attempting to change immutable fields:
+   - selector:
+      from: {app:old-app}
+      to:   {app:new-app}
+
+Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden`,
+		},
+		{
+			name: "volumeClaimTemplates change from nil",
+			currentSpec: map[string]interface{}{
+				"serviceName": "test-svc",
+			},
+			desiredSpec: map[string]interface{}{
+				"serviceName": "test-svc",
+				"volumeClaimTemplates": []interface{}{
+					map[string]interface{}{
+						"metadata": map[string]interface{}{
+							"name": "data",
+						},
+					},
+				},
+			},
+			expectedMessage: `attempting to change immutable fields:
+   - volumeClaimTemplates:
+      from: <nil>
+      to:   [data]
+
+Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden`,
+		},
+		{
+			name: "complex volumeClaimTemplates change",
+			currentSpec: map[string]interface{}{
+				"volumeClaimTemplates": []interface{}{
+					map[string]interface{}{
+						"metadata": map[string]interface{}{
+							"name": "data1",
+						},
+					},
+				},
+			},
+			desiredSpec: map[string]interface{}{
+				"volumeClaimTemplates": []interface{}{
+					map[string]interface{}{
+						"metadata": map[string]interface{}{
+							"name": "data1",
+						},
+					},
+					map[string]interface{}{
+						"metadata": map[string]interface{}{
+							"name": "data2",
+						},
+					},
+				},
+			},
+			expectedMessage: `attempting to change immutable fields:
+   - volumeClaimTemplates:
+      from: [data1]
+      to:   [data1, data2]
+
+Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden`,
+		},
+		{
+			name: "multiple volumeClaimTemplate change",
+			currentSpec: map[string]interface{}{
+				"serviceName": "postgresql-svc",
+				"selector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{
+						"app": "postgresql",
+					},
+				},
+				"volumeClaimTemplates": []interface{}{
+					templateWithStorage("static-files", "1Gi"),
+					templateWithStorage("dexconfig", "1Gi"),
+					templateWithStorage("argocd-dex-server-tls", "1Gi"),
+				},
+			},
+			desiredSpec: map[string]interface{}{
+				"serviceName": "postgresql-svc",
+				"selector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{
+						"app": "postgresql",
+					},
+				},
+				"volumeClaimTemplates": []interface{}{
+					templateWithStorage("static-files", "2Gi"),
+					templateWithStorage("dexconfig", "3Gi"),
+					templateWithStorage("argocd-dex-server-tls", "4Gi"),
+				},
+			},
+			expectedMessage: `attempting to change immutable fields:
+   - volumeClaimTemplates.argocd-dex-server-tls:
+      from: "1Gi"
+      to:   "4Gi"
+   - volumeClaimTemplates.dexconfig:
+      from: "1Gi"
+      to:   "3Gi"
+   - volumeClaimTemplates.static-files:
+      from: "1Gi"
+      to:   "2Gi"
+
+Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden`,
+		},
+		{
+			name: "multiple field changes",
+			currentSpec: map[string]interface{}{
+				"serviceName": "postgresql-svc",
+				"selector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{
+						"app": "postgresql",
+					},
+				},
+				"volumeClaimTemplates": []interface{}{
+					templateWithStorage("static-files", "1Gi"),
+					templateWithStorage("dexconfig", "1Gi"),
+					templateWithStorage("argocd-dex-server-tls", "1Gi"),
+				},
+			},
+			desiredSpec: map[string]interface{}{
+				"serviceName": "postgresql-svc-new",
+				"selector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{
+						"app": "postgresql-new",
+					},
+				},
+				"volumeClaimTemplates": []interface{}{
+					templateWithStorage("static-files", "2Gi"),
+					templateWithStorage("dexconfig", "1Gi"),
+					templateWithStorage("argocd-dex-server-tls", "1Gi"),
+				},
+			},
+			expectedMessage: `attempting to change immutable fields:
+   - selector:
+      from: {app:postgresql}
+      to:   {app:postgresql-new}
+   - serviceName:
+      from: "postgresql-svc"
+      to:   "postgresql-svc-new"
+   - volumeClaimTemplates.static-files:
+      from: "1Gi"
+      to:   "2Gi"
+
+Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			current := &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"apiVersion": testAPIVersion,
+					"kind":       "StatefulSet",
+					"metadata": map[string]interface{}{
+						"name":      testStatefulSet,
+						"namespace": testNamespace,
+					},
+					"spec": tt.currentSpec,
+				},
+			}
+
+			desired := &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"apiVersion": testAPIVersion,
+					"kind":       "StatefulSet",
+					"metadata": map[string]interface{}{
+						"name":      testStatefulSet,
+						"namespace": testNamespace,
+					},
+					"spec": tt.desiredSpec,
+				},
+			}
+
+			task := &syncTask{
+				liveObj:   current,
+				targetObj: desired,
+			}
+
+			sc := newTestSyncCtx(nil)
+
+			// Mock the resource operations to return immutable field error
+			mockResourceOps := &kubetest.MockResourceOps{
+				Commands: map[string]kubetest.KubectlOutput{
+					testStatefulSet: {
+						Err: errors.New("Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden"),
+					},
+				},
+			}
+			sc.resourceOps = mockResourceOps
+
+			_, message := sc.applyObject(task, false, false)
+			assert.Equal(t, tt.expectedMessage, message)
+		})
+	}
 }

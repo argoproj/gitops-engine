@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -965,6 +966,85 @@ func (sc *syncContext) shouldUseServerSideApply(targetObj *unstructured.Unstruct
 	return sc.serverSideApply || resourceutil.HasAnnotationOption(targetObj, common.AnnotationSyncOptions, common.SyncOptionServerSideApply)
 }
 
+func formatValue(v interface{}) string {
+	if v == nil {
+		return "<nil>"
+	}
+
+	// Special case for volumeClaimTemplates
+	if templates, ok := v.([]interface{}); ok {
+		// For a single volumeClaimTemplate field change
+		if len(templates) == 1 {
+			if template, ok := templates[0].(map[string]interface{}); ok {
+				if storage := getTemplateStorage(template); storage != "" {
+					return fmt.Sprintf("%q", storage)
+				}
+			}
+		}
+		// For multiple templates or other array types format
+		var names []string
+		for _, t := range templates {
+			if template, ok := t.(map[string]interface{}); ok {
+				if metadata, ok := template["metadata"].(map[string]interface{}); ok {
+					if name, ok := metadata["name"].(string); ok {
+						if storage := getTemplateStorage(template); storage != "" {
+							names = append(names, fmt.Sprintf("%s(%s)", name, storage))
+							continue
+						}
+						names = append(names, name)
+					}
+				}
+			}
+		}
+		return fmt.Sprintf("[%s]", strings.Join(names, ", "))
+	}
+
+	// Special case for selector matchLabels
+	if m, ok := v.(map[string]interface{}); ok {
+		if matchLabels, exists := m["matchLabels"].(map[string]interface{}); exists {
+			var labels []string
+			for k, v := range matchLabels {
+				labels = append(labels, fmt.Sprintf("%s:%s", k, v))
+			}
+			sort.Strings(labels)
+			return fmt.Sprintf("{%s}", strings.Join(labels, ", "))
+		}
+	}
+	// Add quotes for string values
+	if str, ok := v.(string); ok {
+		return fmt.Sprintf("%q", str)
+	}
+	// For other types, use standard formatting
+	return fmt.Sprintf("%v", v)
+}
+
+// Get storage size from template
+func getTemplateStorage(template map[string]interface{}) string {
+	spec, ok := template["spec"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	resources, ok := spec["resources"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	requests, ok := resources["requests"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	storage, ok := requests["storage"].(string)
+	if !ok {
+		return ""
+	}
+	return storage
+}
+
+// Format field changes for error messages
+func formatFieldChange(field string, currentVal, desiredVal interface{}) string {
+	return fmt.Sprintf("   - %s:\n      from: %s\n      to:   %s",
+		field, formatValue(currentVal), formatValue(desiredVal))
+}
+
 func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.ResultCode, string) {
 	dryRunStrategy := cmdutil.DryRunNone
 	if dryRun {
@@ -1005,6 +1085,71 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 		message, err = sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager, false)
 	}
 	if err != nil {
+		// Check if this is a StatefulSet immutable field error
+		if strings.Contains(err.Error(), "updates to statefulset spec for fields other than") {
+			current := t.liveObj
+			desired := t.targetObj
+
+			if current != nil && desired != nil {
+				currentSpec, _, _ := unstructured.NestedMap(current.Object, "spec")
+				desiredSpec, _, _ := unstructured.NestedMap(desired.Object, "spec")
+
+				mutableFields := map[string]bool{
+					"replicas":                             true,
+					"ordinals":                             true,
+					"template":                             true,
+					"updateStrategy":                       true,
+					"persistentVolumeClaimRetentionPolicy": true,
+					"minReadySeconds":                      true,
+				}
+
+				var changes []string
+				for k, desiredVal := range desiredSpec {
+					if !mutableFields[k] {
+						currentVal, exists := currentSpec[k]
+						if !exists {
+							changes = append(changes, formatFieldChange(k, nil, desiredVal))
+						} else if !reflect.DeepEqual(currentVal, desiredVal) {
+							if k == "volumeClaimTemplates" {
+								// Handle volumeClaimTemplates specially
+								currentTemplates := currentVal.([]interface{})
+								desiredTemplates := desiredVal.([]interface{})
+
+								// If template count differs or we're adding/removing templates,
+								// use the standard array format
+								if len(currentTemplates) != len(desiredTemplates) {
+									changes = append(changes, formatFieldChange(k, currentVal, desiredVal))
+								} else {
+									// Compare each template
+									for i, desired := range desiredTemplates {
+										current := currentTemplates[i]
+										desiredTemplate := desired.(map[string]interface{})
+										currentTemplate := current.(map[string]interface{})
+
+										name := desiredTemplate["metadata"].(map[string]interface{})["name"].(string)
+										desiredStorage := getTemplateStorage(desiredTemplate)
+										currentStorage := getTemplateStorage(currentTemplate)
+
+										if currentStorage != desiredStorage {
+											changes = append(changes, fmt.Sprintf("   - volumeClaimTemplates.%s:\n      from: %q\n      to:   %q",
+												name, currentStorage, desiredStorage))
+										}
+									}
+								}
+							} else {
+								changes = append(changes, formatFieldChange(k, currentVal, desiredVal))
+							}
+						}
+					}
+				}
+				if len(changes) > 0 {
+					sort.Strings(changes)
+					message := fmt.Sprintf("attempting to change immutable fields:\n%s\n\nForbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden",
+						strings.Join(changes, "\n"))
+					return common.ResultCodeSyncFailed, message
+				}
+			}
+		}
 		return common.ResultCodeSyncFailed, err.Error()
 	}
 	if kube.IsCRD(t.targetObj) && !dryRun {
