@@ -753,16 +753,28 @@ func withReplaceAnnotation(un *unstructured.Unstructured) *unstructured.Unstruct
 	return un
 }
 
+func withReplaceOptionAnnotation(un *unstructured.Unstructured, option string) *unstructured.Unstructured {
+	un.SetAnnotations(map[string]string{synccommon.AnnotationSyncOptions: option})
+	return un
+}
+
 func TestSync_Replace(t *testing.T) {
 	testCases := []struct {
-		name        string
-		target      *unstructured.Unstructured
-		live        *unstructured.Unstructured
-		commandUsed string
+		name          string
+		target        *unstructured.Unstructured
+		live          *unstructured.Unstructured
+		replaceForGKs map[schema.GroupKind]string
+		commandUsed   string
 	}{
-		{"NoAnnotation", NewPod(), NewPod(), "apply"},
-		{"AnnotationIsSet", withReplaceAnnotation(NewPod()), NewPod(), "replace"},
-		{"LiveObjectMissing", withReplaceAnnotation(NewPod()), nil, "create"},
+		{"NoAnnotation", NewPod(), NewPod(), nil, "apply"},
+		{"AnnotationIsSet", withReplaceAnnotation(NewPod()), NewPod(), nil, "replace"},
+		{"LiveObjectMissing", withReplaceAnnotation(NewPod()), nil, nil, "create"},
+		{"AnnotationAlways", withReplaceOptionAnnotation(NewPod(), synccommon.SyncOptionReplaceAlways), NewPod(), nil, "replace"},
+		{"AnnotationNever", withReplaceOptionAnnotation(NewPod(), synccommon.SyncOptionReplaceNever), NewPod(), nil, "apply"},
+		{"SettingForPods", NewPod(), NewPod(), map[schema.GroupKind]string{{Group: "", Kind: "Pod"}: synccommon.SyncOptionReplaceAlways}, "replace"},
+		{"SettingNotForPods", NewPod(), NewPod(), map[schema.GroupKind]string{{Group: "", Kind: "ConfigMap"}: synccommon.SyncOptionReplaceAlways}, "apply"},
+		{"AnnotationAlwaysSettingForPodsNever", withReplaceOptionAnnotation(NewPod(), synccommon.SyncOptionReplaceAlways), NewPod(), map[schema.GroupKind]string{{Group: "", Kind: "Pod"}: synccommon.SyncOptionReplaceNever}, "replace"},
+		{"AnnotationNeverSettingForPodsAlways", withReplaceOptionAnnotation(NewPod(), synccommon.SyncOptionReplaceNever), NewPod(), map[schema.GroupKind]string{{Group: "", Kind: "Pod"}: synccommon.SyncOptionReplaceAlways}, "apply"},
 	}
 
 	for _, tc := range testCases {
@@ -777,6 +789,7 @@ func TestSync_Replace(t *testing.T) {
 				Live:   []*unstructured.Unstructured{tc.live},
 				Target: []*unstructured.Unstructured{tc.target},
 			})
+			syncCtx.replaceForGKs = tc.replaceForGKs
 
 			syncCtx.Sync()
 
@@ -851,6 +864,11 @@ func withForceAnnotation(un *unstructured.Unstructured) *unstructured.Unstructur
 	return un
 }
 
+func withForceOptionAnnotation(un *unstructured.Unstructured, option string) *unstructured.Unstructured {
+	un.SetAnnotations(map[string]string{synccommon.AnnotationSyncOptions: option})
+	return un
+}
+
 func withForceAndReplaceAnnotations(un *unstructured.Unstructured) *unstructured.Unstructured {
 	un.SetAnnotations(map[string]string{synccommon.AnnotationSyncOptions: "Force=true,Replace=true"})
 	return un
@@ -861,13 +879,20 @@ func TestSync_Force(t *testing.T) {
 		name        string
 		target      *unstructured.Unstructured
 		live        *unstructured.Unstructured
+		forceForGKs map[schema.GroupKind]string
 		commandUsed string
 		force       bool
 	}{
-		{"NoAnnotation", NewPod(), NewPod(), "apply", false},
-		{"ForceApplyAnnotationIsSet", withForceAnnotation(NewPod()), NewPod(), "apply", true},
-		{"ForceReplaceAnnotationIsSet", withForceAndReplaceAnnotations(NewPod()), NewPod(), "replace", true},
-		{"LiveObjectMissing", withReplaceAnnotation(NewPod()), nil, "create", false},
+		{"NoAnnotation", NewPod(), NewPod(), nil, "apply", false},
+		{"ForceApplyAnnotationIsSet", withForceAnnotation(NewPod()), NewPod(), nil, "apply", true},
+		{"ForceReplaceAnnotationIsSet", withForceAndReplaceAnnotations(NewPod()), NewPod(), nil, "replace", true},
+		{"LiveObjectMissing", withReplaceAnnotation(NewPod()), nil, nil, "create", false},
+		{"AnnotationAlways", withForceOptionAnnotation(NewPod(), synccommon.SyncOptionForceAlways), NewPod(), nil, "apply", true},
+		{"AnnotationNever", withForceOptionAnnotation(NewPod(), synccommon.SyncOptionForceNever), NewPod(), nil, "apply", false},
+		{"SettingForPods", NewPod(), NewPod(), map[schema.GroupKind]string{{Group: "", Kind: "Pod"}: synccommon.SyncOptionForceAlways}, "apply", true},
+		{"SettingNotForPods", NewPod(), NewPod(), map[schema.GroupKind]string{{Group: "", Kind: "ConfigMap"}: synccommon.SyncOptionForceAlways}, "apply", false},
+		{"AnnotationAlwaysSettingForPodsNever", withForceOptionAnnotation(NewPod(), synccommon.SyncOptionForceAlways), NewPod(), map[schema.GroupKind]string{{Group: "", Kind: "Pod"}: synccommon.SyncOptionReplaceNever}, "apply", true},
+		{"AnnotationNeverSettingForPodsAlways", withForceOptionAnnotation(NewPod(), synccommon.SyncOptionForceNever), NewPod(), map[schema.GroupKind]string{{Group: "", Kind: "Pod"}: synccommon.SyncOptionReplaceAlways}, "apply", false},
 	}
 
 	for _, tc := range testCases {
@@ -882,6 +907,7 @@ func TestSync_Force(t *testing.T) {
 				Live:   []*unstructured.Unstructured{tc.live},
 				Target: []*unstructured.Unstructured{tc.target},
 			})
+			syncCtx.forceForGKs = tc.forceForGKs
 
 			syncCtx.Sync()
 
