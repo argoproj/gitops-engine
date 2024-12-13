@@ -14,6 +14,7 @@ import (
 	v1extensions "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	apierr "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/validation"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -23,6 +24,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2/textlogger"
+	"k8s.io/kubectl/pkg/cmd/util"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"k8s.io/kubectl/pkg/util/openapi"
 
@@ -123,7 +125,15 @@ func WithPruneConfirmed(confirmed bool) SyncOpt {
 	}
 }
 
+// WithDryRun sets dry run setting
+func WithDryRun(dryRun bool) SyncOpt {
+	return func(ctx *syncContext) {
+		ctx.dryRun = dryRun
+	}
+}
+
 // WithOperationSettings allows to set sync operation settings
+// Deprecated, use individual setters
 func WithOperationSettings(dryRun bool, prune bool, force bool, skipHooks bool) SyncOpt {
 	return func(ctx *syncContext) {
 		ctx.prune = prune
@@ -183,9 +193,27 @@ func WithSyncWaveHook(syncWaveHook common.SyncWaveHook) SyncOpt {
 	}
 }
 
+// WithReplace sets a replace to a given value
+// Deprecated, prefer using WithReplaceOption
 func WithReplace(replace bool) SyncOpt {
 	return func(ctx *syncContext) {
 		ctx.replace = replace
+	}
+}
+
+// WithReplaceOptions sets replace options
+func WithReplaceOptions(replaceOption string, replaceRequested bool) SyncOpt {
+	return func(ctx *syncContext) {
+		ctx.replaceOption = replaceOption
+		ctx.replaceRequested = replaceRequested
+	}
+}
+
+// WithReplaceOption sets force options
+func WithForceOptions(forceOption string, forceRequested bool) SyncOpt {
+	return func(ctx *syncContext) {
+		ctx.forceOption = forceOption
+		ctx.forceRequested = forceRequested
 	}
 }
 
@@ -337,11 +365,15 @@ type syncContext struct {
 
 	dryRun                 bool
 	force                  bool
+	forceOption            string
+	forceRequested         bool
 	validate               bool
 	skipHooks              bool
 	resourcesFilter        func(key kube.ResourceKey, target *unstructured.Unstructured, live *unstructured.Unstructured) bool
 	prune                  bool
 	replace                bool
+	replaceOption          string
+	replaceRequested       bool
 	serverSideApply        bool
 	serverSideApplyManager string
 	pruneLast              bool
@@ -965,6 +997,64 @@ func (sc *syncContext) shouldUseServerSideApply(targetObj *unstructured.Unstruct
 	return sc.serverSideApply || resourceutil.HasAnnotationOption(targetObj, common.AnnotationSyncOptions, common.SyncOptionServerSideApply)
 }
 
+func (sc *syncContext) replaceObject(t *syncTask, dryRunStrategy util.DryRunStrategy, force bool, validate bool) (message string, err error) {
+	if t.liveObj != nil {
+		// Avoid using `kubectl replace` for CRDs since 'replace' might recreate resource and so delete all CRD instances.
+		// The same thing applies for namespaces, which would delete the namespace as well as everything within it,
+		// so we want to avoid using `kubectl replace` in that case as well.
+		if kube.IsCRD(t.targetObj) || t.targetObj.GetKind() == kubeutil.NamespaceKind {
+			update := t.targetObj.DeepCopy()
+			update.SetResourceVersion(t.liveObj.GetResourceVersion())
+			_, err = sc.resourceOps.UpdateResource(context.TODO(), update, dryRunStrategy)
+			if err == nil {
+				message = fmt.Sprintf("%s/%s updated", t.targetObj.GetKind(), t.targetObj.GetName())
+			} else {
+				message = fmt.Sprintf("error when updating: %v", err.Error())
+			}
+		} else {
+			message, err = sc.resourceOps.ReplaceResource(context.TODO(), t.targetObj, dryRunStrategy, force)
+		}
+	} else {
+		message, err = sc.resourceOps.CreateResource(context.TODO(), t.targetObj, dryRunStrategy, validate)
+	}
+	return message, err
+}
+
+func (sc *syncContext) shouldReplaceByDefault(t *syncTask) bool {
+	return (sc.replace ||
+		resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplace) ||
+		sc.replaceOption == common.SyncOptionReplace ||
+		sc.replaceOption == common.SyncOptionReplaceAlways ||
+		resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplaceAlways) ||
+		sc.replaceRequested && sc.replaceOption == common.SyncOptionReplaceIfRequested ||
+		sc.replaceRequested && resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplaceIfRequested)) &&
+		!(sc.replaceOption == common.SyncOptionReplaceNever || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplaceNever))
+}
+
+func (sc *syncContext) shouldForceByDefault(t *syncTask) bool {
+	return (sc.force ||
+		resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionForce) ||
+		sc.forceOption == common.SyncOptionForce ||
+		sc.forceOption == common.SyncOptionForceAlways ||
+		resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionForceAlways) ||
+		sc.forceRequested && sc.replaceOption == common.SyncOptionForceIfRequested ||
+		sc.forceRequested && resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionForceIfRequested)) &&
+		!(sc.forceOption == common.SyncOptionForceNever || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionForceNever))
+}
+
+func (sc *syncContext) shouldRetryWithReplace(t *syncTask, err error) bool {
+	return strings.Contains(err.Error(), validation.FieldImmutableErrorMsg) &&
+		(sc.replaceOption == common.SyncOptionReplaceIfImmutableFieldsUpdated || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplaceIfImmutableFieldsUpdated)) ||
+		(sc.replaceOption == common.SyncOptionReplaceIfApplyFailed || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplaceIfApplyFailed))
+}
+
+func (sc *syncContext) shouldForceWhenRetrying(t *syncTask, err error, forceByDefault bool) bool {
+	return forceByDefault ||
+		(strings.Contains(err.Error(), validation.FieldImmutableErrorMsg) &&
+			(sc.forceOption == common.SyncOptionForceIfImmutableFieldsUpdated || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionForceIfImmutableFieldsUpdated)) ||
+			(sc.forceOption == common.SyncOptionForceIfApplyFailed || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionForceIfApplyFailed)))
+}
+
 func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.ResultCode, string) {
 	dryRunStrategy := cmdutil.DryRunNone
 	if dryRun {
@@ -978,31 +1068,18 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 
 	var err error
 	var message string
-	shouldReplace := sc.replace || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplace)
-	force := sc.force || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionForce)
+	replaceByDefault := sc.shouldReplaceByDefault(t)
+	forceByDefault := sc.shouldForceByDefault(t)
 	serverSideApply := sc.shouldUseServerSideApply(t.targetObj)
-	if shouldReplace {
-		if t.liveObj != nil {
-			// Avoid using `kubectl replace` for CRDs since 'replace' might recreate resource and so delete all CRD instances.
-			// The same thing applies for namespaces, which would delete the namespace as well as everything within it,
-			// so we want to avoid using `kubectl replace` in that case as well.
-			if kube.IsCRD(t.targetObj) || t.targetObj.GetKind() == kubeutil.NamespaceKind {
-				update := t.targetObj.DeepCopy()
-				update.SetResourceVersion(t.liveObj.GetResourceVersion())
-				_, err = sc.resourceOps.UpdateResource(context.TODO(), update, dryRunStrategy)
-				if err == nil {
-					message = fmt.Sprintf("%s/%s updated", t.targetObj.GetKind(), t.targetObj.GetName())
-				} else {
-					message = fmt.Sprintf("error when updating: %v", err.Error())
-				}
-			} else {
-				message, err = sc.resourceOps.ReplaceResource(context.TODO(), t.targetObj, dryRunStrategy, force)
-			}
-		} else {
-			message, err = sc.resourceOps.CreateResource(context.TODO(), t.targetObj, dryRunStrategy, validate)
-		}
+	if replaceByDefault {
+		message, err = sc.replaceObject(t, dryRunStrategy, forceByDefault, validate)
 	} else {
-		message, err = sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager, false)
+		message, err = sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, forceByDefault, validate, serverSideApply, sc.serverSideApplyManager, false)
+		if err != nil {
+			if sc.shouldRetryWithReplace(t, err) {
+				message, err = sc.replaceObject(t, dryRunStrategy, sc.shouldForceWhenRetrying(t, err, forceByDefault), validate)
+			}
+		}
 	}
 	if err != nil {
 		return common.ResultCodeSyncFailed, err.Error()
