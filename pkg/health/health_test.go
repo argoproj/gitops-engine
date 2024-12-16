@@ -167,3 +167,8 @@ func TestGetArgoWorkflowHealth(t *testing.T) {
 	assert.Equal(t, "", health.Message)
 
 }
+
+func TestGetArgoApplicationHealth(t *testing.T) {
+	assertAppHealth(t, "./testdata/application-healthy.yaml", HealthStatusHealthy)
+	assertAppHealth(t, "./testdata/application-degraded.yaml", HealthStatusDegraded)
+}
