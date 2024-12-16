@@ -13,8 +13,8 @@ import (
 )
 
 func Test_syncTasks_kindOrder(t *testing.T) {
-	assert.Equal(t, -35, kindOrder["Namespace"])
-	assert.Equal(t, -1, kindOrder["APIService"])
+	assert.Equal(t, -36, kindOrder["Namespace"])
+	assert.Equal(t, -2, kindOrder["APIService"])
 	assert.Equal(t, 0, kindOrder["MyCRD"])
 }
 
