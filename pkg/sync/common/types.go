@@ -28,8 +28,32 @@ const (
 	SyncOptionPruneLast = "PruneLast=true"
 	// Sync option that enables use of replace or create command instead of apply
 	SyncOptionReplace = "Replace=true"
+	// Sync option that disables use of replace or create command instead of apply
+	SyncOptionReplaceFalse = "Replace=false"
+	// Sync option that enables use of replace or create command instead of apply
+	SyncOptionReplaceAlways = "Replace=always"
+	// Sync option that disables use of replace or create command instead of apply
+	SyncOptionReplaceNever = "Replace=never"
+	// Sync option that enables use of replace or create command instead of apply if API requested replace
+	SyncOptionReplaceIfRequested = "Replace=if-requested"
+	// Sync option that enables use of replace or create command instead of apply if immutable fields were updated
+	SyncOptionReplaceIfImmutableFieldsUpdated = "Replace=if-immutable-fields-updated"
+	// Sync option that enables use of replace or create command instead of apply if apply failed
+	SyncOptionReplaceIfApplyFailed = "Replace=if-apply-failed"
 	// Sync option that enables use of --force flag, delete and re-create
 	SyncOptionForce = "Force=true"
+	// Sync option that disables use of --force flag, delete and re-create
+	SyncOptionForceFalse = "Force=false"
+	// Sync option that enables use of --force flag, delete and re-create
+	SyncOptionForceAlways = "Force=always"
+	// Sync option that disables use of --force flag, delete and re-create
+	SyncOptionForceNever = "Force=never"
+	// Sync option that enables use of --force flag, delete and re-create if API requested replace
+	SyncOptionForceIfRequested = "Force=if-requested"
+	// Sync option that enables use of --force flag, delete and re-createif immutable fields were updated
+	SyncOptionForceIfImmutableFieldsUpdated = "Force=if-immutable-fields-updated"
+	// Sync option that enables use of --force flag, delete and re-create if apply failed
+	SyncOptionForceIfApplyFailed = "Force=if-apply-failed"
 	// Sync option that enables use of --server-side flag instead of client-side
 	SyncOptionServerSideApply = "ServerSideApply=true"
 	// Sync option that disables use of --server-side flag instead of client-side

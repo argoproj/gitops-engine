@@ -753,16 +753,28 @@ func withReplaceAnnotation(un *unstructured.Unstructured) *unstructured.Unstruct
 	return un
 }
 
+func withReplaceOptionAnnotation(un *unstructured.Unstructured, option string) *unstructured.Unstructured {
+	un.SetAnnotations(map[string]string{synccommon.AnnotationSyncOptions: option})
+	return un
+}
+
 func TestSync_Replace(t *testing.T) {
 	testCases := []struct {
 		name        string
 		target      *unstructured.Unstructured
 		live        *unstructured.Unstructured
+		requested   bool
 		commandUsed string
 	}{
-		{"NoAnnotation", NewPod(), NewPod(), "apply"},
-		{"AnnotationIsSet", withReplaceAnnotation(NewPod()), NewPod(), "replace"},
-		{"LiveObjectMissing", withReplaceAnnotation(NewPod()), nil, "create"},
+		{"NoAnnotation", NewPod(), NewPod(), false, "apply"},
+		{"AnnotationIsSet", withReplaceAnnotation(NewPod()), NewPod(), false, "replace"},
+		{"LiveObjectMissing", withReplaceAnnotation(NewPod()), nil, false, "create"},
+		{"AnnotationAlways", withReplaceOptionAnnotation(NewPod(), synccommon.SyncOptionReplaceAlways), NewPod(), false, "replace"},
+		{"AnnotationNever", withReplaceOptionAnnotation(NewPod(), synccommon.SyncOptionReplaceNever), NewPod(), false, "apply"},
+		{"AnnotationIfRequestedFalse", withReplaceOptionAnnotation(NewPod(), synccommon.SyncOptionReplaceIfRequested), NewPod(), false, "apply"},
+		{"AnnotationIfRequestedTrue", withReplaceOptionAnnotation(NewPod(), synccommon.SyncOptionReplaceIfRequested), NewPod(), true, "replace"},
+		{"AnnotationIfApplyFailedFalse", withReplaceOptionAnnotation(NewPod(), synccommon.SyncOptionReplaceIfApplyFailed), NewPod(), false, "apply"},
+		{"AnnotationIfImmutableFieldsUpdatedFalse", withReplaceOptionAnnotation(NewPod(), synccommon.SyncOptionReplaceIfImmutableFieldsUpdated), NewPod(), false, "apply"},
 	}
 
 	for _, tc := range testCases {
@@ -777,6 +789,7 @@ func TestSync_Replace(t *testing.T) {
 				Live:   []*unstructured.Unstructured{tc.live},
 				Target: []*unstructured.Unstructured{tc.target},
 			})
+			syncCtx.replaceRequested = tc.requested
 
 			syncCtx.Sync()
 
@@ -862,12 +875,19 @@ func TestSync_Force(t *testing.T) {
 		target      *unstructured.Unstructured
 		live        *unstructured.Unstructured
 		commandUsed string
+		requested   bool
 		force       bool
 	}{
-		{"NoAnnotation", NewPod(), NewPod(), "apply", false},
-		{"ForceApplyAnnotationIsSet", withForceAnnotation(NewPod()), NewPod(), "apply", true},
-		{"ForceReplaceAnnotationIsSet", withForceAndReplaceAnnotations(NewPod()), NewPod(), "replace", true},
-		{"LiveObjectMissing", withReplaceAnnotation(NewPod()), nil, "create", false},
+		{"NoAnnotation", NewPod(), NewPod(), "apply", false, false},
+		{"ForceApplyAnnotationIsSet", withForceAnnotation(NewPod()), NewPod(), "apply", false, true},
+		{"ForceReplaceAnnotationIsSet", withForceAndReplaceAnnotations(NewPod()), NewPod(), "replace", false, true},
+		{"LiveObjectMissing", withReplaceAnnotation(NewPod()), nil, "create", false, false},
+		{"AnnotationAlways", withReplaceOptionAnnotation(NewPod(), synccommon.SyncOptionForceAlways), NewPod(), "apply", false, true},
+		{"AnnotationNever", withReplaceOptionAnnotation(NewPod(), synccommon.SyncOptionForceNever), NewPod(), "apply", false, false},
+		{"AnnotationIfRequestedFalse", withReplaceOptionAnnotation(NewPod(), synccommon.SyncOptionForceIfRequested), NewPod(), "apply", false, false},
+		{"AnnotationIfRequestedTrue", withReplaceOptionAnnotation(NewPod(), synccommon.SyncOptionForceIfRequested), NewPod(), "apply", true, true},
+		{"AnnotationIfApplyFailedFalse", withReplaceOptionAnnotation(NewPod(), synccommon.SyncOptionForceIfApplyFailed), NewPod(), "apply", false, false},
+		{"AnnotationIfImmutableFieldsUpdatedFalse", withReplaceOptionAnnotation(NewPod(), synccommon.SyncOptionForceIfImmutableFieldsUpdated), NewPod(), "apply", false, false},
 	}
 
 	for _, tc := range testCases {
@@ -882,6 +902,7 @@ func TestSync_Force(t *testing.T) {
 				Live:   []*unstructured.Unstructured{tc.live},
 				Target: []*unstructured.Unstructured{tc.target},
 			})
+			syncCtx.forceRequested = tc.requested
 
 			syncCtx.Sync()
 
