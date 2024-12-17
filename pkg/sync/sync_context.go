@@ -1248,7 +1248,7 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 	// finally create resources
 	var tasksGroup syncTasks
 	for _, task := range createTasks {
-		//Only wait if the type of the next task is different than the previous type
+		// Only wait if the type of the next task is different than the previous type
 		if len(tasksGroup) > 0 && tasksGroup[0].targetObj.GetKind() != task.kind() {
 			state = sc.processCreateTasks(state, tasksGroup, dryRun)
 			tasksGroup = syncTasks{task}
@@ -1308,6 +1308,7 @@ func (sc *syncContext) setResourceResult(task *syncTask, syncStatus common.Resul
 
 	res := common.ResourceSyncResult{
 		ResourceKey: kube.GetResourceKey(task.obj()),
+		Images:      kube.GetResourceImages(task.obj()),
 		Version:     task.version(),
 		Status:      task.syncStatus,
 		Message:     task.message,
