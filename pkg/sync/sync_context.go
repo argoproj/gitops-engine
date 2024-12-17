@@ -476,6 +476,15 @@ func (sc *syncContext) Sync() {
 		return
 	}
 
+	hooksCompleted := tasks.Filter(func(task *syncTask) bool {
+		return task.isHook() && task.completed()
+	})
+	for _, task := range hooksCompleted {
+		if err := sc.removeHookFinalizer(task); err != nil {
+			sc.setResourceResult(task, task.syncStatus, common.OperationError, fmt.Sprintf("Failed to remove hook finalizer: %v", err))
+		}
+	}
+
 	// collect all completed hooks which have appropriate delete policy
 	hooksPendingDeletionSuccessful := tasks.Filter(func(task *syncTask) bool {
 		return task.isHook() && task.liveObj != nil && !task.running() && task.deleteOnPhaseSuccessful()
@@ -575,6 +584,56 @@ func (sc *syncContext) filterOutOfSyncTasks(tasks syncTasks) syncTasks {
 		}
 		return true
 	})
+}
+
+func (sc *syncContext) removeHookFinalizer(task *syncTask) error {
+	if task.liveObj == nil {
+		return nil
+	}
+	finalizers := task.targetObj.GetFinalizers()
+	var mutated bool
+	for i, finalizer := range finalizers {
+		if finalizer == hook.HookFinalizer {
+			finalizers = append(finalizers[:i], finalizers[i+1:]...)
+			mutated = true
+			break
+		}
+	}
+	if mutated {
+		task.targetObj.SetFinalizers(finalizers)
+		task.liveObj.SetFinalizers(finalizers)
+		// The cached live object may be stale in the controller cache, and the actual object may have been updated in the meantime,
+		// and Kubernetes API will return a conflict error on the Update call.
+		// In that case, we need to get the latest version of the object and retry the update.
+		return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			updateErr := sc.updateResource(task)
+			if apierr.IsConflict(updateErr) {
+				sc.log.WithValues("task", task).V(1).Info("Retrying hook finalizer removal due to conflict on update")
+				resIf, err := sc.getResourceIf(task, "get")
+				if err != nil {
+					return err
+				}
+				liveObj, err := resIf.Get(context.TODO(), task.targetObj.GetName(), metav1.GetOptions{})
+				if err != nil {
+					return err
+				}
+				task.liveObj = liveObj
+			}
+			return updateErr
+		})
+
+	}
+	return nil
+}
+
+func (sc *syncContext) updateResource(task *syncTask) error {
+	sc.log.WithValues("task", task).V(1).Info("Updating resource")
+	resIf, err := sc.getResourceIf(task, "update")
+	if err != nil {
+		return err
+	}
+	_, err = resIf.Update(context.TODO(), task.liveObj, metav1.UpdateOptions{})
+	return err
 }
 
 func (sc *syncContext) deleteHooks(hooksPendingDeletion syncTasks) {
@@ -680,6 +739,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 					generateName := obj.GetGenerateName()
 					targetObj.SetName(fmt.Sprintf("%s%s", generateName, postfix))
 				}
+				targetObj.SetFinalizers(append(targetObj.GetFinalizers(), hook.HookFinalizer))
 
 				hookTasks = append(hookTasks, &syncTask{phase: phase, targetObj: targetObj})
 			}
@@ -1091,6 +1151,11 @@ func (sc *syncContext) Terminate() {
 	tasks, _ := sc.getSyncTasks()
 	for _, task := range tasks {
 		if !task.isHook() || task.liveObj == nil {
+			continue
+		}
+		if err := sc.removeHookFinalizer(task); err != nil {
+			sc.setResourceResult(task, task.syncStatus, common.OperationError, fmt.Sprintf("Failed to remove hook finalizer: %v", err))
+			terminateSuccessful = false
 			continue
 		}
 		phase, msg, err := sc.getOperationPhase(task.liveObj)
