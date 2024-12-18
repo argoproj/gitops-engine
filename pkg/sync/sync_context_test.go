@@ -39,9 +39,13 @@ import (
 )
 
 const (
-	testAPIVersion  = "apps/v1"
-	testStatefulSet = "test-statefulset"
-	testNamespace   = "default"
+	testAPIVersion     = "apps/v1"
+	testStatefulSet    = "test-statefulset"
+	testNamespace      = "default"
+	staticFiles        = "static-files"
+	argocdDexServerTLS = "argocd-dex-server-tls"
+	postgresqlSvc      = "postgresql-svc"
+	dexconfig          = "dexconfig"
 )
 
 var standardVerbs = v1.Verbs{"create", "delete", "deletecollection", "get", "list", "patch", "update", "watch"}
@@ -2204,29 +2208,29 @@ Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordina
 		{
 			name: "multiple volumeClaimTemplate change",
 			currentSpec: map[string]interface{}{
-				"serviceName": "postgresql-svc",
+				"serviceName": postgresqlSvc,
 				"selector": map[string]interface{}{
 					"matchLabels": map[string]interface{}{
 						"app": "postgresql",
 					},
 				},
 				"volumeClaimTemplates": []interface{}{
-					templateWithStorage("static-files", "1Gi"),
-					templateWithStorage("dexconfig", "1Gi"),
-					templateWithStorage("argocd-dex-server-tls", "1Gi"),
+					templateWithStorage(staticFiles, "1Gi"),
+					templateWithStorage(dexconfig, "1Gi"),
+					templateWithStorage(argocdDexServerTLS, "1Gi"),
 				},
 			},
 			desiredSpec: map[string]interface{}{
-				"serviceName": "postgresql-svc",
+				"serviceName": postgresqlSvc,
 				"selector": map[string]interface{}{
 					"matchLabels": map[string]interface{}{
 						"app": "postgresql",
 					},
 				},
 				"volumeClaimTemplates": []interface{}{
-					templateWithStorage("static-files", "2Gi"),
-					templateWithStorage("dexconfig", "3Gi"),
-					templateWithStorage("argocd-dex-server-tls", "4Gi"),
+					templateWithStorage(staticFiles, "2Gi"),
+					templateWithStorage(dexconfig, "3Gi"),
+					templateWithStorage(argocdDexServerTLS, "4Gi"),
 				},
 			},
 			expectedMessage: `attempting to change immutable fields:
@@ -2245,16 +2249,16 @@ Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordina
 		{
 			name: "multiple field changes",
 			currentSpec: map[string]interface{}{
-				"serviceName": "postgresql-svc",
+				"serviceName": postgresqlSvc,
 				"selector": map[string]interface{}{
 					"matchLabels": map[string]interface{}{
 						"app": "postgresql",
 					},
 				},
 				"volumeClaimTemplates": []interface{}{
-					templateWithStorage("static-files", "1Gi"),
-					templateWithStorage("dexconfig", "1Gi"),
-					templateWithStorage("argocd-dex-server-tls", "1Gi"),
+					templateWithStorage(staticFiles, "1Gi"),
+					templateWithStorage(dexconfig, "1Gi"),
+					templateWithStorage(argocdDexServerTLS, "1Gi"),
 				},
 			},
 			desiredSpec: map[string]interface{}{
@@ -2265,9 +2269,9 @@ Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordina
 					},
 				},
 				"volumeClaimTemplates": []interface{}{
-					templateWithStorage("static-files", "2Gi"),
-					templateWithStorage("dexconfig", "1Gi"),
-					templateWithStorage("argocd-dex-server-tls", "1Gi"),
+					templateWithStorage(staticFiles, "2Gi"),
+					templateWithStorage(dexconfig, "1Gi"),
+					templateWithStorage(argocdDexServerTLS, "1Gi"),
 				},
 			},
 			expectedMessage: `attempting to change immutable fields:
