@@ -118,6 +118,14 @@ func TestAPIService(t *testing.T) {
 	assertAppHealth(t, "./testdata/apiservice-v1beta1-false.yaml", HealthStatusProgressing)
 }
 
+func TestCustomResourceDefinitionHealth(t *testing.T) {
+	assertAppHealth(t, "./testdata/crd-v1-healthy.yaml", HealthStatusHealthy)
+	assertAppHealth(t, "./testdata/crd-v1-non-structual-degraded.yaml", HealthStatusDegraded)
+	assertAppHealth(t, "./testdata/crd-v1-not-established-degraded.yaml", HealthStatusDegraded)
+	assertAppHealth(t, "./testdata/crd-v1-terminating-progressing.yaml", HealthStatusProgressing)
+	assertAppHealth(t, "./testdata/crd-v1-no-conditions-progressing.yaml", HealthStatusProgressing)
+}
+
 func TestGetArgoWorkflowHealth(t *testing.T) {
 	sampleWorkflow := unstructured.Unstructured{Object: map[string]interface{}{
 		"spec": map[string]interface{}{
