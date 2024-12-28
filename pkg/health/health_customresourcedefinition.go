@@ -25,7 +25,8 @@ func getCustomResourceDefinitionHealth(obj *unstructured.Unstructured) (*HealthS
 }
 
 func getApiExtenstionsV1CustomResourceDefinitionHealth(crd *apiextensionsv1.CustomResourceDefinition) (*HealthStatus, error) {
-	if crd.Status.Conditions == nil {
+
+	if crd.Status.Conditions == nil || crd.Status.Conditions != nil && len(crd.Status.Conditions) == 0 {
 		return &HealthStatus{
 			Status:  HealthStatusProgressing,
 			Message: "Status conditions not found",
@@ -49,7 +50,7 @@ func getApiExtenstionsV1CustomResourceDefinitionHealth(crd *apiextensionsv1.Cust
 				conditionMsg = condition.Message
 			}
 		case apiextensionsv1.NamesAccepted:
-			if condition.Status == apiextensionsv1.ConditionTrue {
+			if condition.Status == apiextensionsv1.ConditionFalse {
 				namesNotAccepted = true
 				conditionMsg = condition.Message
 			}
