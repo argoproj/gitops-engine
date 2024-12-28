@@ -25,12 +25,6 @@ func getCustomResourceDefinitionHealth(obj *unstructured.Unstructured) (*HealthS
 }
 
 func getApiExtenstionsV1CustomResourceDefinitionHealth(crd *apiextensionsv1.CustomResourceDefinition) (*HealthStatus, error) {
-	if crd.ObjectMeta.DeletionTimestamp != nil {
-		return &HealthStatus{
-			Status:  HealthStatusProgressing,
-			Message: "CRD is being terminated",
-		}, nil
-	}
 	if crd.Status.Conditions == nil {
 		return &HealthStatus{
 			Status:  HealthStatusProgressing,
@@ -39,40 +33,61 @@ func getApiExtenstionsV1CustomResourceDefinitionHealth(crd *apiextensionsv1.Cust
 	}
 
 	var (
-		isEstablished  bool
-		hasViolations  bool
-		violationMsg   string
-		establishedMsg string
+		isEstablished    bool
+		isTerminating    bool
+		namesNotAccepted bool
+		hasViolations    bool
+		conditionMsg     string
 	)
 
 	// Check conditions
 	for _, condition := range crd.Status.Conditions {
 		switch condition.Type {
+		case apiextensionsv1.Terminating:
+			if condition.Status == apiextensionsv1.ConditionTrue {
+				isTerminating = true
+				conditionMsg = condition.Message
+			}
+		case apiextensionsv1.NamesAccepted:
+			if condition.Status == apiextensionsv1.ConditionTrue {
+				namesNotAccepted = true
+				conditionMsg = condition.Message
+			}
 		case apiextensionsv1.Established:
 			if condition.Status == apiextensionsv1.ConditionTrue {
 				isEstablished = true
 			} else {
-				establishedMsg = condition.Message
+				conditionMsg = condition.Message
 			}
-		case "NonStructuralSchema":
+		case apiextensionsv1.NonStructuralSchema:
 			if condition.Status == apiextensionsv1.ConditionTrue {
 				hasViolations = true
-				violationMsg = condition.Message
+				conditionMsg = condition.Message
 			}
 		}
 	}
 
 	// Return appropriate health status
 	switch {
+	case isTerminating:
+		return &HealthStatus{
+			Status:  HealthStatusProgressing,
+			Message: fmt.Sprintf("CRD is being terminated: %s", conditionMsg),
+		}, nil
+	case namesNotAccepted:
+		return &HealthStatus{
+			Status:  HealthStatusDegraded,
+			Message: fmt.Sprintf("CRD names have not been accepted: %s", conditionMsg),
+		}, nil
 	case !isEstablished:
 		return &HealthStatus{
 			Status:  HealthStatusDegraded,
-			Message: fmt.Sprintf("CRD is not established: %s", establishedMsg),
+			Message: fmt.Sprintf("CRD is not established: %s", conditionMsg),
 		}, nil
 	case hasViolations:
 		return &HealthStatus{
 			Status:  HealthStatusDegraded,
-			Message: fmt.Sprintf("Schema violations found: %s", violationMsg),
+			Message: fmt.Sprintf("Schema violations found: %s", conditionMsg),
 		}, nil
 	default:
 		return &HealthStatus{
