@@ -116,6 +116,11 @@ func GetHealthCheckFunc(gvk schema.GroupVersionKind) func(obj *unstructured.Unst
 		case kube.IngressKind:
 			return getIngressHealth
 		}
+	case "apiextensions":
+		switch gvk.Kind {
+		case kube.CustomResourceDefinitionKind:
+			return getCustomResourceDefinitionHealth
+		}
 	case "argoproj.io":
 		switch gvk.Kind {
 		case "Workflow":
