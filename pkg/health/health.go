@@ -70,6 +70,7 @@ func GetResourceHealth(obj *unstructured.Unstructured, healthOverride HealthOver
 			Message: "Pending deletion",
 		}, nil
 	}
+
 	if healthOverride != nil {
 		health, err := healthOverride.GetResourceHealth(obj)
 		if err != nil {
@@ -83,6 +84,7 @@ func GetResourceHealth(obj *unstructured.Unstructured, healthOverride HealthOver
 			return health, nil
 		}
 	}
+
 	if healthCheck := GetHealthCheckFunc(obj.GroupVersionKind()); healthCheck != nil {
 		if health, err = healthCheck(obj); err != nil {
 			health = &HealthStatus{
