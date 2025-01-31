@@ -43,6 +43,7 @@ type ResourceOperations interface {
 	ReplaceResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force bool) (string, error)
 	CreateResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, validate bool) (string, error)
 	UpdateResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy) (*unstructured.Unstructured, error)
+	GetServerSideDiffDryRunApplier() diff.KubeApplier
 }
 
 type kubectlResourceOperations struct {
@@ -54,9 +55,24 @@ type kubectlResourceOperations struct {
 	openAPISchema openapi.Resources
 }
 
+type kubectlServerSideDiffDryRunApplier struct {
+	resourceOps *kubectlResourceOperations
+}
+
 type commandExecutor func(f cmdutil.Factory, ioStreams genericclioptions.IOStreams, fileName string) error
 
-func (k *kubectlResourceOperations) runResourceCommand(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, serverSideDiff bool, executor commandExecutor) (string, error) {
+func (k *kubectlServerSideDiffDryRunApplier) ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string, serverSideDiff bool) (string, error) {
+	// Don't append stderr output when trying to get resource's predicted live state.
+	return k.resourceOps.applyResourceImpl(ctx, obj, dryRunStrategy, force, validate, serverSideApply, manager, serverSideDiff, false)
+}
+
+func (k *kubectlResourceOperations) GetServerSideDiffDryRunApplier() diff.KubeApplier {
+	return &kubectlServerSideDiffDryRunApplier{
+		resourceOps: k,
+	}
+}
+
+func (k *kubectlResourceOperations) runResourceCommand(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, serverSideDiff bool, appendStderr bool, executor commandExecutor) (string, error) {
 	manifestBytes, err := json.Marshal(obj)
 	if err != nil {
 		return "", err
@@ -97,7 +113,7 @@ func (k *kubectlResourceOperations) runResourceCommand(ctx context.Context, obj 
 	// applied but just running in dryrun mode. Also, kubectl auth reconcile doesn't
 	// currently support running dryrun in server mode.
 	if obj.GetAPIVersion() == "rbac.authorization.k8s.io/v1" && !serverSideDiff {
-		outReconcile, err := k.rbacReconcile(ctx, obj, manifestFile.Name(), dryRunStrategy)
+		outReconcile, err := k.rbacReconcile(ctx, obj, manifestFile.Name(), dryRunStrategy, appendStderr)
 		if err != nil {
 			return "", fmt.Errorf("error running rbacReconcile: %s", err)
 		}
@@ -119,8 +135,10 @@ func (k *kubectlResourceOperations) runResourceCommand(ctx context.Context, obj 
 	if buf := strings.TrimSpace(ioStreams.Out.(*bytes.Buffer).String()); len(buf) > 0 {
 		out = append(out, buf)
 	}
-	if buf := strings.TrimSpace(ioStreams.ErrOut.(*bytes.Buffer).String()); len(buf) > 0 {
-		out = append(out, buf)
+	if appendStderr {
+		if buf := strings.TrimSpace(ioStreams.ErrOut.(*bytes.Buffer).String()); len(buf) > 0 {
+			out = append(out, buf)
+		}
 	}
 	return strings.Join(out, ". "), nil
 }
@@ -134,13 +152,13 @@ func (k *kubectlResourceOperations) runResourceCommand(ctx context.Context, obj 
 // roleRef, which is an immutable field.
 // See: https://github.com/kubernetes/kubernetes/issues/66353
 // `auth reconcile` will delete and recreate the resource if necessary
-func (k *kubectlResourceOperations) rbacReconcile(ctx context.Context, obj *unstructured.Unstructured, fileName string, dryRunStrategy cmdutil.DryRunStrategy) (string, error) {
+func (k *kubectlResourceOperations) rbacReconcile(ctx context.Context, obj *unstructured.Unstructured, fileName string, dryRunStrategy cmdutil.DryRunStrategy, appendStderr bool) (string, error) {
 	cleanup, err := k.processKubectlRun("auth")
 	if err != nil {
 		return "", fmt.Errorf("error processing kubectl run auth: %w", err)
 	}
 	defer cleanup()
-	outReconcile, err := k.authReconcile(ctx, obj, fileName, dryRunStrategy)
+	outReconcile, err := k.authReconcile(ctx, obj, fileName, dryRunStrategy, appendStderr)
 	if err != nil {
 		return "", fmt.Errorf("error running kubectl auth reconcile: %w", err)
 	}
@@ -168,7 +186,7 @@ func (k *kubectlResourceOperations) ReplaceResource(ctx context.Context, obj *un
 	span.SetBaggageItem("name", obj.GetName())
 	defer span.Finish()
 	k.log.Info(fmt.Sprintf("Replacing resource %s/%s in cluster: %s, namespace: %s", obj.GetKind(), obj.GetName(), k.config.Host, obj.GetNamespace()))
-	return k.runResourceCommand(ctx, obj, dryRunStrategy, false, func(f cmdutil.Factory, ioStreams genericclioptions.IOStreams, fileName string) error {
+	return k.runResourceCommand(ctx, obj, dryRunStrategy, false, true, func(f cmdutil.Factory, ioStreams genericclioptions.IOStreams, fileName string) error {
 		cleanup, err := k.processKubectlRun("replace")
 		if err != nil {
 			return err
@@ -189,7 +207,7 @@ func (k *kubectlResourceOperations) CreateResource(ctx context.Context, obj *uns
 	span.SetBaggageItem("kind", gvk.Kind)
 	span.SetBaggageItem("name", obj.GetName())
 	defer span.Finish()
-	return k.runResourceCommand(ctx, obj, dryRunStrategy, false, func(f cmdutil.Factory, ioStreams genericclioptions.IOStreams, fileName string) error {
+	return k.runResourceCommand(ctx, obj, dryRunStrategy, false, true, func(f cmdutil.Factory, ioStreams genericclioptions.IOStreams, fileName string) error {
 		cleanup, err := k.processKubectlRun("create")
 		if err != nil {
 			return err
@@ -244,7 +262,11 @@ func (k *kubectlResourceOperations) UpdateResource(ctx context.Context, obj *uns
 
 // ApplyResource performs an apply of a unstructured resource
 func (k *kubectlResourceOperations) ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string, serverSideDiff bool) (string, error) {
-	span := k.tracer.StartSpan("ApplyResource")
+	return k.applyResourceImpl(ctx, obj, dryRunStrategy, force, validate, serverSideApply, manager, serverSideDiff, true)
+}
+
+func (k *kubectlResourceOperations) applyResourceImpl(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string, serverSideDiff, appendStderr bool) (string, error) {
+	span := k.tracer.StartSpan("applyResourceImpl")
 	span.SetBaggageItem("kind", obj.GetKind())
 	span.SetBaggageItem("name", obj.GetName())
 	defer span.Finish()
@@ -254,7 +276,7 @@ func (k *kubectlResourceOperations) ApplyResource(ctx context.Context, obj *unst
 		"serverSideApply", serverSideApply,
 		"serverSideDiff", serverSideDiff).Info(fmt.Sprintf("Applying resource %s/%s in cluster: %s, namespace: %s", obj.GetKind(), obj.GetName(), k.config.Host, obj.GetNamespace()))
 
-	return k.runResourceCommand(ctx, obj, dryRunStrategy, serverSideDiff, func(f cmdutil.Factory, ioStreams genericclioptions.IOStreams, fileName string) error {
+	return k.runResourceCommand(ctx, obj, dryRunStrategy, serverSideDiff, appendStderr, func(f cmdutil.Factory, ioStreams genericclioptions.IOStreams, fileName string) error {
 		cleanup, err := k.processKubectlRun("apply")
 		if err != nil {
 			return err
@@ -461,7 +483,7 @@ func newReconcileOptions(f cmdutil.Factory, kubeClient *kubernetes.Clientset, fi
 	return o, nil
 }
 
-func (k *kubectlResourceOperations) authReconcile(ctx context.Context, obj *unstructured.Unstructured, manifestFile string, dryRunStrategy cmdutil.DryRunStrategy) (string, error) {
+func (k *kubectlResourceOperations) authReconcile(ctx context.Context, obj *unstructured.Unstructured, manifestFile string, dryRunStrategy cmdutil.DryRunStrategy, appendStderr bool) (string, error) {
 	kubeClient, err := kubernetes.NewForConfig(k.config)
 	if err != nil {
 		return "", err
@@ -498,8 +520,10 @@ func (k *kubectlResourceOperations) authReconcile(ctx context.Context, obj *unst
 	if buf := strings.TrimSpace(ioStreams.Out.(*bytes.Buffer).String()); len(buf) > 0 {
 		out = append(out, buf)
 	}
-	if buf := strings.TrimSpace(ioStreams.ErrOut.(*bytes.Buffer).String()); len(buf) > 0 {
-		out = append(out, buf)
+	if appendStderr {
+		if buf := strings.TrimSpace(ioStreams.ErrOut.(*bytes.Buffer).String()); len(buf) > 0 {
+			out = append(out, buf)
+		}
 	}
 	return strings.Join(out, ". "), nil
 }

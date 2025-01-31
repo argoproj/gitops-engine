@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/argoproj/gitops-engine/pkg/diff"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -27,6 +28,20 @@ type MockResourceOps struct {
 	recordLock sync.RWMutex
 
 	getResourceFunc *func(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string) (*unstructured.Unstructured, error)
+}
+
+type MockServerSideDiffDryRunApplier struct {
+	resourceOps *MockResourceOps
+}
+
+func (s *MockServerSideDiffDryRunApplier) ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string, serverSideDiff bool) (string, error) {
+	return s.resourceOps.ApplyResource(ctx, obj, dryRunStrategy, force, validate, serverSideApply, manager, serverSideDiff)
+}
+
+func (r *MockResourceOps) GetServerSideDiffDryRunApplier() diff.KubeApplier {
+	return &MockServerSideDiffDryRunApplier{
+		resourceOps: r,
+	}
 }
 
 // WithGetResourceFunc overrides the default ConvertToVersion behavior.
