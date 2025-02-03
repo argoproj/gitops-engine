@@ -19,6 +19,7 @@ import (
 	"k8s.io/kube-openapi/pkg/util/proto"
 	"k8s.io/kubectl/pkg/util/openapi"
 
+	"github.com/argoproj/gitops-engine/pkg/diff"
 	utils "github.com/argoproj/gitops-engine/pkg/utils/io"
 	"github.com/argoproj/gitops-engine/pkg/utils/tracing"
 )
@@ -29,6 +30,7 @@ type OnKubectlRunFunc func(command string) (CleanupFunc, error)
 
 type Kubectl interface {
 	ManageResources(config *rest.Config, openAPISchema openapi.Resources) (ResourceOperations, func(), error)
+	ManageServerSideDiffDryRuns(config *rest.Config, openAPISchema openapi.Resources) (diff.KubeApplier, func(), error)
 	LoadOpenAPISchema(config *rest.Config) (openapi.Resources, *managedfields.GvkParser, error)
 	ConvertToVersion(obj *unstructured.Unstructured, group, version string) (*unstructured.Unstructured, error)
 	DeleteResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string, deleteOptions metav1.DeleteOptions) error
@@ -287,6 +289,31 @@ func (k *KubectlCmd) ManageResources(config *rest.Config, openAPISchema openapi.
 		utils.DeleteFile(f.Name())
 	}
 	return &kubectlResourceOperations{
+		config:        config,
+		fact:          fact,
+		openAPISchema: openAPISchema,
+		tracer:        k.Tracer,
+		log:           k.Log,
+		onKubectlRun:  k.OnKubectlRun,
+	}, cleanup, nil
+}
+
+func (k *KubectlCmd) ManageServerSideDiffDryRuns(config *rest.Config, openAPISchema openapi.Resources) (diff.KubeApplier, func(), error) {
+	f, err := os.CreateTemp(utils.TempDir, "")
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate temp file for kubeconfig: %v", err)
+	}
+	_ = f.Close()
+	err = WriteKubeConfig(config, "", f.Name())
+	if err != nil {
+		utils.DeleteFile(f.Name())
+		return nil, nil, fmt.Errorf("failed to write kubeconfig: %v", err)
+	}
+	fact := kubeCmdFactory(f.Name(), "", config)
+	cleanup := func() {
+		utils.DeleteFile(f.Name())
+	}
+	return &kubectlServerSideDiffDryRunApplier{
 		config:        config,
 		fact:          fact,
 		openAPISchema: openAPISchema,
