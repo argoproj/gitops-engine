@@ -39,7 +39,7 @@ import (
 
 // ResourceOperations provides methods to manage k8s resources
 type ResourceOperations interface {
-	ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string, serverSideDiff bool) (string, error)
+	ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string) (string, error)
 	ReplaceResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force bool) (string, error)
 	CreateResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, validate bool) (string, error)
 	UpdateResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy) (*unstructured.Unstructured, error)
@@ -298,7 +298,7 @@ func (k *kubectlResourceOperations) UpdateResource(ctx context.Context, obj *uns
 }
 
 // ApplyResource performs an apply of a unstructured resource
-func (k *kubectlServerSideDiffDryRunApplier) ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string, serverSideDiff bool) (string, error) {
+func (k *kubectlServerSideDiffDryRunApplier) ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string) (string, error) {
 	span := k.tracer.StartSpan("ApplyResource")
 	span.SetBaggageItem("kind", obj.GetKind())
 	span.SetBaggageItem("name", obj.GetName())
@@ -306,8 +306,7 @@ func (k *kubectlServerSideDiffDryRunApplier) ApplyResource(ctx context.Context, 
 	k.log.WithValues(
 		"dry-run", [...]string{"none", "client", "server"}[dryRunStrategy],
 		"manager", manager,
-		"serverSideApply", serverSideApply,
-		"serverSideDiff", serverSideDiff).Info(fmt.Sprintf("Applying resource %s/%s in cluster: %s, namespace: %s", obj.GetKind(), obj.GetName(), k.config.Host, obj.GetNamespace()))
+		"serverSideApply", serverSideApply).Info(fmt.Sprintf("Applying resource %s/%s in cluster: %s, namespace: %s", obj.GetKind(), obj.GetName(), k.config.Host, obj.GetNamespace()))
 
 	return k.runResourceCommand(obj, func(ioStreams genericclioptions.IOStreams, fileName string) error {
 		cleanup, err := processKubectlRun(k.onKubectlRun, "apply")
@@ -325,7 +324,7 @@ func (k *kubectlServerSideDiffDryRunApplier) ApplyResource(ctx context.Context, 
 }
 
 // ApplyResource performs an apply of a unstructured resource
-func (k *kubectlResourceOperations) ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string, serverSideDiff bool) (string, error) {
+func (k *kubectlResourceOperations) ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string) (string, error) {
 	span := k.tracer.StartSpan("ApplyResource")
 	span.SetBaggageItem("kind", obj.GetKind())
 	span.SetBaggageItem("name", obj.GetName())
@@ -334,7 +333,7 @@ func (k *kubectlResourceOperations) ApplyResource(ctx context.Context, obj *unst
 		"dry-run", [...]string{"none", "client", "server"}[dryRunStrategy],
 		"manager", manager,
 		"serverSideApply", serverSideApply,
-		"serverSideDiff", serverSideDiff).Info(fmt.Sprintf("Applying resource %s/%s in cluster: %s, namespace: %s", obj.GetKind(), obj.GetName(), k.config.Host, obj.GetNamespace()))
+		"serverSideDiff", true).Info(fmt.Sprintf("Applying resource %s/%s in cluster: %s, namespace: %s", obj.GetKind(), obj.GetName(), k.config.Host, obj.GetNamespace()))
 
 	return k.runResourceCommand(ctx, obj, dryRunStrategy, func(ioStreams genericclioptions.IOStreams, fileName string) error {
 		cleanup, err := processKubectlRun(k.onKubectlRun, "apply")
@@ -343,7 +342,7 @@ func (k *kubectlResourceOperations) ApplyResource(ctx context.Context, obj *unst
 		}
 		defer cleanup()
 
-		applyOpts, err := k.newApplyOptions(ioStreams, obj, fileName, validate, force, serverSideApply, dryRunStrategy, manager, serverSideDiff)
+		applyOpts, err := k.newApplyOptions(ioStreams, obj, fileName, validate, force, serverSideApply, dryRunStrategy, manager)
 		if err != nil {
 			return err
 		}
@@ -430,7 +429,7 @@ func (k *kubectlServerSideDiffDryRunApplier) newApplyOptions(ioStreams genericcl
 	return o, nil
 }
 
-func (k *kubectlResourceOperations) newApplyOptions(ioStreams genericclioptions.IOStreams, obj *unstructured.Unstructured, fileName string, validate bool, force, serverSideApply bool, dryRunStrategy cmdutil.DryRunStrategy, manager string, serverSideDiff bool) (*apply.ApplyOptions, error) {
+func (k *kubectlResourceOperations) newApplyOptions(ioStreams genericclioptions.IOStreams, obj *unstructured.Unstructured, fileName string, validate bool, force, serverSideApply bool, dryRunStrategy cmdutil.DryRunStrategy, manager string) (*apply.ApplyOptions, error) {
 	o, err := newApplyOptionsCommon(k.config, k.fact, ioStreams, obj, fileName, validate, force, serverSideApply, dryRunStrategy, manager)
 	if err != nil {
 		return nil, err
@@ -445,21 +444,9 @@ func (k *kubectlResourceOperations) newApplyOptions(ioStreams genericclioptions.
 				return nil, err
 			}
 		case cmdutil.DryRunServer:
-			// Preserving for backwards compatibility when older Argo CD uses a newer GitOps Engine.
-			if serverSideDiff {
-				// managedFields are required by server-side diff to identify
-				// changes made by mutation webhooks.
-				o.PrintFlags.JSONYamlPrintFlags.ShowManagedFields = true
-				p, err := o.PrintFlags.JSONYamlPrintFlags.ToPrinter("json")
-				if err != nil {
-					return nil, fmt.Errorf("error configuring server-side diff printer: %w", err)
-				}
-				return p, nil
-			} else {
-				err = o.PrintFlags.Complete("%s (server dry run)")
-				if err != nil {
-					return nil, fmt.Errorf("error configuring server dryrun printer: %w", err)
-				}
+			err = o.PrintFlags.Complete("%s (server dry run)")
+			if err != nil {
+				return nil, fmt.Errorf("error configuring server dryrun printer: %w", err)
 			}
 		}
 		return o.PrintFlags.ToPrinter()
