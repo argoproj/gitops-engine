@@ -13,7 +13,6 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/kubectl/pkg/util/openapi"
 
-	"github.com/argoproj/gitops-engine/pkg/diff"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 )
 
@@ -98,12 +97,6 @@ func (k *MockKubectlCmd) SetOnKubectlRun(onKubectlRun kube.OnKubectlRunFunc) {
 }
 
 func (k *MockKubectlCmd) ManageResources(config *rest.Config, openAPISchema openapi.Resources) (kube.ResourceOperations, func(), error) {
-	return &MockResourceOps{}, func() {
-
-	}, nil
-}
-
-func (k *MockKubectlCmd) ManageServerSideDiffDryRuns(config *rest.Config, openAPISchema openapi.Resources) (diff.KubeApplier, func(), error) {
 	return &MockResourceOps{}, func() {
 
 	}, nil
