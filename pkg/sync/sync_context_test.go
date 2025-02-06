@@ -1161,7 +1161,6 @@ func TestNamespaceAutoCreationForNonExistingNs(t *testing.T) {
 			syncStatus:     synccommon.ResultCodeSyncFailed,
 			operationState: synccommon.OperationError,
 			message:        "namespaceModifier error: some error",
-			waveOverride:   nil,
 		}, tasks[0])
 	})
 }
