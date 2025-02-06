@@ -45,6 +45,7 @@ type ResourceOperations interface {
 	UpdateResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy) (*unstructured.Unstructured, error)
 }
 
+// This is a generic implementation for doing most kubectl operations.
 type kubectlResourceOperations struct {
 	config        *rest.Config
 	log           logr.Logger
@@ -54,6 +55,7 @@ type kubectlResourceOperations struct {
 	openAPISchema openapi.Resources
 }
 
+// This is an implementation specific for doing server-side diff dry runs.
 type kubectlServerSideDiffDryRunApplier struct {
 	config        *rest.Config
 	log           logr.Logger
@@ -86,27 +88,35 @@ func maybeLogManifest(manifestBytes []byte, log logr.Logger) error {
 	return nil
 }
 
-func (k *kubectlResourceOperations) runResourceCommand(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, executor commandExecutor) (string, error) {
+func createManifestFile(obj *unstructured.Unstructured, log logr.Logger) (*os.File, error) {
 	manifestBytes, err := json.Marshal(obj)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	manifestFile, err := os.CreateTemp(io.TempDir, "")
 	if err != nil {
-		return "", fmt.Errorf("Failed to generate temp file for manifest: %v", err)
+		return nil, fmt.Errorf("Failed to generate temp file for manifest: %v", err)
 	}
-	defer io.DeleteFile(manifestFile.Name())
 	if _, err = manifestFile.Write(manifestBytes); err != nil {
-		return "", fmt.Errorf("Failed to write manifest: %v", err)
+		return nil, fmt.Errorf("Failed to write manifest: %v", err)
 	}
 	if err = manifestFile.Close(); err != nil {
-		return "", fmt.Errorf("Failed to close manifest: %v", err)
+		return nil, fmt.Errorf("Failed to close manifest: %v", err)
 	}
 
-	err = maybeLogManifest(manifestBytes, k.log)
+	err = maybeLogManifest(manifestBytes, log)
+	if err != nil {
+		return nil, err
+	}
+	return manifestFile, nil
+}
+
+func (k *kubectlResourceOperations) runResourceCommand(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, executor commandExecutor) (string, error) {
+	manifestFile, err := createManifestFile(obj, k.log)
 	if err != nil {
 		return "", err
 	}
+	defer io.DeleteFile(manifestFile.Name())
 
 	var out []string
 	// rbac resouces are first applied with auth reconcile kubectl feature.
@@ -140,26 +150,11 @@ func (k *kubectlResourceOperations) runResourceCommand(ctx context.Context, obj 
 }
 
 func (k *kubectlServerSideDiffDryRunApplier) runResourceCommand(obj *unstructured.Unstructured, executor commandExecutor) (string, error) {
-	manifestBytes, err := json.Marshal(obj)
+	manifestFile, err := createManifestFile(obj, k.log)
 	if err != nil {
 		return "", err
-	}
-	manifestFile, err := os.CreateTemp(io.TempDir, "")
-	if err != nil {
-		return "", fmt.Errorf("Failed to generate temp file for manifest: %v", err)
 	}
 	defer io.DeleteFile(manifestFile.Name())
-	if _, err = manifestFile.Write(manifestBytes); err != nil {
-		return "", fmt.Errorf("Failed to write manifest: %v", err)
-	}
-	if err = manifestFile.Close(); err != nil {
-		return "", fmt.Errorf("Failed to close manifest: %v", err)
-	}
-
-	err = maybeLogManifest(manifestBytes, k.log)
-	if err != nil {
-		return "", err
-	}
 
 	// Run kubectl apply
 	ioStreams := genericclioptions.IOStreams{
@@ -172,7 +167,7 @@ func (k *kubectlServerSideDiffDryRunApplier) runResourceCommand(obj *unstructure
 		return "", errors.New(cleanKubectlOutput(err.Error()))
 	}
 	if buf := strings.TrimSpace(ioStreams.ErrOut.(*bytes.Buffer).String()); len(buf) > 0 {
-		k.log.Info("Server-side dry run apply had non-empty stderr: %s", buf)
+		k.log.Info("Warning: server-side dry run apply had non-empty stderr: %s", buf)
 	}
 	if buf := strings.TrimSpace(ioStreams.Out.(*bytes.Buffer).String()); len(buf) > 0 {
 		return buf, nil
@@ -306,7 +301,7 @@ func (k *kubectlServerSideDiffDryRunApplier) ApplyResource(ctx context.Context, 
 	k.log.WithValues(
 		"dry-run", [...]string{"none", "client", "server"}[dryRunStrategy],
 		"manager", manager,
-		"serverSideApply", serverSideApply).Info(fmt.Sprintf("Applying resource %s/%s in cluster: %s, namespace: %s", obj.GetKind(), obj.GetName(), k.config.Host, obj.GetNamespace()))
+		"serverSideApply", serverSideApply).Info(fmt.Sprintf("Running server-side diff. Dry run applying resource %s/%s in cluster: %s, namespace: %s", obj.GetKind(), obj.GetName(), k.config.Host, obj.GetNamespace()))
 
 	return k.runResourceCommand(obj, func(ioStreams genericclioptions.IOStreams, fileName string) error {
 		cleanup, err := processKubectlRun(k.onKubectlRun, "apply")
@@ -406,23 +401,17 @@ func (k *kubectlServerSideDiffDryRunApplier) newApplyOptions(ioStreams genericcl
 
 	o.ToPrinter = func(operation string) (printers.ResourcePrinter, error) {
 		o.PrintFlags.NamePrintFlags.Operation = operation
-		switch o.DryRunStrategy {
-		case cmdutil.DryRunClient:
-			err = o.PrintFlags.Complete("%s (dry run)")
-			if err != nil {
-				return nil, err
-			}
-		case cmdutil.DryRunServer:
-			// managedFields are required by server-side diff to identify
-			// changes made by mutation webhooks.
-			o.PrintFlags.JSONYamlPrintFlags.ShowManagedFields = true
-			p, err := o.PrintFlags.JSONYamlPrintFlags.ToPrinter("json")
-			if err != nil {
-				return nil, fmt.Errorf("error configuring server-side diff printer: %w", err)
-			}
-			return p, nil
+		if o.DryRunStrategy != cmdutil.DryRunServer {
+			return nil, fmt.Errorf("invalid dry run strategy passed to server-side diff dry run applier: %d, expected %d", o.DryRunStrategy, cmdutil.DryRunServer)
 		}
-		return o.PrintFlags.ToPrinter()
+		// managedFields are required by server-side diff to identify
+		// changes made by mutation webhooks.
+		o.PrintFlags.JSONYamlPrintFlags.ShowManagedFields = true
+		p, err := o.PrintFlags.JSONYamlPrintFlags.ToPrinter("json")
+		if err != nil {
+			return nil, fmt.Errorf("error configuring server-side diff printer: %w", err)
+		}
+		return p, nil
 	}
 
 	o.ForceConflicts = true
