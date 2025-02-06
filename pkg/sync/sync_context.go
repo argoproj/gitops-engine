@@ -452,6 +452,13 @@ func (sc *syncContext) Sync() {
 				}
 			}
 		}
+
+		// If namespace creation was required the first sync will only validate and create the namespace
+		// We need an extra sync wave for the actual resources in the namespace after the namespace is created
+		if sc.syncNamespace != nil && sc.namespace != "" {
+			sc.syncNamespace = nil
+			sc.Sync()
+		}
 	}
 
 	// if (a) we are multi-step and we have any running tasks,
@@ -708,7 +715,9 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	}
 
 	if sc.syncNamespace != nil && sc.namespace != "" {
-		tasks = sc.autoCreateNamespace(tasks)
+		// If namespace creation is required and the namespace modifier is set, then we need to
+		// add the namespace creation task to the list of tasks and remove other resources for the moment (namespace creation first)
+		tasks = sc.autoCreateNamespace()
 	}
 
 	// enrich task with live obj
@@ -830,7 +839,8 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 	return tasks, successful
 }
 
-func (sc *syncContext) autoCreateNamespace(tasks syncTasks) syncTasks {
+func (sc *syncContext) autoCreateNamespace() syncTasks {
+	var tasks syncTasks
 	isNamespaceCreationNeeded := true
 
 	var allObjs []*unstructured.Unstructured
@@ -855,17 +865,17 @@ func (sc *syncContext) autoCreateNamespace(tasks syncTasks) syncTasks {
 				nsTask := &syncTask{phase: common.SyncPhasePreSync, targetObj: managedNs, liveObj: liveObj}
 				_, ok := sc.syncRes[nsTask.resultKey()]
 				if ok {
-					tasks = sc.appendNsTask(tasks, nsTask, managedNs, liveObj)
+					tasks = sc.appendNsTask(nsTask, managedNs, liveObj)
 				} else {
 					if liveObj != nil {
 						sc.log.WithValues("namespace", sc.namespace).Info("Namespace already exists")
-						tasks = sc.appendNsTask(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: managedNs, liveObj: liveObj}, managedNs, liveObj)
+						tasks = sc.appendNsTask(&syncTask{phase: common.SyncPhasePreSync, targetObj: managedNs, liveObj: liveObj}, managedNs, liveObj)
 					}
 				}
 			} else if apierr.IsNotFound(err) {
-				tasks = sc.appendNsTask(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: managedNs, liveObj: nil}, managedNs, nil)
+				tasks = sc.appendNsTask(&syncTask{phase: common.SyncPhasePreSync, targetObj: managedNs, liveObj: nil}, managedNs, nil)
 			} else {
-				tasks = sc.appendFailedNsTask(tasks, managedNs, fmt.Errorf("Namespace auto creation failed: %s", err))
+				tasks = sc.appendFailedNsTask(managedNs, fmt.Errorf("Namespace auto creation failed: %s", err))
 			}
 		} else {
 			sc.setOperationPhase(common.OperationFailed, fmt.Sprintf("Namespace auto creation failed: %s", err))
@@ -874,22 +884,20 @@ func (sc *syncContext) autoCreateNamespace(tasks syncTasks) syncTasks {
 	return tasks
 }
 
-func (sc *syncContext) appendNsTask(tasks syncTasks, preTask *syncTask, managedNs, liveNs *unstructured.Unstructured) syncTasks {
+func (sc *syncContext) appendNsTask(preTask *syncTask, managedNs, liveNs *unstructured.Unstructured) syncTasks {
 	modified, err := sc.syncNamespace(managedNs, liveNs)
 	if err != nil {
-		tasks = sc.appendFailedNsTask(tasks, managedNs, fmt.Errorf("namespaceModifier error: %s", err))
+		return sc.appendFailedNsTask(managedNs, fmt.Errorf("namespaceModifier error: %s", err))
 	} else if modified {
-		tasks = append(tasks, preTask)
+		return syncTasks{preTask}
 	}
-
-	return tasks
+	return nil
 }
 
-func (sc *syncContext) appendFailedNsTask(tasks syncTasks, unstructuredObj *unstructured.Unstructured, err error) syncTasks {
+func (sc *syncContext) appendFailedNsTask(unstructuredObj *unstructured.Unstructured, err error) syncTasks {
 	task := &syncTask{phase: common.SyncPhasePreSync, targetObj: unstructuredObj}
 	sc.setResourceResult(task, common.ResultCodeSyncFailed, common.OperationError, err.Error())
-	tasks = append(tasks, task)
-	return tasks
+	return syncTasks{task}
 }
 
 func isNamespaceWithName(res *unstructured.Unstructured, ns string) bool {
