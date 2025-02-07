@@ -45,7 +45,7 @@ type ResourceOperations interface {
 	UpdateResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy) (*unstructured.Unstructured, error)
 }
 
-// This is a generic implementation for doing most kubectl operations.
+// This is a generic implementation for doing most kubectl operations. Implements the ResourceOperations interface.
 type kubectlResourceOperations struct {
 	config        *rest.Config
 	log           logr.Logger
@@ -55,7 +55,7 @@ type kubectlResourceOperations struct {
 	openAPISchema openapi.Resources
 }
 
-// This is an implementation specific for doing server-side diff dry runs.
+// This is an implementation specific for doing server-side diff dry runs. Implements the KubeApplier interface.
 type kubectlServerSideDiffDryRunApplier struct {
 	config        *rest.Config
 	log           logr.Logger
@@ -166,13 +166,18 @@ func (k *kubectlServerSideDiffDryRunApplier) runResourceCommand(obj *unstructure
 	if err != nil {
 		return "", errors.New(cleanKubectlOutput(err.Error()))
 	}
-	if buf := strings.TrimSpace(ioStreams.ErrOut.(*bytes.Buffer).String()); len(buf) > 0 {
-		k.log.Info("Warning: server-side dry run apply had non-empty stderr: %s", buf)
+	stdoutBuf := strings.TrimSpace(ioStreams.Out.(*bytes.Buffer).String())
+	stderrBuf := strings.TrimSpace(ioStreams.ErrOut.(*bytes.Buffer).String())
+	if len(stderrBuf) > 0 {
+		if len(stdoutBuf) == 0 {
+			err = fmt.Errorf("kubectl stdout is empty while stderr is not: %s", stderrBuf)
+			k.log.Error(err, "")
+			return "", err
+		} else {
+			k.log.Error(fmt.Errorf("kubectl stderr is not empty: %s", stderrBuf), "")
+		}
 	}
-	if buf := strings.TrimSpace(ioStreams.Out.(*bytes.Buffer).String()); len(buf) > 0 {
-		return buf, nil
-	}
-	return "", nil
+	return stdoutBuf, nil
 }
 
 // rbacReconcile will perform reconciliation for RBAC resources. It will run
