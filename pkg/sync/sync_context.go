@@ -296,12 +296,12 @@ const (
 	crdReadinessTimeout = time.Duration(3) * time.Second
 )
 
-// getOperationPhase returns a hook status from an _live_ unstructured object
-func (sc *syncContext) getOperationPhase(hook *unstructured.Unstructured) (common.OperationPhase, string, error) {
+// getOperationPhase returns a health status from a _live_ unstructured object
+func (sc *syncContext) getOperationPhase(obj *unstructured.Unstructured) (common.OperationPhase, string, error) {
 	phase := common.OperationSucceeded
-	message := fmt.Sprintf("%s created", hook.GetName())
+	message := fmt.Sprintf("%s created", obj.GetName())
 
-	resHealth, err := health.GetResourceHealth(hook, sc.healthOverride)
+	resHealth, err := health.GetResourceHealth(obj, sc.healthOverride)
 	if err != nil {
 		return "", "", err
 	}
@@ -665,8 +665,8 @@ func (sc *syncContext) GetState() (common.OperationPhase, string, []common.Resou
 }
 
 func (sc *syncContext) setOperationFailed(syncFailTasks, syncFailedTasks syncTasks, message string) {
-	errorMessageFactory := func(_ []*syncTask, message string) string {
-		messages := syncFailedTasks.Map(func(task *syncTask) string {
+	errorMessageFactory := func(tasks syncTasks, message string) string {
+		messages := tasks.Map(func(task *syncTask) string {
 			return task.message
 		})
 		if len(messages) > 0 {
@@ -687,7 +687,9 @@ func (sc *syncContext) setOperationFailed(syncFailTasks, syncFailedTasks syncTas
 		// the phase, so we make sure we have at least one more sync
 		sc.log.WithValues("syncFailTasks", syncFailTasks).V(1).Info("Running sync fail tasks")
 		if sc.runTasks(syncFailTasks, false) == failed {
-			sc.setOperationPhase(common.OperationFailed, errorMessage)
+			failedSyncFailTasks := syncFailTasks.Filter(func(t *syncTask) bool { return t.syncStatus == common.ResultCodeSyncFailed })
+			syncFailTasksMessage := errorMessageFactory(failedSyncFailTasks, "one or more SyncFail hooks failed")
+			sc.setOperationPhase(common.OperationFailed, fmt.Sprintf("%s\n%s", errorMessage, syncFailTasksMessage))
 		}
 	} else {
 		sc.setOperationPhase(common.OperationFailed, errorMessage)
@@ -747,8 +749,9 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 					generateName := obj.GetGenerateName()
 					targetObj.SetName(fmt.Sprintf("%s%s", generateName, postfix))
 				}
-				targetObj.SetFinalizers(append(targetObj.GetFinalizers(), hook.HookFinalizer))
-
+				if !hook.HasHookFinalizer(targetObj) {
+					targetObj.SetFinalizers(append(targetObj.GetFinalizers(), hook.HookFinalizer))
+				}
 				hookTasks = append(hookTasks, &syncTask{phase: phase, targetObj: targetObj})
 			}
 		}
