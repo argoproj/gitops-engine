@@ -8,24 +8,24 @@ issues:
 linters:
   enable:
     - errcheck
-#    - errorlint
+    - errorlint
     - gocritic
     - gofumpt
-#    - goimports
+    - goimports
     - gomodguard
     - gosimple
     - govet
     - importas
     - ineffassign
-#    - misspell
+    - misspell
     # Disabled because of https://github.com/argoproj/argo-cd/issues/21705
     # - nolintlint
-#    - perfsprint
+    - perfsprint
     - revive
     - staticcheck
     - testifylint
-#    - thelper
-#    - unparam
+    - thelper
+    - unparam
     - unused
     - usestdlibvars
     - whitespace
@@ -34,15 +34,35 @@ linters-settings:
     disabled-checks:
       - appendAssign
       - assignOp # Keep it disabled for readability
-      - commentFormatting #FIXME
       - exitAfterDefer
-      - elseif #FIXME
-      - ifElseChain #FIXME
-      - mapKey
-      - singleCaseSwitch #FIXME
       - typeSwitchVar
-      - unlambda #FIXME
-      - wrapperFunc #FIXME
+  goimports:
+    local-prefixes: github.com/argoproj/gitops-engine
+  importas:
+    alias:
+      - alias: appsv1
+        pkg: k8s.io/api/apps/v1
+      - alias: corev1
+        pkg: k8s.io/api/core/v1
+      - alias: apierrors
+        pkg: k8s.io/apimachinery/pkg/api/errors
+      - alias: apiextensionsv1
+        pkg: k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1
+      - alias: metav1
+        pkg: k8s.io/apimachinery/pkg/apis/meta/v1
+      - alias: testingutils
+        pkg: github.com/argoproj/gitops-engine/pkg/utils/testing
+  perfsprint:
+    # Optimizes even if it requires an int or uint type cast.
+    int-conversion: true
+    # Optimizes into `err.Error()` even if it is only equivalent for non-nil errors.
+    err-error: true
+    # Optimizes `fmt.Errorf`.
+    errorf: true
+    # Optimizes `fmt.Sprintf` with only one argument.
+    sprintf1: true
+    # Optimizes into strings concatenation.
+    strconcat: true
   revive:
     # https://github.com/mgechev/revive/blob/master/RULES_DESCRIPTIONS.md
     rules:
@@ -55,11 +75,8 @@ linters-settings:
       - name: context-keys-type
         disabled: true
       - name: dot-imports
-        disabled: true
       - name: duplicated-imports
-        disabled: true
       - name: early-return
-        disabled: true
         arguments:
           - 'preserveScope'
       - name: empty-block
@@ -73,9 +90,7 @@ linters-settings:
       - name: identical-branches
       - name: if-return
       - name: increment-decrement
-        disabled: true
       - name: indent-error-flow
-        disabled: true
         arguments:
           - 'preserveScope'
       - name: modifies-parameter
@@ -85,7 +100,6 @@ linters-settings:
       - name: redefines-builtin-id
         disabled: true
       - name: redundant-import-alias
-        disabled: true
       - name: superfluous-else
         arguments:
           - 'preserveScope'
@@ -95,7 +109,6 @@ linters-settings:
       - name: unexported-return
         disabled: true
       - name: unnecessary-stmt
-        disabled: true
       - name: unreachable-code
       - name: unused-parameter
       - name: use-any
@@ -107,6 +120,5 @@ linters-settings:
     enable-all: true
     disable:
       - go-require
-      - require-error
 run:
   timeout: 5m

@@ -12,9 +12,8 @@ import (
 	"github.com/go-logr/logr"
 	"golang.org/x/sync/semaphore"
 	authorizationv1 "k8s.io/api/authorization/v1"
-	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	k8sErrors "k8s.io/apimachinery/pkg/api/errors"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -608,7 +607,7 @@ func (c *clusterCache) listResources(ctx context.Context, resClient dynamic.Reso
 			if ierr != nil {
 				// Log out a retry
 				if c.listRetryLimit > 1 && c.listRetryFunc(ierr) {
-					retryCount += 1
+					retryCount++
 					c.log.Info(fmt.Sprintf("Error while listing resources: %v (try %d/%d)", ierr, retryCount, c.listRetryLimit))
 				}
 				return ierr
@@ -646,10 +645,9 @@ func (c *clusterCache) loadInitialState(ctx context.Context, api kube.APIResourc
 			c.replaceResourceCache(api.GroupKind, items, ns)
 			return nil
 		})
-	} else {
-		c.replaceResourceCache(api.GroupKind, items, ns)
-		return resourceVersion, nil
 	}
+	c.replaceResourceCache(api.GroupKind, items, ns)
+	return resourceVersion, nil
 }
 
 func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo, resClient dynamic.ResourceInterface, ns string, resourceVersion string) {
@@ -671,7 +669,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 		w, err := watchutil.NewRetryWatcher(resourceVersion, &cache.ListWatch{
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 				res, err := resClient.Watch(ctx, options)
-				if errors.IsNotFound(err) {
+				if apierrors.IsNotFound(err) {
 					c.stopWatching(api.GroupKind, ns)
 				}
 				return res, err
@@ -720,7 +718,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 				c.recordEvent(event.Type, obj)
 				if kube.IsCRD(obj) {
 					var resources []kube.APIResourceInfo
-					crd := v1.CustomResourceDefinition{}
+					crd := apiextensionsv1.CustomResourceDefinition{}
 					err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &crd)
 					if err != nil {
 						c.log.Error(err, "Failed to extract CRD resources")
@@ -736,7 +734,7 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 							Meta: metav1.APIResource{
 								Group:        crd.Spec.Group,
 								SingularName: crd.Spec.Names.Singular,
-								Namespaced:   crd.Spec.Scope == v1.NamespaceScoped,
+								Namespaced:   crd.Spec.Scope == apiextensionsv1.NamespaceScoped,
 								Name:         crd.Spec.Names.Plural,
 								Kind:         crd.Spec.Names.Singular,
 								Version:      v.Name,
@@ -808,7 +806,7 @@ func (c *clusterCache) processApi(client dynamic.Interface, api kube.APIResource
 
 // isRestrictedResource checks if the kube api call is unauthorized or forbidden
 func (c *clusterCache) isRestrictedResource(err error) bool {
-	return c.respectRBAC != RespectRbacDisabled && (k8sErrors.IsForbidden(err) || k8sErrors.IsUnauthorized(err))
+	return c.respectRBAC != RespectRbacDisabled && (apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err))
 }
 
 // checkPermission runs a self subject access review to check if the controller has permissions to list the resource
@@ -845,10 +843,10 @@ func (c *clusterCache) checkPermission(ctx context.Context, reviewInterface auth
 			}
 			if resp != nil && resp.Status.Allowed {
 				return true, nil
-			} else {
-				// unsupported, remove from watch list
-				return false, nil
 			}
+			// unsupported, remove from watch list
+			//nolint:staticcheck //FIXME
+			return false, nil
 		}
 	}
 	// checkPermission follows the same logic of determining namespace/cluster resource as the processApi function
@@ -977,7 +975,7 @@ func (c *clusterCache) sync() error {
 	})
 	if err != nil {
 		c.log.Error(err, "Failed to sync cluster")
-		return fmt.Errorf("failed to sync cluster %s: %v", c.config.Host, err)
+		return fmt.Errorf("failed to sync cluster %s: %w", c.config.Host, err)
 	}
 
 	c.log.Info("Cluster successfully synced")
@@ -1157,13 +1155,12 @@ func buildGraph(nsNodes map[kube.ResourceKey]*Resource) map[kube.ResourceKey]map
 					continue
 				}
 				graphKeyNode, ok := nsNodes[kube.ResourceKey{Group: group.Group, Kind: ownerRef.Kind, Namespace: childNode.Ref.Namespace, Name: ownerRef.Name}]
-				if ok {
-					ownerRef.UID = graphKeyNode.Ref.UID
-					childNode.OwnerRefs[i] = ownerRef
-				} else {
+				if !ok {
 					// No resource found with the given graph key, so move on.
 					continue
 				}
+				ownerRef.UID = graphKeyNode.Ref.UID
+				childNode.OwnerRefs[i] = ownerRef
 			}
 
 			// Now that we have the UID of the parent, update the graph.
@@ -1198,7 +1195,7 @@ func (c *clusterCache) IsNamespaced(gk schema.GroupKind) (bool, error) {
 	if isNamespaced, ok := c.namespacedResources[gk]; ok {
 		return isNamespaced, nil
 	}
-	return false, errors.NewNotFound(schema.GroupResource{Group: gk.Group}, "")
+	return false, apierrors.NewNotFound(schema.GroupResource{Group: gk.Group}, "")
 }
 
 func (c *clusterCache) managesNamespace(namespace string) bool {
@@ -1251,7 +1248,7 @@ func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructure
 					var err error
 					managedObj, err = c.kubectl.GetResource(context.TODO(), c.config, targetObj.GroupVersionKind(), existingObj.Ref.Name, existingObj.Ref.Namespace)
 					if err != nil {
-						if errors.IsNotFound(err) {
+						if apierrors.IsNotFound(err) {
 							return nil
 						}
 						return err
@@ -1261,7 +1258,7 @@ func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructure
 				var err error
 				managedObj, err = c.kubectl.GetResource(context.TODO(), c.config, targetObj.GroupVersionKind(), targetObj.GetName(), targetObj.GetNamespace())
 				if err != nil {
-					if errors.IsNotFound(err) {
+					if apierrors.IsNotFound(err) {
 						return nil
 					}
 					return err
@@ -1276,7 +1273,7 @@ func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructure
 				c.log.V(1).Info(fmt.Sprintf("Failed to convert resource: %v", err))
 				managedObj, err = c.kubectl.GetResource(context.TODO(), c.config, targetObj.GroupVersionKind(), managedObj.GetName(), managedObj.GetNamespace())
 				if err != nil {
-					if errors.IsNotFound(err) {
+					if apierrors.IsNotFound(err) {
 						return nil
 					}
 					return err

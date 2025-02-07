@@ -5,7 +5,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/types"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -17,7 +17,7 @@ type Resource struct {
 	// ResourceVersion holds most recent observed resource version
 	ResourceVersion string
 	// Resource reference
-	Ref v1.ObjectReference
+	Ref corev1.ObjectReference
 	// References to resource owners
 	OwnerRefs []metav1.OwnerReference
 	// Optional creation timestamp of the resource
@@ -92,10 +92,8 @@ func (r *Resource) iterateChildren(ns map[kube.ResourceKey]*Resource, parents ma
 			if parents[childKey] {
 				key := r.ResourceKey()
 				_ = action(fmt.Errorf("circular dependency detected. %s is child and parent of %s", childKey.String(), key.String()), child, ns)
-			} else {
-				if action(nil, child, ns) {
-					child.iterateChildren(ns, newResourceKeySet(parents, r.ResourceKey()), action)
-				}
+			} else if action(nil, child, ns) {
+				child.iterateChildren(ns, newResourceKeySet(parents, r.ResourceKey()), action)
 			}
 		}
 	}

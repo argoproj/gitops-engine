@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -17,7 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 	extensionsv1beta1 "k8s.io/api/extensions/v1beta1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -74,10 +74,11 @@ var (
       - hostname: localhost`, testCreationTime.UTC().Format(time.RFC3339)))
 )
 
-func newCluster(t testing.TB, objs ...runtime.Object) *clusterCache {
-	cache := newClusterWithOptions(t, []UpdateSettingsFunc{}, objs...)
+func newCluster(tb testing.TB, objs ...runtime.Object) *clusterCache {
+	tb.Helper()
+	cache := newClusterWithOptions(tb, []UpdateSettingsFunc{}, objs...)
 
-	t.Cleanup(func() {
+	tb.Cleanup(func() {
 		cache.Invalidate()
 	})
 
@@ -236,7 +237,7 @@ func TestStatefulSetOwnershipInferred(t *testing.T) {
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: kube.StatefulSetKind},
 		ObjectMeta: metav1.ObjectMeta{UID: "123", Name: "web", Namespace: "default"},
 		Spec: appsv1.StatefulSetSpec{
-			VolumeClaimTemplates: []v1.PersistentVolumeClaim{{
+			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "www",
 				},
@@ -247,14 +248,14 @@ func TestStatefulSetOwnershipInferred(t *testing.T) {
 	tests := []struct {
 		name          string
 		cluster       *clusterCache
-		pvc           *v1.PersistentVolumeClaim
+		pvc           *corev1.PersistentVolumeClaim
 		expectedRefs  []metav1.OwnerReference
 		expectNoOwner bool
 	}{
 		{
 			name:    "STSTemplateNameNotMatching",
 			cluster: newCluster(t, sts),
-			pvc: &v1.PersistentVolumeClaim{
+			pvc: &corev1.PersistentVolumeClaim{
 				TypeMeta:   metav1.TypeMeta{Kind: kube.PersistentVolumeClaimKind},
 				ObjectMeta: metav1.ObjectMeta{Name: "www1-web-0", Namespace: "default"},
 			},
@@ -263,7 +264,7 @@ func TestStatefulSetOwnershipInferred(t *testing.T) {
 		{
 			name:    "MatchingSTSExists",
 			cluster: newCluster(t, sts),
-			pvc: &v1.PersistentVolumeClaim{
+			pvc: &corev1.PersistentVolumeClaim{
 				TypeMeta:   metav1.TypeMeta{Kind: kube.PersistentVolumeClaimKind},
 				ObjectMeta: metav1.ObjectMeta{Name: "www-web-0", Namespace: "default"},
 			},
@@ -272,7 +273,7 @@ func TestStatefulSetOwnershipInferred(t *testing.T) {
 		{
 			name:    "STSTemplateNameNotMatchingWithBatchProcessing",
 			cluster: newClusterWithOptions(t, opts, sts),
-			pvc: &v1.PersistentVolumeClaim{
+			pvc: &corev1.PersistentVolumeClaim{
 				TypeMeta:   metav1.TypeMeta{Kind: kube.PersistentVolumeClaimKind},
 				ObjectMeta: metav1.ObjectMeta{Name: "www1-web-0", Namespace: "default"},
 			},
@@ -281,7 +282,7 @@ func TestStatefulSetOwnershipInferred(t *testing.T) {
 		{
 			name:    "MatchingSTSExistsWithBatchProcessing",
 			cluster: newClusterWithOptions(t, opts, sts),
-			pvc: &v1.PersistentVolumeClaim{
+			pvc: &corev1.PersistentVolumeClaim{
 				TypeMeta:   metav1.TypeMeta{Kind: kube.PersistentVolumeClaimKind},
 				ObjectMeta: metav1.ObjectMeta{Name: "www-web-0", Namespace: "default"},
 			},
@@ -466,7 +467,7 @@ metadata:
 	_, err = cluster.GetManagedLiveObjs([]*unstructured.Unstructured{clusterLevelRes}, func(r *Resource) bool {
 		return len(r.OwnerRefs) == 0
 	})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	otherNamespaceRes := strToUnstructured(`
 apiVersion: apps/v1
@@ -624,7 +625,7 @@ metadata:
 					convertToVersionWasCalled = true
 
 					if testCaseCopy.localConvertFails {
-						return nil, fmt.Errorf("failed to convert resource client-side")
+						return nil, errors.New("failed to convert resource client-side")
 					}
 
 					return obj, nil
@@ -637,7 +638,7 @@ metadata:
 			managedObjs, err := cluster.GetManagedLiveObjs([]*unstructured.Unstructured{targetDeploy}, func(_ *Resource) bool {
 				return true
 			})
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, testCaseCopy.expectConvertToVersionCalled, convertToVersionWasCalled)
 			assert.Equal(t, testCaseCopy.expectGetResourceCalled, getResourceWasCalled)
 			assert.Equal(t, map[kube.ResourceKey]*unstructured.Unstructured{
@@ -846,11 +847,12 @@ func ExampleNewClusterCache_resourceUpdatedEvents() {
 		panic(err)
 	}
 	unsubscribe := clusterCache.OnResourceUpdated(func(newRes *Resource, oldRes *Resource, _ map[kube.ResourceKey]*Resource) {
-		if newRes == nil {
+		switch {
+		case newRes == nil:
 			fmt.Printf("%s deleted\n", oldRes.Ref.String())
-		} else if oldRes == nil {
+		case oldRes == nil:
 			fmt.Printf("%s created\n", newRes.Ref.String())
-		} else {
+		default:
 			fmt.Printf("%s updated\n", newRes.Ref.String())
 		}
 	})
@@ -860,6 +862,7 @@ func ExampleNewClusterCache_resourceUpdatedEvents() {
 }
 
 func getResourceKey(t *testing.T, obj runtime.Object) kube.ResourceKey {
+	t.Helper()
 	gvk := obj.GetObjectKind().GroupVersionKind()
 	m, err := meta.Accessor(obj)
 	require.NoError(t, err)
@@ -1307,7 +1310,7 @@ func Test_watchEvents_Deadlock(t *testing.T) {
 			require.True(t, v)
 		case <-time.After(10 * time.Second):
 			hasDeadlock = true
-			t.Errorf("timeout reached on attempt %d. It is possible that a deadlock occured", i)
+			t.Errorf("timeout reached on attempt %d. It is possible that a deadlock occurred", i)
 			// Tip: to debug the deadlock, increase the timer to a value higher than X in "go test -timeout X"
 			// This will make the test panic with the goroutines information
 			t.FailNow()
@@ -1376,7 +1379,7 @@ func BenchmarkIterateHierarchyV2(b *testing.B) {
 	}
 }
 
-//func BenchmarkIterateHierarchy(b *testing.B) {
+// func BenchmarkIterateHierarchy(b *testing.B) {
 //	cluster := newCluster(b)
 //	for _, resource := range testResources {
 //		cluster.setNode(resource)

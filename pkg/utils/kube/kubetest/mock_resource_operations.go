@@ -4,13 +4,14 @@ import (
 	"context"
 	"sync"
 
-	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+
+	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 )
 
 type MockResourceOps struct {
@@ -105,7 +106,7 @@ func (r *MockResourceOps) GetLastResourceCommand(key kube.ResourceKey) string {
 	return r.lastCommandPerResource[key]
 }
 
-func (r *MockResourceOps) ApplyResource(_ context.Context, obj *unstructured.Unstructured, _ cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string, _ bool) (string, error) {
+func (r *MockResourceOps) ApplyResource(_ context.Context, obj *unstructured.Unstructured, _ cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string) (string, error) {
 	r.SetLastValidate(validate)
 	r.SetLastServerSideApply(serverSideApply)
 	r.SetLastServerSideApplyManager(manager)

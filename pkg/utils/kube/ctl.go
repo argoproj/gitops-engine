@@ -19,6 +19,7 @@ import (
 	"k8s.io/kube-openapi/pkg/util/proto"
 	"k8s.io/kubectl/pkg/util/openapi"
 
+	"github.com/argoproj/gitops-engine/pkg/diff"
 	utils "github.com/argoproj/gitops-engine/pkg/utils/io"
 	"github.com/argoproj/gitops-engine/pkg/utils/tracing"
 )
@@ -131,11 +132,11 @@ func (k *KubectlCmd) LoadOpenAPISchema(config *rest.Config) (openapi.Resources, 
 	oapiGetter := openapi.NewOpenAPIGetter(disco)
 	oapiResources, err := openapi.NewOpenAPIParser(oapiGetter).Parse()
 	if err != nil {
-		return nil, nil, fmt.Errorf("error getting openapi resources: %s", err)
+		return nil, nil, fmt.Errorf("error getting openapi resources: %w", err)
 	}
 	gvkParser, err := k.newGVKParser(oapiGetter)
 	if err != nil {
-		return oapiResources, nil, fmt.Errorf("error getting gvk parser: %s", err)
+		return oapiResources, nil, fmt.Errorf("error getting gvk parser: %w", err)
 	}
 	return oapiResources, gvkParser, nil
 }
@@ -143,11 +144,11 @@ func (k *KubectlCmd) LoadOpenAPISchema(config *rest.Config) (openapi.Resources, 
 func (k *KubectlCmd) newGVKParser(oapiGetter discovery.OpenAPISchemaInterface) (*managedfields.GvkParser, error) {
 	doc, err := oapiGetter.OpenAPISchema()
 	if err != nil {
-		return nil, fmt.Errorf("error getting openapi schema: %s", err)
+		return nil, fmt.Errorf("error getting openapi schema: %w", err)
 	}
 	models, err := proto.NewOpenAPIData(doc)
 	if err != nil {
-		return nil, fmt.Errorf("error getting openapi data: %s", err)
+		return nil, fmt.Errorf("error getting openapi data: %w", err)
 	}
 	var taintedGVKs []schema.GroupVersionKind
 	models, taintedGVKs = newUniqueModels(models)
@@ -273,13 +274,13 @@ func (k *KubectlCmd) DeleteResource(ctx context.Context, config *rest.Config, gv
 func (k *KubectlCmd) ManageResources(config *rest.Config, openAPISchema openapi.Resources) (ResourceOperations, func(), error) {
 	f, err := os.CreateTemp(utils.TempDir, "")
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to generate temp file for kubeconfig: %v", err)
+		return nil, nil, fmt.Errorf("failed to generate temp file for kubeconfig: %w", err)
 	}
 	_ = f.Close()
 	err = WriteKubeConfig(config, "", f.Name())
 	if err != nil {
 		utils.DeleteFile(f.Name())
-		return nil, nil, fmt.Errorf("failed to write kubeconfig: %v", err)
+		return nil, nil, fmt.Errorf("failed to write kubeconfig: %w", err)
 	}
 	fact := kubeCmdFactory(f.Name(), "", config)
 	cleanup := func() {
@@ -292,6 +293,31 @@ func (k *KubectlCmd) ManageResources(config *rest.Config, openAPISchema openapi.
 		tracer:        k.Tracer,
 		log:           k.Log,
 		onKubectlRun:  k.OnKubectlRun,
+	}, cleanup, nil
+}
+
+func ManageServerSideDiffDryRuns(config *rest.Config, openAPISchema openapi.Resources, tracer tracing.Tracer, log logr.Logger, onKubectlRun OnKubectlRunFunc) (diff.KubeApplier, func(), error) {
+	f, err := os.CreateTemp(utils.TempDir, "")
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate temp file for kubeconfig: %w", err)
+	}
+	_ = f.Close()
+	err = WriteKubeConfig(config, "", f.Name())
+	if err != nil {
+		utils.DeleteFile(f.Name())
+		return nil, nil, fmt.Errorf("failed to write kubeconfig: %w", err)
+	}
+	fact := kubeCmdFactory(f.Name(), "", config)
+	cleanup := func() {
+		utils.DeleteFile(f.Name())
+	}
+	return &kubectlServerSideDiffDryRunApplier{
+		config:        config,
+		fact:          fact,
+		openAPISchema: openAPISchema,
+		tracer:        tracer,
+		log:           log,
+		onKubectlRun:  onKubectlRun,
 	}, cleanup, nil
 }
 

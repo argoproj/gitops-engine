@@ -10,8 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/argoproj/gitops-engine/pkg/diff/mocks"
-	"github.com/argoproj/gitops-engine/pkg/diff/testdata"
 	openapi_v2 "github.com/google/gnostic-models/openapiv2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -19,7 +17,6 @@ import (
 	"google.golang.org/protobuf/proto"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -29,6 +26,9 @@ import (
 	"k8s.io/klog/v2/textlogger"
 	openapiproto "k8s.io/kube-openapi/pkg/util/proto"
 	"sigs.k8s.io/yaml"
+
+	"github.com/argoproj/gitops-engine/pkg/diff/mocks"
+	"github.com/argoproj/gitops-engine/pkg/diff/testdata"
 )
 
 func printDiff(result *DiffResult) (string, error) {
@@ -62,7 +62,7 @@ func printDiffInternal(name string, live *unstructured.Unstructured, target *uns
 	if err != nil {
 		return nil, err
 	}
-	liveFile := filepath.Join(tempDir, fmt.Sprintf("%s-live.yaml", name))
+	liveFile := filepath.Join(tempDir, name+"-live.yaml")
 	liveData := []byte("")
 	if live != nil {
 		liveData, err = yaml.Marshal(live)
@@ -125,18 +125,18 @@ func newDeployment() *appsv1.Deployment {
 					"app": "demo",
 				},
 			},
-			Template: v1.PodTemplateSpec{
+			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						"app": "demo",
 					},
 				},
-				Spec: v1.PodSpec{
-					Containers: []v1.Container{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
 						{
 							Name:  "demo",
 							Image: "gcr.io/kuar-demo/kuard-amd64:1",
-							Ports: []v1.ContainerPort{
+							Ports: []corev1.ContainerPort{
 								{
 									ContainerPort: 80,
 								},
@@ -150,6 +150,7 @@ func newDeployment() *appsv1.Deployment {
 }
 
 func diff(t *testing.T, config, live *unstructured.Unstructured, options ...Option) *DiffResult {
+	t.Helper()
 	res, err := Diff(config, live, options...)
 	assert.NoError(t, err)
 	return res
@@ -171,9 +172,7 @@ func TestDiff(t *testing.T) {
 func TestDiff_KnownTypeInvalidValue(t *testing.T) {
 	leftDep := newDeployment()
 	leftUn := mustToUnstructured(leftDep)
-	if !assert.NoError(t, unstructured.SetNestedField(leftUn.Object, "badValue", "spec", "revisionHistoryLimit")) {
-		return
-	}
+	require.NoError(t, unstructured.SetNestedField(leftUn.Object, "badValue", "spec", "revisionHistoryLimit"))
 
 	t.Run("NoDifference", func(t *testing.T) {
 		diffRes := diff(t, leftUn, leftUn, diffOptionsForTest()...)
@@ -187,9 +186,7 @@ func TestDiff_KnownTypeInvalidValue(t *testing.T) {
 
 	t.Run("HasDifference", func(t *testing.T) {
 		rightUn := leftUn.DeepCopy()
-		if !assert.NoError(t, unstructured.SetNestedField(rightUn.Object, "3", "spec", "revisionHistoryLimit")) {
-			return
-		}
+		require.NoError(t, unstructured.SetNestedField(rightUn.Object, "3", "spec", "revisionHistoryLimit"))
 
 		diffRes := diff(t, leftUn, rightUn, diffOptionsForTest()...)
 		assert.True(t, diffRes.Modified)
@@ -205,13 +202,13 @@ func TestDiffWithNils(t *testing.T) {
 	// This "difference" is checked at the comparator.
 	assert.False(t, diffRes.Modified)
 	diffRes, err := TwoWayDiff(nil, resource)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.False(t, diffRes.Modified)
 
 	diffRes = diff(t, resource, nil, diffOptionsForTest()...)
 	assert.True(t, diffRes.Modified)
 	diffRes, err = TwoWayDiff(resource, nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, diffRes.Modified)
 }
 
@@ -300,7 +297,7 @@ func TestThreeWayDiff(t *testing.T) {
 	// difference
 	configBytes, err := json.Marshal(configDep)
 	require.NoError(t, err)
-	liveDep.Annotations[v1.LastAppliedConfigAnnotation] = string(configBytes)
+	liveDep.Annotations[corev1.LastAppliedConfigAnnotation] = string(configBytes)
 	configUn = mustToUnstructured(configDep)
 	liveUn = mustToUnstructured(liveDep)
 	res = diff(t, configUn, liveUn, diffOptionsForTest()...)
@@ -322,7 +319,7 @@ func TestThreeWayDiff(t *testing.T) {
 	// last-applied-configuration annotation from the live object, and redo the diff. This time,
 	// the diff will report not modified (because we have no way of knowing what was a defaulted
 	// field without this annotation)
-	delete(liveDep.Annotations, v1.LastAppliedConfigAnnotation)
+	delete(liveDep.Annotations, corev1.LastAppliedConfigAnnotation)
 	configUn = mustToUnstructured(configDep)
 	liveUn = mustToUnstructured(liveDep)
 	res = diff(t, configUn, liveUn, diffOptionsForTest()...)
@@ -528,7 +525,7 @@ func TestDiffResourceWithInvalidField(t *testing.T) {
 	diffRes := diff(t, &leftUn, rightUn, diffOptionsForTest()...)
 	assert.True(t, diffRes.Modified)
 	ascii, err := printDiff(diffRes)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	assert.Contains(t, ascii, "invalidKey")
 	if ascii != "" {
@@ -753,20 +750,14 @@ func TestUnsortedEndpoints(t *testing.T) {
 }
 
 func buildGVKParser(t *testing.T) *managedfields.GvkParser {
+	t.Helper()
 	document := &openapi_v2.Document{}
-	err := proto.Unmarshal(testdata.OpenAPIV2Doc, document)
-	if err != nil {
-		t.Fatalf("error unmarshaling openapi doc: %s", err)
-	}
+	require.NoErrorf(t, proto.Unmarshal(testdata.OpenAPIV2Doc, document), "error unmarshaling openapi doc")
 	models, err := openapiproto.NewOpenAPIData(document)
-	if err != nil {
-		t.Fatalf("error building openapi data: %s", err)
-	}
+	require.NoErrorf(t, err, "error building openapi data: %s", err)
 
 	gvkParser, err := managedfields.NewGVKParser(models, false)
-	if err != nil {
-		t.Fatalf("error building gvkParser: %s", err)
-	}
+	require.NoErrorf(t, err, "error building gvkParser: %s", err)
 	return gvkParser
 }
 
@@ -1351,10 +1342,7 @@ func getLiveSecretJsonBytes() []byte {
 func bytesToUnstructured(t *testing.T, jsonBytes []byte) *unstructured.Unstructured {
 	t.Helper()
 	var jsonMap map[string]any
-	err := json.Unmarshal(jsonBytes, &jsonMap)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, json.Unmarshal(jsonBytes, &jsonMap))
 	return &unstructured.Unstructured{
 		Object: jsonMap,
 	}
@@ -1369,7 +1357,7 @@ func TestHideSecretDataHandleEmptySecret(t *testing.T) {
 	target, live, err := HideSecretData(targetSecret, liveSecret, nil)
 
 	// then
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.NotNil(t, target)
 	assert.NotNil(t, live)
 	assert.Nil(t, target.Object["data"])
@@ -1403,8 +1391,7 @@ metadata:
   name: my-sa
 `)
 	var un unstructured.Unstructured
-	err := yaml.Unmarshal(manifest, &un)
-	assert.NoError(t, err)
+	require.NoError(t, yaml.Unmarshal(manifest, &un))
 	newUn := remarshal(&un, applyOptions(diffOptionsForTest()))
 	_, ok := newUn.Object["imagePullSecrets"]
 	assert.False(t, ok)
@@ -1436,8 +1423,7 @@ spec:
         cpu: 0.2
 `)
 	un := unstructured.Unstructured{}
-	err := yaml.Unmarshal(manifest, &un)
-	require.NoError(t, err)
+	require.NoError(t, yaml.Unmarshal(manifest, &un))
 
 	testCases := []struct {
 		name        string
@@ -1519,20 +1505,14 @@ func diffOptionsForTest() []Option {
 func YamlToSvc(t *testing.T, y []byte) *corev1.Service {
 	t.Helper()
 	svc := corev1.Service{}
-	err := yaml.Unmarshal(y, &svc)
-	if err != nil {
-		t.Fatalf("error unmarshaling service bytes: %s", err)
-	}
+	require.NoErrorf(t, yaml.Unmarshal(y, &svc), "error unmarshaling service bytes")
 	return &svc
 }
 
 func YamlToDeploy(t *testing.T, y []byte) *appsv1.Deployment {
 	t.Helper()
 	deploy := appsv1.Deployment{}
-	err := yaml.Unmarshal(y, &deploy)
-	if err != nil {
-		t.Fatalf("error unmarshaling deployment bytes: %s", err)
-	}
+	require.NoErrorf(t, yaml.Unmarshal(y, &deploy), "error unmarshaling deployment bytes")
 	return &deploy
 }
 
