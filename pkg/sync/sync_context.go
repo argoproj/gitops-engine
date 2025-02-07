@@ -590,40 +590,48 @@ func (sc *syncContext) removeHookFinalizer(task *syncTask) error {
 	if task.liveObj == nil {
 		return nil
 	}
-	finalizers := task.targetObj.GetFinalizers()
-	var mutated bool
-	for i, finalizer := range finalizers {
-		if finalizer == hook.HookFinalizer {
-			finalizers = append(finalizers[:i], finalizers[i+1:]...)
-			mutated = true
-			break
-		}
-	}
-	if mutated {
-		task.targetObj.SetFinalizers(finalizers)
-		task.liveObj.SetFinalizers(finalizers)
-		// The cached live object may be stale in the controller cache, and the actual object may have been updated in the meantime,
-		// and Kubernetes API will return a conflict error on the Update call.
-		// In that case, we need to get the latest version of the object and retry the update.
-		return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			updateErr := sc.updateResource(task)
-			if apierr.IsConflict(updateErr) {
-				sc.log.WithValues("task", task).V(1).Info("Retrying hook finalizer removal due to conflict on update")
-				resIf, err := sc.getResourceIf(task, "get")
-				if err != nil {
-					return err
-				}
-				liveObj, err := resIf.Get(context.TODO(), task.targetObj.GetName(), metav1.GetOptions{})
-				if err != nil {
-					return err
-				}
-				task.liveObj = liveObj
+	removeFinalizerMMutation := func(obj *unstructured.Unstructured) bool {
+		finalizers := obj.GetFinalizers()
+		for i, finalizer := range finalizers {
+			if finalizer == hook.HookFinalizer {
+				obj.SetFinalizers(append(finalizers[:i], finalizers[i+1:]...))
+				return true
 			}
-			return updateErr
-		})
-
+		}
+		return false
 	}
-	return nil
+
+	// The cached live object may be stale in the controller cache, and the actual object may have been updated in the meantime,
+	// and Kubernetes API will return a conflict error on the Update call.
+	// In that case, we need to get the latest version of the object and retry the update.
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		mutated := removeFinalizerMMutation(task.liveObj)
+		if !mutated {
+			return nil
+		}
+
+		updateErr := sc.updateResource(task)
+		if apierr.IsConflict(updateErr) {
+			sc.log.WithValues("task", task).V(1).Info("Retrying hook finalizer removal due to conflict on update")
+			resIf, err := sc.getResourceIf(task, "get")
+			if err != nil {
+				return err
+			}
+			liveObj, err := resIf.Get(context.TODO(), task.liveObj.GetName(), metav1.GetOptions{})
+			if apierr.IsNotFound(err) {
+				sc.log.WithValues("task", task).V(1).Info("Resource is already deleted")
+				return nil
+			} else if err != nil {
+				return err
+			}
+			task.liveObj = liveObj
+		} else if apierr.IsNotFound(updateErr) {
+			// If the resource is already deleted, it is a no-op
+			sc.log.WithValues("task", task).V(1).Info("Resource is already deleted")
+			return nil
+		}
+		return updateErr
+	})
 }
 
 func (sc *syncContext) updateResource(task *syncTask) error {
