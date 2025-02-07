@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -624,7 +625,7 @@ metadata:
 					convertToVersionWasCalled = true
 
 					if testCaseCopy.localConvertFails {
-						return nil, fmt.Errorf("failed to convert resource client-side")
+						return nil, errors.New("failed to convert resource client-side")
 					}
 
 					return obj, nil
