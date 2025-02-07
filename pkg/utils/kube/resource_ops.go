@@ -156,28 +156,31 @@ func (k *kubectlServerSideDiffDryRunApplier) runResourceCommand(obj *unstructure
 	}
 	defer io.DeleteFile(manifestFile.Name())
 
+	stdoutBuf := &bytes.Buffer{}
+	stderrBuf := &bytes.Buffer{}
+
 	// Run kubectl apply
 	ioStreams := genericclioptions.IOStreams{
 		In:     &bytes.Buffer{},
-		Out:    &bytes.Buffer{},
-		ErrOut: &bytes.Buffer{},
+		Out:    stdoutBuf,
+		ErrOut: stderrBuf,
 	}
 	err = executor(ioStreams, manifestFile.Name())
 	if err != nil {
 		return "", errors.New(cleanKubectlOutput(err.Error()))
 	}
-	stdoutBuf := strings.TrimSpace(ioStreams.Out.(*bytes.Buffer).String())
-	stderrBuf := strings.TrimSpace(ioStreams.ErrOut.(*bytes.Buffer).String())
-	if len(stderrBuf) > 0 {
-		if len(stdoutBuf) == 0 {
-			err = fmt.Errorf("kubectl stdout is empty while stderr is not: %s", stderrBuf)
-			k.log.Error(err, "")
-			return "", err
-		} else {
-			k.log.Error(fmt.Errorf("kubectl stderr is not empty: %s", stderrBuf), "")
-		}
+	stdout := stdoutBuf.String()
+	stderr := stderrBuf.String()
+
+	if stderr != "" && stdout == "" {
+		err := fmt.Errorf("Server-side dry run apply had non-empty stderr: %s", stderr)
+		k.log.Error(err, "server-side diff")
+		return "", err
 	}
-	return stdoutBuf, nil
+	if stderr != "" {
+		k.log.Info("Warning: Server-side dry run apply had non-empty stderr: %s", stderr)
+	}
+	return stdout, nil
 }
 
 // rbacReconcile will perform reconciliation for RBAC resources. It will run
