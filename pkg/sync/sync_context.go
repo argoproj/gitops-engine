@@ -1175,7 +1175,7 @@ func (sc *syncContext) Terminate() {
 		}
 		if phase == common.OperationRunning {
 			err := sc.deleteResource(task)
-			if err != nil {
+			if err != nil && !apierr.IsNotFound(err) {
 				sc.setResourceResult(task, "", common.OperationFailed, fmt.Sprintf("Failed to delete: %v", err))
 				terminateSuccessful = false
 			} else {
