@@ -1307,6 +1307,7 @@ func (sc *syncContext) setResourceResult(task *syncTask, syncStatus common.Resul
 
 	res := common.ResourceSyncResult{
 		ResourceKey: kube.GetResourceKey(task.obj()),
+		Images:      kube.GetResourceImages(task.obj()),
 		Version:     task.version(),
 		Status:      task.syncStatus,
 		Message:     task.message,

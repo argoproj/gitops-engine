@@ -136,6 +136,8 @@ func NewHookDeletePolicy(p string) (HookDeletePolicy, bool) {
 type ResourceSyncResult struct {
 	// holds associated resource key
 	ResourceKey kube.ResourceKey
+	// holds the images associated with the resource
+	Images []string
 	// holds resource version
 	Version string
 	// holds the execution order
