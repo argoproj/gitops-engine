@@ -107,11 +107,13 @@ type OnEventHandler func(event watch.EventType, un *unstructured.Unstructured)
 type OnProcessEventsHandler func(duration time.Duration, processedEventsNumber int)
 
 // OnPopulateResourceInfoHandler returns additional resource metadata that should be stored in cache
-type OnPopulateResourceInfoHandler func(un *unstructured.Unstructured, isRoot bool) (info interface{}, cacheManifest bool)
+type OnPopulateResourceInfoHandler func(un *unstructured.Unstructured, isRoot bool) (info any, cacheManifest bool)
 
 // OnResourceUpdatedHandler handlers resource update event
-type OnResourceUpdatedHandler func(newRes *Resource, oldRes *Resource, namespaceResources map[kube.ResourceKey]*Resource)
-type Unsubscribe func()
+type (
+	OnResourceUpdatedHandler func(newRes *Resource, oldRes *Resource, namespaceResources map[kube.ResourceKey]*Resource)
+	Unsubscribe              func()
+)
 
 type ClusterCache interface {
 	// EnsureSynced checks cache state and synchronizes it if necessary
@@ -262,12 +264,12 @@ type clusterCacheSync struct {
 }
 
 // ListRetryFuncNever never retries on errors
-func ListRetryFuncNever(err error) bool {
+func ListRetryFuncNever(_ error) bool {
 	return false
 }
 
 // ListRetryFuncAlways always retries on errors
-func ListRetryFuncAlways(err error) bool {
+func ListRetryFuncAlways(_ error) bool {
 	return true
 }
 
@@ -332,6 +334,7 @@ func (c *clusterCache) OnProcessEventsHandler(handler OnProcessEventsHandler) Un
 		delete(c.processEventsHandlers, key)
 	}
 }
+
 func (c *clusterCache) getProcessEventsHandlers() []OnProcessEventsHandler {
 	c.handlersLock.Lock()
 	defer c.handlersLock.Unlock()
@@ -420,7 +423,7 @@ func (c *clusterCache) newResource(un *unstructured.Unstructured) *Resource {
 	ownerRefs, isInferredParentOf := c.resolveResourceReferences(un)
 
 	cacheManifest := false
-	var info interface{}
+	var info any
 	if c.populateResourceInfoHandler != nil {
 		info, cacheManifest = c.populateResourceInfoHandler(un, len(ownerRefs) == 0)
 	}
@@ -559,7 +562,6 @@ func (c *clusterCache) startMissingWatches() error {
 						delete(namespacedResources, api.GroupKind)
 						return nil
 					}
-
 				}
 				go c.watchEvents(ctx, api, resClient, ns, resourceVersion)
 				return nil
@@ -587,7 +589,7 @@ func (c *clusterCache) listResources(ctx context.Context, resClient dynamic.Reso
 	}
 	defer c.listSemaphore.Release(1)
 
-	var retryCount int64 = 0
+	var retryCount int64
 	resourceVersion := ""
 	listPager := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 		var res *unstructured.UnstructuredList
@@ -635,7 +637,6 @@ func (c *clusterCache) loadInitialState(ctx context.Context, api kube.APIResourc
 			return nil
 		})
 	})
-
 	if err != nil {
 		return "", fmt.Errorf("failed to load initial state of resource %s: %w", api.GroupKind.String(), err)
 	}
@@ -727,9 +728,11 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 					for _, v := range crd.Spec.Versions {
 						resources = append(resources, kube.APIResourceInfo{
 							GroupKind: schema.GroupKind{
-								Group: crd.Spec.Group, Kind: crd.Spec.Names.Kind},
+								Group: crd.Spec.Group, Kind: crd.Spec.Names.Kind,
+							},
 							GroupVersionResource: schema.GroupVersionResource{
-								Group: crd.Spec.Group, Version: v.Name, Resource: crd.Spec.Names.Plural},
+								Group: crd.Spec.Group, Version: v.Name, Resource: crd.Spec.Names.Plural,
+							},
 							Meta: metav1.APIResource{
 								Group:        crd.Spec.Group,
 								SingularName: crd.Spec.Names.Singular,
@@ -881,7 +884,6 @@ func (c *clusterCache) sync() error {
 	c.namespacedResources = make(map[schema.GroupKind]bool)
 	config := c.config
 	version, err := c.kubectl.GetServerVersion(config)
-
 	if err != nil {
 		return err
 	}
@@ -904,7 +906,6 @@ func (c *clusterCache) sync() error {
 	c.openAPISchema = openAPISchema
 
 	apis, err := c.kubectl.GetAPIResources(c.config, true, c.settings.ResourcesFilter)
-
 	if err != nil {
 		return err
 	}
@@ -939,8 +940,9 @@ func (c *clusterCache) sync() error {
 					if un, ok := obj.(*unstructured.Unstructured); !ok {
 						return fmt.Errorf("object %s/%s has an unexpected type", un.GroupVersionKind().String(), un.GetName())
 					} else {
+						newRes := c.newResource(un)
 						lock.Lock()
-						c.setNode(c.newResource(un))
+						c.setNode(newRes)
 						lock.Unlock()
 					}
 					return nil
@@ -973,7 +975,6 @@ func (c *clusterCache) sync() error {
 			return nil
 		})
 	})
-
 	if err != nil {
 		c.log.Error(err, "Failed to sync cluster")
 		return fmt.Errorf("failed to sync cluster %s: %v", c.config.Host, err)
@@ -1408,11 +1409,9 @@ func (c *clusterCache) onNodeRemoved(key kube.ResourceKey) {
 	}
 }
 
-var (
-	ignoredRefreshResources = map[string]bool{
-		"/" + kube.EndpointsKind: true,
-	}
-)
+var ignoredRefreshResources = map[string]bool{
+	"/" + kube.EndpointsKind: true,
+}
 
 // GetClusterInfo returns cluster cache statistics
 func (c *clusterCache) GetClusterInfo() ClusterInfo {

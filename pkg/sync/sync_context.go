@@ -657,7 +657,7 @@ func (sc *syncContext) GetState() (common.OperationPhase, string, []common.Resou
 }
 
 func (sc *syncContext) setOperationFailed(syncFailTasks, syncFailedTasks syncTasks, message string) {
-	errorMessageFactory := func(tasks []*syncTask, message string) string {
+	errorMessageFactory := func(_ []*syncTask, message string) string {
 		messages := syncFailedTasks.Map(func(task *syncTask) string {
 			return task.message
 		})
@@ -787,7 +787,6 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 
 	// check permissions
 	for _, task := range tasks {
-
 		var serverRes *metav1.APIResource
 		var err error
 
@@ -994,7 +993,7 @@ func (sc *syncContext) setOperationPhase(phase common.OperationPhase, message st
 
 // ensureCRDReady waits until specified CRD is ready (established condition is true).
 func (sc *syncContext) ensureCRDReady(name string) error {
-	return wait.PollUntilContextTimeout(context.Background(), time.Duration(100)*time.Millisecond, crdReadinessTimeout, true, func(ctx context.Context) (bool, error) {
+	return wait.PollUntilContextTimeout(context.Background(), time.Duration(100)*time.Millisecond, crdReadinessTimeout, true, func(_ context.Context) (bool, error) {
 		crd, err := sc.extensionsclientset.ApiextensionsV1().CustomResourceDefinitions().Get(context.TODO(), name, metav1.GetOptions{})
 		if err != nil {
 			return false, err
@@ -1313,7 +1312,7 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 	// finally create resources
 	var tasksGroup syncTasks
 	for _, task := range createTasks {
-		//Only wait if the type of the next task is different than the previous type
+		// Only wait if the type of the next task is different than the previous type
 		if len(tasksGroup) > 0 && tasksGroup[0].targetObj.GetKind() != task.kind() {
 			state = sc.processCreateTasks(state, tasksGroup, dryRun)
 			tasksGroup = syncTasks{task}

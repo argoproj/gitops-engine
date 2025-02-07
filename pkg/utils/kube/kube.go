@@ -112,7 +112,7 @@ func TestConfig(config *rest.Config) error {
 }
 
 // ToUnstructured converts a concrete K8s API type to a un unstructured object
-func ToUnstructured(obj interface{}) (*unstructured.Unstructured, error) {
+func ToUnstructured(obj any) (*unstructured.Unstructured, error) {
 	uObj, err := runtime.NewTestUnstructuredConverter(equality.Semantic).ToUnstructured(obj)
 	if err != nil {
 		return nil, err
@@ -121,7 +121,7 @@ func ToUnstructured(obj interface{}) (*unstructured.Unstructured, error) {
 }
 
 // MustToUnstructured converts a concrete K8s API type to a un unstructured object and panics if not successful
-func MustToUnstructured(obj interface{}) *unstructured.Unstructured {
+func MustToUnstructured(obj any) *unstructured.Unstructured {
 	uObj, err := ToUnstructured(obj)
 	if err != nil {
 		panic(err)
@@ -205,12 +205,15 @@ var (
 	// See ApplyOpts::Run()
 	// cmdutil.AddSourceToErr(fmt.Sprintf("applying patch:\n%s\nto:\n%v\nfor:", patchBytes, info), info.Source, err)
 	kubectlApplyPatchErrOutRegexp = regexp.MustCompile(`(?s)^error when applying patch:.*\nfor: "\S+": `)
+
+	kubectlErrOutMapRegexp = regexp.MustCompile(`map\[.*\]`)
 )
 
 // cleanKubectlOutput makes the error output of kubectl a little better to read
 func cleanKubectlOutput(s string) string {
 	s = strings.TrimSpace(s)
 	s = kubectlErrOutRegexp.ReplaceAllString(s, "")
+	s = kubectlErrOutMapRegexp.ReplaceAllString(s, "")
 	s = kubectlApplyPatchErrOutRegexp.ReplaceAllString(s, "")
 	s = strings.Replace(s, "; if you choose to ignore these errors, turn validation off with --validate=false", "", -1)
 	return s
@@ -406,7 +409,7 @@ func GetDeploymentReplicas(u *unstructured.Unstructured) *int64 {
 
 // RetryUntilSucceed keep retrying given action with specified interval until action succeed or specified context is done.
 func RetryUntilSucceed(ctx context.Context, interval time.Duration, desc string, log logr.Logger, action func() error) {
-	pollErr := wait.PollUntilContextCancel(ctx, interval, true, func(ctx context.Context) (bool /*done*/, error) {
+	pollErr := wait.PollUntilContextCancel(ctx, interval, true, func(_ context.Context) (bool /*done*/, error) {
 		log.V(1).Info(fmt.Sprintf("Start %s", desc))
 		err := action()
 		if err == nil {

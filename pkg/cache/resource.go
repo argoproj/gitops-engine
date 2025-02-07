@@ -2,6 +2,7 @@ package cache
 
 import (
 	"fmt"
+
 	"k8s.io/apimachinery/pkg/types"
 
 	v1 "k8s.io/api/core/v1"
@@ -22,7 +23,7 @@ type Resource struct {
 	// Optional creation timestamp of the resource
 	CreationTimestamp *metav1.Time
 	// Optional additional information about the resource
-	Info interface{}
+	Info any
 	// Optional whole resource manifest
 	Resource *unstructured.Unstructured
 
@@ -36,7 +37,6 @@ func (r *Resource) ResourceKey() kube.ResourceKey {
 
 func (r *Resource) isParentOf(child *Resource) bool {
 	for i, ownerRef := range child.OwnerRefs {
-
 		// backfill UID of inferred owner child references
 		if ownerRef.UID == "" && r.Ref.Kind == ownerRef.Kind && r.Ref.APIVersion == ownerRef.APIVersion && r.Ref.Name == ownerRef.Name {
 			ownerRef.UID = r.Ref.UID
