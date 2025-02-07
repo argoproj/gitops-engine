@@ -590,7 +590,7 @@ func (sc *syncContext) removeHookFinalizer(task *syncTask) error {
 	if task.liveObj == nil {
 		return nil
 	}
-	removeFinalizerMMutation := func(obj *unstructured.Unstructured) bool {
+	removeFinalizerMutation := func(obj *unstructured.Unstructured) bool {
 		finalizers := obj.GetFinalizers()
 		for i, finalizer := range finalizers {
 			if finalizer == hook.HookFinalizer {
@@ -605,7 +605,7 @@ func (sc *syncContext) removeHookFinalizer(task *syncTask) error {
 	// and Kubernetes API will return a conflict error on the Update call.
 	// In that case, we need to get the latest version of the object and retry the update.
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		mutated := removeFinalizerMMutation(task.liveObj)
+		mutated := removeFinalizerMutation(task.liveObj)
 		if !mutated {
 			return nil
 		}
