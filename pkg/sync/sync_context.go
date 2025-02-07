@@ -298,7 +298,7 @@ const (
 // getOperationPhase returns a health status from a _live_ unstructured object
 func (sc *syncContext) getOperationPhase(obj *unstructured.Unstructured) (common.OperationPhase, string, error) {
 	phase := common.OperationSucceeded
-	message := fmt.Sprintf("%s created", obj.GetName())
+	message := obj.GetName() + " created"
 
 	resHealth, err := health.GetResourceHealth(obj, sc.healthOverride)
 	if err != nil {

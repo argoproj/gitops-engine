@@ -28,7 +28,6 @@ import (
 
 	"github.com/argoproj/gitops-engine/pkg/diff"
 	"github.com/argoproj/gitops-engine/pkg/health"
-	"github.com/argoproj/gitops-engine/pkg/sync/common"
 	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
 	"github.com/argoproj/gitops-engine/pkg/sync/hook"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
@@ -1290,14 +1289,14 @@ func TestRunSync_HooksNotDeletedIfPhaseNotCompleted(t *testing.T) {
 	hook1 := newHook(synccommon.HookTypePreSync)
 	hook1.SetName("completed-hook")
 	hook1.SetNamespace(testingutils.FakeArgoCDNamespace)
-	_ = testingutils.Annotate(hook1, synccommon.AnnotationKeyHookDeletePolicy, string(common.HookDeletePolicyHookSucceeded))
+	_ = testingutils.Annotate(hook1, synccommon.AnnotationKeyHookDeletePolicy, string(synccommon.HookDeletePolicyHookSucceeded))
 	completedHook := hook1.DeepCopy()
 	completedHook.SetFinalizers(append(completedHook.GetFinalizers(), hook.HookFinalizer))
 
 	hook2 := newHook(synccommon.HookTypePreSync)
 	hook2.SetNamespace(testingutils.FakeArgoCDNamespace)
 	hook2.SetName("in-progress-hook")
-	_ = testingutils.Annotate(hook2, synccommon.AnnotationKeyHookDeletePolicy, string(common.HookDeletePolicyHookSucceeded))
+	_ = testingutils.Annotate(hook2, synccommon.AnnotationKeyHookDeletePolicy, string(synccommon.HookDeletePolicyHookSucceeded))
 	inProgressHook := hook2.DeepCopy()
 	inProgressHook.SetFinalizers(append(inProgressHook.GetFinalizers(), hook.HookFinalizer))
 
@@ -1319,9 +1318,9 @@ func TestRunSync_HooksNotDeletedIfPhaseNotCompleted(t *testing.T) {
 	fakeDynamicClient := fake.NewSimpleDynamicClient(runtime.NewScheme())
 	syncCtx.dynamicIf = fakeDynamicClient
 	updatedCount := 0
-	fakeDynamicClient.PrependReactor("update", "*", func(action testcore.Action) (handled bool, ret runtime.Object, err error) {
+	fakeDynamicClient.PrependReactor("update", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
 		// Removing the finalizers
-		updatedCount += 1
+		updatedCount++
 		return true, nil, nil
 	})
 	deletedCount := 0
@@ -1350,14 +1349,14 @@ func TestRunSync_HooksDeletedAfterPhaseCompleted(t *testing.T) {
 	hook1 := newHook(synccommon.HookTypePreSync)
 	hook1.SetName("completed-hook1")
 	hook1.SetNamespace(testingutils.FakeArgoCDNamespace)
-	_ = testingutils.Annotate(hook1, synccommon.AnnotationKeyHookDeletePolicy, string(common.HookDeletePolicyHookSucceeded))
+	_ = testingutils.Annotate(hook1, synccommon.AnnotationKeyHookDeletePolicy, string(synccommon.HookDeletePolicyHookSucceeded))
 	completedHook1 := hook1.DeepCopy()
 	completedHook1.SetFinalizers(append(completedHook1.GetFinalizers(), hook.HookFinalizer))
 
 	hook2 := newHook(synccommon.HookTypePreSync)
 	hook2.SetNamespace(testingutils.FakeArgoCDNamespace)
 	hook2.SetName("completed-hook2")
-	_ = testingutils.Annotate(hook2, synccommon.AnnotationKeyHookDeletePolicy, string(common.HookDeletePolicyHookSucceeded))
+	_ = testingutils.Annotate(hook2, synccommon.AnnotationKeyHookDeletePolicy, string(synccommon.HookDeletePolicyHookSucceeded))
 	completedHook2 := hook2.DeepCopy()
 	completedHook2.SetFinalizers(append(completedHook1.GetFinalizers(), hook.HookFinalizer))
 
@@ -1376,9 +1375,9 @@ func TestRunSync_HooksDeletedAfterPhaseCompleted(t *testing.T) {
 	fakeDynamicClient := fake.NewSimpleDynamicClient(runtime.NewScheme())
 	syncCtx.dynamicIf = fakeDynamicClient
 	updatedCount := 0
-	fakeDynamicClient.PrependReactor("update", "*", func(action testcore.Action) (handled bool, ret runtime.Object, err error) {
+	fakeDynamicClient.PrependReactor("update", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
 		// Removing the finalizers
-		updatedCount += 1
+		updatedCount++
 		return true, nil, nil
 	})
 	deletedCount := 0
@@ -1407,14 +1406,14 @@ func TestRunSync_HooksDeletedAfterPhaseCompletedFailed(t *testing.T) {
 	hook1 := newHook(synccommon.HookTypeSync)
 	hook1.SetName("completed-hook1")
 	hook1.SetNamespace(testingutils.FakeArgoCDNamespace)
-	_ = testingutils.Annotate(hook1, synccommon.AnnotationKeyHookDeletePolicy, string(common.HookDeletePolicyHookFailed))
+	_ = testingutils.Annotate(hook1, synccommon.AnnotationKeyHookDeletePolicy, string(synccommon.HookDeletePolicyHookFailed))
 	completedHook1 := hook1.DeepCopy()
 	completedHook1.SetFinalizers(append(completedHook1.GetFinalizers(), hook.HookFinalizer))
 
 	hook2 := newHook(synccommon.HookTypeSync)
 	hook2.SetNamespace(testingutils.FakeArgoCDNamespace)
 	hook2.SetName("completed-hook2")
-	_ = testingutils.Annotate(hook2, synccommon.AnnotationKeyHookDeletePolicy, string(common.HookDeletePolicyHookFailed))
+	_ = testingutils.Annotate(hook2, synccommon.AnnotationKeyHookDeletePolicy, string(synccommon.HookDeletePolicyHookFailed))
 	completedHook2 := hook2.DeepCopy()
 	completedHook2.SetFinalizers(append(completedHook1.GetFinalizers(), hook.HookFinalizer))
 
@@ -1433,9 +1432,9 @@ func TestRunSync_HooksDeletedAfterPhaseCompletedFailed(t *testing.T) {
 	fakeDynamicClient := fake.NewSimpleDynamicClient(runtime.NewScheme())
 	syncCtx.dynamicIf = fakeDynamicClient
 	updatedCount := 0
-	fakeDynamicClient.PrependReactor("update", "*", func(action testcore.Action) (handled bool, ret runtime.Object, err error) {
+	fakeDynamicClient.PrependReactor("update", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
 		// Removing the finalizers
-		updatedCount += 1
+		updatedCount++
 		return true, nil, nil
 	})
 	deletedCount := 0
