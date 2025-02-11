@@ -1031,16 +1031,16 @@ func (sc *syncContext) shouldUseServerSideApply(targetObj *unstructured.Unstruct
 	return sc.serverSideApply || resourceutil.HasAnnotationOption(targetObj, common.AnnotationSyncOptions, common.SyncOptionServerSideApply)
 }
 
-func formatValue(v interface{}) string {
+func formatValue(v any) string {
 	if v == nil {
 		return "<nil>"
 	}
 
 	// Special case for volumeClaimTemplates
-	if templates, ok := v.([]interface{}); ok {
+	if templates, ok := v.([]any); ok {
 		// For a single volumeClaimTemplate field change
 		if len(templates) == 1 {
-			if template, ok := templates[0].(map[string]interface{}); ok {
+			if template, ok := templates[0].(map[string]any); ok {
 				if storage := getTemplateStorage(template); storage != "" {
 					return fmt.Sprintf("%q", storage)
 				}
@@ -1049,8 +1049,8 @@ func formatValue(v interface{}) string {
 		// For multiple templates or other array types format
 		var names []string
 		for _, t := range templates {
-			if template, ok := t.(map[string]interface{}); ok {
-				if metadata, ok := template["metadata"].(map[string]interface{}); ok {
+			if template, ok := t.(map[string]any); ok {
+				if metadata, ok := template["metadata"].(map[string]any); ok {
 					if name, ok := metadata["name"].(string); ok {
 						if storage := getTemplateStorage(template); storage != "" {
 							names = append(names, fmt.Sprintf("%s(%s)", name, storage))
@@ -1065,8 +1065,8 @@ func formatValue(v interface{}) string {
 	}
 
 	// Special case for selector matchLabels
-	if m, ok := v.(map[string]interface{}); ok {
-		if matchLabels, exists := m["matchLabels"].(map[string]interface{}); exists {
+	if m, ok := v.(map[string]any); ok {
+		if matchLabels, exists := m["matchLabels"].(map[string]any); exists {
 			var labels []string
 			for k, v := range matchLabels {
 				labels = append(labels, fmt.Sprintf("%s:%s", k, v))
@@ -1084,16 +1084,16 @@ func formatValue(v interface{}) string {
 }
 
 // Get storage size from template
-func getTemplateStorage(template map[string]interface{}) string {
-	spec, ok := template["spec"].(map[string]interface{})
+func getTemplateStorage(template map[string]any) string {
+	spec, ok := template["spec"].(map[string]any)
 	if !ok {
 		return ""
 	}
-	resources, ok := spec["resources"].(map[string]interface{})
+	resources, ok := spec["resources"].(map[string]any)
 	if !ok {
 		return ""
 	}
-	requests, ok := resources["requests"].(map[string]interface{})
+	requests, ok := resources["requests"].(map[string]any)
 	if !ok {
 		return ""
 	}
@@ -1105,7 +1105,7 @@ func getTemplateStorage(template map[string]interface{}) string {
 }
 
 // Format field changes for error messages
-func formatFieldChange(field string, currentVal, desiredVal interface{}) string {
+func formatFieldChange(field string, currentVal, desiredVal any) string {
 	return fmt.Sprintf("   - %s:\n      from: %s\n      to:   %s",
 		field, formatValue(currentVal), formatValue(desiredVal))
 }
@@ -1177,8 +1177,8 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 						} else if !reflect.DeepEqual(currentVal, desiredVal) {
 							if k == "volumeClaimTemplates" {
 								// Handle volumeClaimTemplates specially
-								currentTemplates := currentVal.([]interface{})
-								desiredTemplates := desiredVal.([]interface{})
+								currentTemplates := currentVal.([]any)
+								desiredTemplates := desiredVal.([]any)
 
 								// If template count differs or we're adding/removing templates,
 								// use the standard array format
@@ -1188,10 +1188,10 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 									// Compare each template
 									for i, desired := range desiredTemplates {
 										current := currentTemplates[i]
-										desiredTemplate := desired.(map[string]interface{})
-										currentTemplate := current.(map[string]interface{})
+										desiredTemplate := desired.(map[string]any)
+										currentTemplate := current.(map[string]any)
 
-										name := desiredTemplate["metadata"].(map[string]interface{})["name"].(string)
+										name := desiredTemplate["metadata"].(map[string]any)["name"].(string)
 										desiredStorage := getTemplateStorage(desiredTemplate)
 										currentStorage := getTemplateStorage(currentTemplate)
 
