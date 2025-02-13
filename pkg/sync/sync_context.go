@@ -1110,6 +1110,7 @@ func (sc *syncContext) shouldUseServerSideApply(targetObj *unstructured.Unstruct
 	return sc.serverSideApply || resourceutil.HasAnnotationOption(targetObj, common.AnnotationSyncOptions, common.SyncOptionServerSideApply)
 }
 
+<<<<<<< HEAD
 // needsClientSideApplyMigration checks if a resource has fields managed by the specified manager
 // that need to be migrated to the server-side apply manager
 func (sc *syncContext) needsClientSideApplyMigration(liveObj *unstructured.Unstructured, fieldManager string) bool {
@@ -1156,56 +1157,103 @@ func (sc *syncContext) performClientSideApplyMigration(targetObj *unstructured.U
 	return nil
 }
 
+=======
+// formatValue converts any value to its string representation with special handling for
+// templates, maps, and strings. Returns "<nil>" for nil values.
+>>>>>>> 3df63b1 (refactor formatValue method to reduce complexity)
 func formatValue(v any) string {
 	if v == nil {
 		return "<nil>"
 	}
 
-	// Special case for volumeClaimTemplates
-	if templates, ok := v.([]any); ok {
-		// For a single volumeClaimTemplate field change
-		if len(templates) == 1 {
-			if template, ok := templates[0].(map[string]any); ok {
-				if storage := getTemplateStorage(template); storage != "" {
-					return fmt.Sprintf("%q", storage)
-				}
-			}
+	switch val := v.(type) {
+	case []any:
+		return formatTemplates(val)
+	case map[string]any:
+		return formatMap(val)
+	case string:
+		return fmt.Sprintf("%q", val)
+	default:
+		return fmt.Sprintf("%v", val)
+	}
+}
+
+// formatTemplates handles the formatting of volumeClaimTemplates arrays.
+// For single templates with storage, returns the storage value.
+// For multiple templates, returns a formatted list of template names with storage.
+func formatTemplates(templates []any) string {
+	if len(templates) == 1 {
+		if storage := getSingleTemplateStorage(templates[0]); storage != "" {
+			return fmt.Sprintf("%q", storage)
 		}
-		// For multiple templates or other array types format
-		var names []string
-		for _, t := range templates {
-			if template, ok := t.(map[string]any); ok {
-				if metadata, ok := template["metadata"].(map[string]any); ok {
-					if name, ok := metadata["name"].(string); ok {
-						if storage := getTemplateStorage(template); storage != "" {
-							names = append(names, fmt.Sprintf("%s(%s)", name, storage))
-							continue
-						}
-						names = append(names, name)
-					}
-				}
-			}
+	}
+	return formatMultipleTemplates(templates)
+}
+
+// getSingleTemplateStorage extracts storage value from a single template.
+// Returns empty string if template is invalid or has no storage.
+func getSingleTemplateStorage(t any) string {
+	template, ok := t.(map[string]any)
+	if !ok {
+		return ""
+	}
+	return getTemplateStorage(template)
+}
+
+// formatMultipleTemplates formats an array of templates into a string list
+// of template names, optionally including storage information.
+func formatMultipleTemplates(templates []any) string {
+	var names []string
+	for _, t := range templates {
+		if name := getTemplateName(t); name != "" {
+			names = append(names, name)
 		}
-		return fmt.Sprintf("[%s]", strings.Join(names, ", "))
+	}
+	return fmt.Sprintf("[%s]", strings.Join(names, ", "))
+}
+
+// getTemplateName extracts and formats the name from a template.
+// If template has storage, appends it to the name in parentheses.
+func getTemplateName(t any) string {
+	template, ok := t.(map[string]any)
+	if !ok {
+		return ""
 	}
 
-	// Special case for selector matchLabels
-	if m, ok := v.(map[string]any); ok {
-		if matchLabels, exists := m["matchLabels"].(map[string]any); exists {
-			var labels []string
-			for k, v := range matchLabels {
-				labels = append(labels, fmt.Sprintf("%s:%s", k, v))
-			}
-			sort.Strings(labels)
-			return fmt.Sprintf("{%s}", strings.Join(labels, ", "))
-		}
+	metadata, ok := template["metadata"].(map[string]any)
+	if !ok {
+		return ""
 	}
-	// Add quotes for string values
-	if str, ok := v.(string); ok {
-		return fmt.Sprintf("%q", str)
+
+	name, ok := metadata["name"].(string)
+	if !ok {
+		return ""
 	}
-	// For other types, use standard formatting
-	return fmt.Sprintf("%v", v)
+
+	if storage := getTemplateStorage(template); storage != "" {
+		return fmt.Sprintf("%s(%s)", name, storage)
+	}
+	return name
+}
+
+// formatMap handles special case formatting for maps, particularly for matchLabels.
+// Returns standard string representation for non-matchLabel maps.
+func formatMap(m map[string]any) string {
+	if matchLabels, exists := m["matchLabels"].(map[string]any); exists {
+		return formatMatchLabels(matchLabels)
+	}
+	return fmt.Sprintf("%v", m)
+}
+
+// formatMatchLabels converts a matchLabels map into a sorted string list
+// of key:value pairs enclosed in curly braces.
+func formatMatchLabels(matchLabels map[string]any) string {
+	var labels []string
+	for k, v := range matchLabels {
+		labels = append(labels, fmt.Sprintf("%s:%s", k, v))
+	}
+	sort.Strings(labels)
+	return fmt.Sprintf("{%s}", strings.Join(labels, ", "))
 }
 
 // Get storage size from template
