@@ -1235,6 +1235,80 @@ func formatFieldChange(field string, currentVal, desiredVal any) string {
 		field, formatValue(currentVal), formatValue(desiredVal))
 }
 
+// validateStatefulSetUpdate checks for changes to immutable fields in a StatefulSet
+// Returns the formatted error message and true if immutable fields were changed
+func (sc *syncContext) validateStatefulSetUpdate(current, desired *unstructured.Unstructured) (string, bool) {
+	currentSpec, _, _ := unstructured.NestedMap(current.Object, "spec")
+	desiredSpec, _, _ := unstructured.NestedMap(desired.Object, "spec")
+
+	changes := getImmutableFieldChanges(currentSpec, desiredSpec)
+	if len(changes) == 0 {
+		return "", false
+	}
+
+	sort.Strings(changes)
+	message := fmt.Sprintf("attempting to change immutable fields:\n%s\n\nForbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden",
+		strings.Join(changes, "\n"))
+	return message, true
+}
+
+// getImmutableFieldChanges compares specs and returns a list of changes to immutable fields
+func getImmutableFieldChanges(currentSpec, desiredSpec map[string]any) []string {
+	mutableFields := map[string]bool{
+		"replicas": true, "ordinals": true, "template": true,
+		"updateStrategy": true, "persistentVolumeClaimRetentionPolicy": true,
+		"minReadySeconds": true,
+	}
+
+	var changes []string
+	for k, desiredVal := range desiredSpec {
+		if mutableFields[k] {
+			continue
+		}
+
+		currentVal, exists := currentSpec[k]
+		if !exists {
+			changes = append(changes, formatFieldChange(k, nil, desiredVal))
+			continue
+		}
+
+		if !reflect.DeepEqual(currentVal, desiredVal) {
+			if k == "volumeClaimTemplates" {
+				changes = append(changes, formatVolumeClaimChanges(currentVal, desiredVal)...)
+			} else {
+				changes = append(changes, formatFieldChange(k, currentVal, desiredVal))
+			}
+		}
+	}
+	return changes
+}
+
+// formatVolumeClaimChanges handles the special case of formatting changes to volumeClaimTemplates
+func formatVolumeClaimChanges(currentVal, desiredVal any) []string {
+	currentTemplates := currentVal.([]any)
+	desiredTemplates := desiredVal.([]any)
+
+	if len(currentTemplates) != len(desiredTemplates) {
+		return []string{formatFieldChange("volumeClaimTemplates", currentVal, desiredVal)}
+	}
+
+	var changes []string
+	for i := range desiredTemplates {
+		desiredTemplate := desiredTemplates[i].(map[string]any)
+		currentTemplate := currentTemplates[i].(map[string]any)
+
+		name := desiredTemplate["metadata"].(map[string]any)["name"].(string)
+		desiredStorage := getTemplateStorage(desiredTemplate)
+		currentStorage := getTemplateStorage(currentTemplate)
+
+		if currentStorage != desiredStorage {
+			changes = append(changes, fmt.Sprintf("   - volumeClaimTemplates.%s:\n      from: %q\n      to:   %q",
+				name, currentStorage, desiredStorage))
+		}
+	}
+	return changes
+}
+
 func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.ResultCode, string) {
 	dryRunStrategy := cmdutil.DryRunNone
 	if dryRun {
@@ -1286,67 +1360,9 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 		message, err = sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager)
 	}
 	if err != nil {
-		// Check if this is a StatefulSet immutable field error
 		if strings.Contains(err.Error(), "updates to statefulset spec for fields other than") {
-			current := t.liveObj
-			desired := t.targetObj
-
-			if current != nil && desired != nil {
-				currentSpec, _, _ := unstructured.NestedMap(current.Object, "spec")
-				desiredSpec, _, _ := unstructured.NestedMap(desired.Object, "spec")
-
-				mutableFields := map[string]bool{
-					"replicas":                             true,
-					"ordinals":                             true,
-					"template":                             true,
-					"updateStrategy":                       true,
-					"persistentVolumeClaimRetentionPolicy": true,
-					"minReadySeconds":                      true,
-				}
-
-				var changes []string
-				for k, desiredVal := range desiredSpec {
-					if !mutableFields[k] {
-						currentVal, exists := currentSpec[k]
-						if !exists {
-							changes = append(changes, formatFieldChange(k, nil, desiredVal))
-						} else if !reflect.DeepEqual(currentVal, desiredVal) {
-							if k == "volumeClaimTemplates" {
-								// Handle volumeClaimTemplates specially
-								currentTemplates := currentVal.([]any)
-								desiredTemplates := desiredVal.([]any)
-
-								// If template count differs or we're adding/removing templates,
-								// use the standard array format
-								if len(currentTemplates) != len(desiredTemplates) {
-									changes = append(changes, formatFieldChange(k, currentVal, desiredVal))
-								} else {
-									// Compare each template
-									for i, desired := range desiredTemplates {
-										current := currentTemplates[i]
-										desiredTemplate := desired.(map[string]any)
-										currentTemplate := current.(map[string]any)
-
-										name := desiredTemplate["metadata"].(map[string]any)["name"].(string)
-										desiredStorage := getTemplateStorage(desiredTemplate)
-										currentStorage := getTemplateStorage(currentTemplate)
-
-										if currentStorage != desiredStorage {
-											changes = append(changes, fmt.Sprintf("   - volumeClaimTemplates.%s:\n      from: %q\n      to:   %q",
-												name, currentStorage, desiredStorage))
-										}
-									}
-								}
-							} else {
-								changes = append(changes, formatFieldChange(k, currentVal, desiredVal))
-							}
-						}
-					}
-				}
-				if len(changes) > 0 {
-					sort.Strings(changes)
-					message := fmt.Sprintf("attempting to change immutable fields:\n%s\n\nForbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden",
-						strings.Join(changes, "\n"))
+			if t.liveObj != nil && t.targetObj != nil {
+				if message, hasChanges := sc.validateStatefulSetUpdate(t.liveObj, t.targetObj); hasChanges {
 					return common.ResultCodeSyncFailed, message
 				}
 			}
@@ -1359,6 +1375,7 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 			sc.log.Error(err, fmt.Sprintf("failed to ensure that CRD %s is ready", crdName))
 		}
 	}
+
 	return common.ResultCodeSynced, message
 }
 
