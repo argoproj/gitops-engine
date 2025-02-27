@@ -197,9 +197,9 @@ func serverSideDiff(config, live *unstructured.Unstructured, opts ...Option) (*D
 // changes done by mutation webhooks. Webhook mutations are identified by finding
 // changes in predictedLive fields not associated with any manager in the
 // managedFields. All fields under this condition will be reverted with their state
-// from live. The resulting diff after this operation will only contain fields that were managed
-// by the provided 'manager' parameter. Any fields not managed by the specified
-// manager will also will be reverted with their state from live.
+// from live. The resulting diff after this operation will contain fields that were managed
+// by the provided 'manager' parameter from predictedLive merged with the fields currently in live.
+// Any fields not managed by the specified manager will also will be reverted with their state from live.
 // If the given predictedLive does not have the managedFields, an error will be returned.
 func removeWebhookMutation(predictedLive, live *unstructured.Unstructured, gvkParser *managedfields.GvkParser, manager string) (*unstructured.Unstructured, error) {
 	plManagedFields := predictedLive.GetManagedFields()
@@ -268,6 +268,9 @@ func removeWebhookMutation(predictedLive, live *unstructured.Unstructured, gvkPa
 	return &unstructured.Unstructured{Object: pl}, nil
 }
 
+// safelyRemoveFieldSet will validate if removing the fieldsToRemove set from predictedLive maintains
+// a valid schema. If removing a field in fieldsToRemove is invalid and breaks the schema, it is not safe
+// to remove and will be skipped from removal from predictedLive.
 func safelyRemoveFieldsSet(predictedLive *typed.TypedValue, fieldsToRemove *fieldpath.Set) *fieldpath.Set {
 	// In some cases, we cannot remove fields due to violation of the predicted live schema. In such cases we validate the removal
 	// of each field and only include it if the removal is valid.
