@@ -193,13 +193,11 @@ func serverSideDiff(config, live *unstructured.Unstructured, opts ...Option) (*D
 	return buildDiffResult(predictedLiveBytes, liveBytes), nil
 }
 
-// removeWebhookMutation will compare the predictedLive with live to identify
-// changes done by mutation webhooks. Webhook mutations are identified by finding
-// changes in predictedLive fields not associated with any manager in the
-// managedFields. All fields under this condition will be reverted with their state
-// from live. The resulting diff after this operation will contain fields that were managed
-// by the provided 'manager' parameter from predictedLive merged with the fields currently in live.
-// Any fields not managed by the specified manager will also will be reverted with their state from live.
+// removeWebhookMutation will compare the predictedLive with live to identify changes done by mutation webhooks.
+// Webhook mutations are removed from predictedLive by removing all fields which are not managed by the 'manager'
+// parameter from predictedLive. The resulting diff after this operation will contain fields that were managed by the
+// provided 'manager' parameter from predictedLive merged with the fields currently in live. Any fields not managed by
+// the specified manager will also will be reverted with their state from live, including any webhook mutations.
 // If the given predictedLive does not have the managedFields, an error will be returned.
 func removeWebhookMutation(predictedLive, live *unstructured.Unstructured, gvkParser *managedfields.GvkParser, manager string) (*unstructured.Unstructured, error) {
 	plManagedFields := predictedLive.GetManagedFields()
