@@ -60,6 +60,7 @@ func init() {
 		"IngressClass",
 		"Ingress",
 		"APIService",
+		"ExternalSecrets",
 	}
 	for i, kind := range kinds {
 		// make sure none of the above entries are zero, we need that for custom resources
