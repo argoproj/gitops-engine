@@ -1273,7 +1273,7 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 			ss.Go(func(state runState) runState {
 				logCtx := sc.log.WithValues("dryRun", dryRun, "task", t)
 				logCtx.V(1).Info("Pruning")
-				span := sc.syncTracer.StartSpanFromTraceParent("pruneObject", sc.syncTraceID, sc.syncTraceRootSpanID)
+				span := sc.createSpan("pruneObject", dryRun)
 				defer span.Finish()
 				result, message := sc.pruneObject(t.liveObj, sc.prune, dryRun)
 				if result == common.ResultCodeSyncFailed {
@@ -1303,7 +1303,7 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 			ss.Go(func(state runState) runState {
 				sc.log.WithValues("dryRun", dryRun, "task", t).V(1).Info("Deleting")
 				if !dryRun {
-					span := sc.syncTracer.StartSpanFromTraceParent("hooksDeletion", sc.syncTraceID, sc.syncTraceRootSpanID)
+					span := sc.createSpan("hooksDeletion", dryRun)
 					defer span.Finish()
 					err := sc.deleteResource(t)
 					message := "deleted"
@@ -1381,7 +1381,7 @@ func (sc *syncContext) processCreateTasks(state runState, tasks syncTasks, dryRu
 			logCtx := sc.log.WithValues("dryRun", dryRun, "task", t)
 			logCtx.V(1).Info("Applying")
 			validate := sc.validate && !resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionsDisableValidation)
-			span := sc.syncTracer.StartSpanFromTraceParent("applyObject", sc.syncTraceID, sc.syncTraceRootSpanID)
+			span := sc.createSpan("applyObject", dryRun)
 			defer span.Finish()
 			result, message := sc.applyObject(t, dryRun, validate)
 			if result == common.ResultCodeSyncFailed {
