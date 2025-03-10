@@ -1354,7 +1354,7 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 
 func (sc *syncContext) createSpan(operation string, dryrun bool) tracing.Span {
 	// skip tracing if dryrun
-	if dryrun {
+	if dryrun || sc.syncTracer == nil {
 		return tracing.NopTracer{}.StartSpan(operation)
 	}
 	return sc.syncTracer.StartSpanFromTraceParent(operation, sc.syncTraceID, sc.syncTraceRootSpanID)
