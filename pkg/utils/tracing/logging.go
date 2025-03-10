@@ -30,6 +30,12 @@ func (l LoggingTracer) StartSpan(operationName string) Span {
 	}
 }
 
+// loggingSpan is not a real distributed tracing system.
+// so no need to implement real StartSpanFromTraceParent method.
+func (l LoggingTracer) StartSpanFromTraceParent(operationName string, parentTraceId, parentSpanId string) Span {
+	return l.StartSpan(operationName)
+}
+
 type loggingSpan struct {
 	logger        logr.Logger
 	operationName string
@@ -53,4 +59,12 @@ func baggageToVals(baggage map[string]any) []any {
 		result = append(result, k, v)
 	}
 	return result
+}
+
+func (s loggingSpan) TraceID() string {
+	return ""
+}
+
+func (s loggingSpan) SpanID() string {
+	return ""
 }
