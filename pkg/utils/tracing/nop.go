@@ -23,10 +23,10 @@ func (n nopSpan) SetBaggageItem(_ string, _ any) {
 func (n nopSpan) Finish() {
 }
 
-func (s nopSpan) TraceID() string {
+func (n nopSpan) TraceID() string {
 	return ""
 }
 
-func (s nopSpan) SpanID() string {
+func (n nopSpan) SpanID() string {
 	return ""
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1367,7 +1368,7 @@ func (sc *syncContext) setBaggageItemForTasks(span *tracing.Span, t *syncTask, m
 	(*span).SetBaggageItem("operationPhase", string(operationPhase))
 	(*span).SetBaggageItem("message", message)
 	(*span).SetBaggageItem("phase", string(t.phase))
-	(*span).SetBaggageItem("wave", fmt.Sprint(t.wave()))
+	(*span).SetBaggageItem("wave", strconv.Itoa(t.wave()))
 }
 
 func (sc *syncContext) processCreateTasks(state runState, tasks syncTasks, dryRun bool) runState {

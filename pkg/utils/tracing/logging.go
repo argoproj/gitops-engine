@@ -32,7 +32,7 @@ func (l LoggingTracer) StartSpan(operationName string) Span {
 
 // loggingSpan is not a real distributed tracing system.
 // so no need to implement real StartSpanFromTraceParent method.
-func (l LoggingTracer) StartSpanFromTraceParent(operationName string, parentTraceId, parentSpanId string) Span {
+func (l LoggingTracer) StartSpanFromTraceParent(operationName string, _, _ string) Span {
 	return l.StartSpan(operationName)
 }
 

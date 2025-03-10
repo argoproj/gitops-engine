@@ -39,7 +39,7 @@ type openTelemetrySpan struct {
 	realSpan trace.Span
 }
 
-func (s openTelemetrySpan) SetBaggageItem(key string, value interface{}) {
+func (s openTelemetrySpan) SetBaggageItem(key string, value any) {
 	s.realSpan.SetAttributes(attribute.Key(key).String(value.(string)))
 }
 
