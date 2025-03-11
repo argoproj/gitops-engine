@@ -6,14 +6,14 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/go-logr/logr v1.4.2
-	github.com/golang/mock v1.6.0
 	github.com/google/gnostic-models v0.6.9
 	github.com/google/uuid v1.6.0
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
 	go.opentelemetry.io/otel v1.28.0
 	go.opentelemetry.io/otel/trace v1.28.0
-	golang.org/x/sync v0.11.0
+	go.uber.org/mock v0.5.0
+	golang.org/x/sync v0.12.0
 	google.golang.org/protobuf v1.36.5
 	k8s.io/api v0.32.2
 	k8s.io/apiextensions-apiserver v0.32.2
@@ -22,10 +22,10 @@ require (
 	k8s.io/client-go v0.32.2
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/kube-aggregator v0.32.2
-	k8s.io/kube-openapi v0.0.0-20241212222426-2c72e554b1e7
+	k8s.io/kube-openapi v0.0.0-20250304201544-e5f78fe3ede9
 	k8s.io/kubectl v0.32.2
 	k8s.io/kubernetes v1.32.2
-	sigs.k8s.io/structured-merge-diff/v4 v4.5.0
+	sigs.k8s.io/structured-merge-diff/v4 v4.6.0
 	sigs.k8s.io/yaml v1.4.0
 )
 
@@ -97,6 +97,7 @@ require (
 	sigs.k8s.io/json v0.0.0-20241010143419-9aa6b5e7a4b3 // indirect
 	sigs.k8s.io/kustomize/api v0.18.0 // indirect
 	sigs.k8s.io/kustomize/kyaml v0.18.1 // indirect
+	sigs.k8s.io/randfill v1.0.0 // indirect
 )
 
 replace (
