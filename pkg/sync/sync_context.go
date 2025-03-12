@@ -1019,7 +1019,6 @@ func (sc *syncContext) shouldUseServerSideApply(targetObj *unstructured.Unstruct
 	// running dry-run in server mode breaks the auto create namespace feature
 	// https://github.com/argoproj/argo-cd/issues/13874
 	if sc.dryRun || dryRun {
-		sc.log.Info("Dry run is true, disabling server-side apply")
 		return false
 	}
 
@@ -1027,6 +1026,7 @@ func (sc *syncContext) shouldUseServerSideApply(targetObj *unstructured.Unstruct
 	if resourceHasDisableSSAAnnotation {
 		return false
 	}
+
 	return sc.serverSideApply || resourceutil.HasAnnotationOption(targetObj, common.AnnotationSyncOptions, common.SyncOptionServerSideApply)
 }
 
