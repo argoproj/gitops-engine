@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
@@ -219,6 +220,7 @@ func NewSyncContext(
 	if err != nil {
 		return nil, nil, err
 	}
+	discoMem := memory.NewMemCacheClient(disco)
 	extensionsclientset, err := clientset.NewForConfig(restConfig)
 	if err != nil {
 		return nil, nil, err
@@ -234,7 +236,7 @@ func NewSyncContext(
 		config:              restConfig,
 		rawConfig:           rawConfig,
 		dynamicIf:           dynamicIf,
-		disco:               disco,
+		disco:               discoMem,
 		extensionsclientset: extensionsclientset,
 		kubectl:             kubectl,
 		resourceOps:         resourceOps,
