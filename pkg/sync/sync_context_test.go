@@ -1202,7 +1202,7 @@ func TestNamespaceAutoCreationForNonExistingNs(t *testing.T) {
 
 		syncCtx.skipDryRun = true
 		creatorCalled := false
-		syncCtx.syncNamespace = func(m, l *unstructured.Unstructured) (bool, error) {
+		syncCtx.syncNamespace = func(_, _ *unstructured.Unstructured) (bool, error) {
 			creatorCalled = true
 			return true, errors.New("some error")
 		}
