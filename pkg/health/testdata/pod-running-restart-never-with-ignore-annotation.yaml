@@ -15,10 +15,16 @@ spec:
     - sh
     - -c
     - sleep 10
-    image: alpine:latest
+    image: alpine:3.21
     imagePullPolicy: Always
     name: main
-    resources: {}
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "250m"
+      limits:
+        memory: "256Mi"
+        cpu: "500m"
     terminationMessagePath: /dev/termination-log
     terminationMessagePolicy: File
     volumeMounts:
@@ -32,6 +38,7 @@ spec:
   securityContext: {}
   serviceAccount: default
   serviceAccountName: default
+  automountServiceAccountToken: false
   terminationGracePeriodSeconds: 30
   tolerations:
   - effect: NoExecute
@@ -62,9 +69,9 @@ status:
     status: "True"
     type: PodScheduled
   containerStatuses:
-  - containerID: docker://acfb261d6c1fe8c543438a202de62cb06c137fa93a2d59262d764470e96f3195
-    image: alpine:latest
-    imageID: docker-pullable://alpine@sha256:621c2f39f8133acb8e64023a94dbdf0d5ca81896102b9e57c0dc184cadaf5528
+  - containerID: containerd://adc73c2c0ae3f1fd9bf294abd834e740042ee375de680c0cfcdd90d863a73b8b
+    image: alpine:3.21
+    imageID: docker.io/library/alpine@sha256:a8560b36e8b8210634f77d9f7f9efd7ffa463e380b75e2e74aff4511df3ef88c
     lastState: {}
     name: main
     ready: true
