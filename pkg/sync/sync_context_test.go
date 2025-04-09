@@ -1195,6 +1195,11 @@ func TestNamespaceAutoCreationForNonExistingNs(t *testing.T) {
 			Live:   []*unstructured.Unstructured{nil},
 			Target: []*unstructured.Unstructured{pod},
 		})
+
+		fakeDisco := syncCtx.disco.(*fakedisco.FakeDiscovery)
+		fakeDisco.Resources = []*metav1.APIResourceList{}
+		syncCtx.disco = fakeDisco
+
 		syncCtx.skipDryRun = true
 		creatorCalled := false
 		syncCtx.syncNamespace = func(m, l *unstructured.Unstructured) (bool, error) {
