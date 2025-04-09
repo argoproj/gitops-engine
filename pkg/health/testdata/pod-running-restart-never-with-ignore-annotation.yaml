@@ -20,6 +20,7 @@ spec:
     name: main
     resources:
       requests:
+        ephemeral-storage: "100Mi"
         memory: "128Mi"
         cpu: "250m"
       limits:
