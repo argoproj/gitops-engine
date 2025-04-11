@@ -12,6 +12,10 @@ import (
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 )
 
+const (
+	AnnotationIgnoreRestartPolicy = "argocd.argoproj.io/ignore-restart-policy"
+)
+
 func getPodHealth(obj *unstructured.Unstructured) (*HealthStatus, error) {
 	gvk := obj.GroupVersionKind()
 	switch gvk {
@@ -93,9 +97,9 @@ func getCorev1PodHealth(pod *corev1.Pod) (*HealthStatus, error) {
 		}
 
 		return &HealthStatus{Status: HealthStatusDegraded, Message: ""}, nil
+
 	case corev1.PodRunning:
-		switch pod.Spec.RestartPolicy {
-		case corev1.RestartPolicyAlways:
+		getHealthStatus := func(pod *corev1.Pod) (*HealthStatus, error) {
 			// if pod is ready, it is automatically healthy
 			if podutils.IsPodReady(pod) {
 				return &HealthStatus{
@@ -117,14 +121,24 @@ func getCorev1PodHealth(pod *corev1.Pod) (*HealthStatus, error) {
 				Status:  HealthStatusProgressing,
 				Message: pod.Status.Message,
 			}, nil
-		case corev1.RestartPolicyOnFailure, corev1.RestartPolicyNever:
-			// pods set with a restart policy of OnFailure or Never, have a finite life.
-			// These pods are typically resource hooks. Thus, we consider these as Progressing
-			// instead of healthy.
-			return &HealthStatus{
-				Status:  HealthStatusProgressing,
-				Message: pod.Status.Message,
-			}, nil
+		}
+		if _, hook := pod.Annotations[AnnotationIgnoreRestartPolicy]; hook {
+			return getHealthStatus(pod)
+		} else {
+			switch pod.Spec.RestartPolicy {
+			case corev1.RestartPolicyAlways:
+				return getHealthStatus(pod)
+			case corev1.RestartPolicyOnFailure, corev1.RestartPolicyNever:
+				// Most pods set with a restart policy of OnFailure or Never, have a finite life.
+				// These pods are typically resource hooks. Thus, we consider these as Progressing
+				// instead of healthy. If this is unwanted, e.g., when the pod is managed by an
+				// operator and therefore has a restart policy of OnFailure or Never, then use the
+				// the AnnotationIgnoreRestartPolicy annotation.
+				return &HealthStatus{
+					Status:  HealthStatusProgressing,
+					Message: pod.Status.Message,
+				}, nil
+			}
 		}
 	}
 	return &HealthStatus{
