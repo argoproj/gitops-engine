@@ -148,9 +148,10 @@ func TestSyncCreateInSortedOrder(t *testing.T) {
 
 func TestSyncCustomResources(t *testing.T) {
 	type fields struct {
-		skipDryRunAnnotationPresent bool
-		crdAlreadyPresent           bool
-		crdInSameSync               bool
+		skipDryRunAnnotationPresent                bool
+		skipDryRunAnnotationPresentForAllResources bool
+		crdAlreadyPresent                          bool
+		crdInSameSync                              bool
 	}
 
 	tests := []struct {
@@ -173,6 +174,9 @@ func TestSyncCustomResources(t *testing.T) {
 		}, true, true},
 		{"unknown crd, skip dry run annotated", fields{
 			skipDryRunAnnotationPresent: true, crdAlreadyPresent: false, crdInSameSync: false,
+		}, false, true},
+		{"unknown crd, skip dry run annotated on app level", fields{
+			skipDryRunAnnotationPresentForAllResources: true, crdAlreadyPresent: false, crdInSameSync: false,
 		}, false, true},
 	}
 	for _, tt := range tests {
@@ -209,6 +213,10 @@ func TestSyncCustomResources(t *testing.T) {
 
 			if tt.fields.skipDryRunAnnotationPresent {
 				cr.SetAnnotations(map[string]string{synccommon.AnnotationSyncOptions: "SkipDryRunOnMissingResource=true"})
+			}
+
+			if tt.fields.skipDryRunAnnotationPresentForAllResources {
+				syncCtx.skipDryRunOnMissingResource = true
 			}
 
 			resources := []*unstructured.Unstructured{cr}
