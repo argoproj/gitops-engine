@@ -825,7 +825,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 			}
 		}
 
-		shouldSkipDryRunOnMissingResource := func(targetObj *unstructured.Unstructured) bool {
+		shouldSkipDryRunOnMissingResource := func() bool {
 			// skip dry run on missing resource error for all application resources
 			if sc.skipDryRunOnMissingResource {
 				return true
@@ -836,7 +836,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 
 		if err != nil {
 			switch {
-			case apierrors.IsNotFound(err) && shouldSkipDryRunOnMissingResource(task.targetObj):
+			case apierrors.IsNotFound(err) && shouldSkipDryRunOnMissingResource():
 				// Special case for custom resources: if CRD is not yet known by the K8s API server,
 				// and the CRD is part of this sync or the resource is annotated with SkipDryRunOnMissingResource=true,
 				// then skip verification during `kubectl apply --dry-run` since we expect the CRD
