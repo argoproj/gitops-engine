@@ -122,13 +122,12 @@ func getCorev1PodHealth(pod *corev1.Pod) (*HealthStatus, error) {
 				Message: pod.Status.Message,
 			}, nil
 		}
-		if _, hook := pod.Annotations[AnnotationIgnoreRestartPolicy]; hook {
+                policy := pod.Spec.RestartPolicy
+		if _, ok := pod.Annotations[AnnotationIgnoreRestartPolicy]; ok || policy == corev1.RestartPolicyAlways {
 			return getHealthStatus(pod)
-		} else {
-			switch pod.Spec.RestartPolicy {
-			case corev1.RestartPolicyAlways:
-				return getHealthStatus(pod)
-			case corev1.RestartPolicyOnFailure, corev1.RestartPolicyNever:
+		}
+		
+			 if policy == corev1.RestartPolicyOnFailure || policy == corev1.RestartPolicyNever {
 				// Most pods set with a restart policy of OnFailure or Never, have a finite life.
 				// These pods are typically resource hooks. Thus, we consider these as Progressing
 				// instead of healthy. If this is unwanted, e.g., when the pod is managed by an
