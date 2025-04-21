@@ -50,9 +50,16 @@ func (r *reconciledResource) key() kubeutil.ResourceKey {
 type SyncContext interface {
 	// Terminate terminates sync operation. The method is asynchronous: it starts deletion is related K8S resources
 	// such as in-flight resource hooks, updates operation status, and exists without waiting for resource completion.
+	// Deprecated: use TerminateContext instead
 	Terminate()
+	// TerminateContext terminates sync operation. The method is asynchronous: it starts deletion is related K8S resources
+	// such as in-flight resource hooks, updates operation status, and exists without waiting for resource completion.
+	TerminateContext(ctx context.Context)
 	// Executes next synchronization step and updates operation status.
+	// Deprecated: use SyncContext instead
 	Sync()
+	// Executes next synchronization step and updates operation status.
+	SyncContext(ctx context.Context)
 	// Returns current sync operation state and information about resources synchronized so far.
 	GetState() (common.OperationPhase, string, []common.ResourceSyncResult)
 }
@@ -75,9 +82,17 @@ func WithPermissionValidator(validator common.PermissionValidator) SyncOpt {
 }
 
 // WithHealthOverride sets specified health override
+// Deprecated: use WithHealthOverrideContext instead
 func WithHealthOverride(override health.HealthOverride) SyncOpt {
 	return func(ctx *syncContext) {
 		ctx.healthOverride = override
+	}
+}
+
+// WithHealthOverrideContext sets specified health override
+func WithHealthOverrideContext(override health.HealthOverrideContext) SyncOpt {
+	return func(ctx *syncContext) {
+		ctx.healthOverrideContext = override
 	}
 }
 
@@ -308,11 +323,17 @@ const (
 )
 
 // getOperationPhase returns a health status from a _live_ unstructured object
-func (sc *syncContext) getOperationPhase(obj *unstructured.Unstructured) (common.OperationPhase, string, error) {
+func (sc *syncContext) getOperationPhase(ctx context.Context, obj *unstructured.Unstructured) (common.OperationPhase, string, error) {
 	phase := common.OperationSucceeded
 	message := obj.GetName() + " created"
 
-	resHealth, err := health.GetResourceHealth(obj, sc.healthOverride)
+	var resHealth *health.HealthStatus
+	var err error
+	if sc.healthOverrideContext != nil {
+		resHealth, err = health.GetResourceHealthContext(ctx, obj, sc.healthOverrideContext)
+	} else if sc.healthOverride != nil {
+		resHealth, err = health.GetResourceHealth(obj, sc.healthOverride)
+	}
 	if err != nil {
 		return "", "", err
 	}
@@ -333,18 +354,19 @@ func (sc *syncContext) getOperationPhase(obj *unstructured.Unstructured) (common
 }
 
 type syncContext struct {
-	healthOverride      health.HealthOverride
-	permissionValidator common.PermissionValidator
-	resources           map[kubeutil.ResourceKey]reconciledResource
-	hooks               []*unstructured.Unstructured
-	config              *rest.Config
-	rawConfig           *rest.Config
-	dynamicIf           dynamic.Interface
-	disco               discovery.DiscoveryInterface
-	extensionsclientset *clientset.Clientset
-	kubectl             kubeutil.Kubectl
-	resourceOps         kubeutil.ResourceOperations
-	namespace           string
+	healthOverride        health.HealthOverride
+	healthOverrideContext health.HealthOverrideContext
+	permissionValidator   common.PermissionValidator
+	resources             map[kubeutil.ResourceKey]reconciledResource
+	hooks                 []*unstructured.Unstructured
+	config                *rest.Config
+	rawConfig             *rest.Config
+	dynamicIf             dynamic.Interface
+	disco                 discovery.DiscoveryInterface
+	extensionsclientset   *clientset.Clientset
+	kubectl               kubeutil.Kubectl
+	resourceOps           kubeutil.ResourceOperations
+	namespace             string
 
 	dryRun                      bool
 	skipDryRun                  bool
@@ -403,8 +425,19 @@ func (sc *syncContext) setRunningPhase(tasks []*syncTask, isPendingDeletion bool
 	}
 }
 
-// sync has performs the actual apply or hook based sync
+// Sync has performs the actual apply or hook based sync
+// Deprecated: use SyncContext instead
 func (sc *syncContext) Sync() {
+	sc.SyncContext(context.Background())
+}
+
+// SyncContext has performs the actual apply or hook based sync
+func (sc *syncContext) SyncContext(ctx context.Context) {
+	sc.sync(ctx)
+}
+
+// sync has performs the actual apply or hook based sync
+func (sc *syncContext) sync(ctx context.Context) {
 	sc.log.WithValues("skipHooks", sc.skipHooks, "started", sc.started()).Info("Syncing")
 	tasks, ok := sc.getSyncTasks()
 	if !ok {
@@ -441,7 +474,7 @@ func (sc *syncContext) Sync() {
 	}) {
 		if task.isHook() {
 			// update the hook's result
-			operationState, message, err := sc.getOperationPhase(task.liveObj)
+			operationState, message, err := sc.getOperationPhase(ctx, task.liveObj)
 			if err != nil {
 				sc.setResourceResult(task, "", common.OperationError, fmt.Sprintf("failed to get resource health: %v", err))
 			} else {
@@ -449,7 +482,13 @@ func (sc *syncContext) Sync() {
 			}
 		} else {
 			// this must be calculated on the live object
-			healthStatus, err := health.GetResourceHealth(task.liveObj, sc.healthOverride)
+			var healthStatus *health.HealthStatus
+			var err error
+			if sc.healthOverrideContext != nil {
+				healthStatus, err = health.GetResourceHealthContext(ctx, task.liveObj, sc.healthOverrideContext)
+			} else if sc.healthOverride != nil {
+				healthStatus, err = health.GetResourceHealth(task.liveObj, sc.healthOverride)
+			}
 			if err == nil {
 				sc.log.WithValues("task", task, "healthStatus", healthStatus).V(1).Info("attempting to update health of running task")
 				if healthStatus == nil {
@@ -1176,8 +1215,17 @@ func (sc *syncContext) hasCRDOfGroupKind(group string, kind string) bool {
 	return false
 }
 
-// terminate looks for any running jobs/workflow hooks and deletes the resource
+// Deprecated: use TerminateContext instead
 func (sc *syncContext) Terminate() {
+	sc.TerminateContext(context.Background())
+}
+
+func (sc *syncContext) TerminateContext(ctx context.Context) {
+	sc.terminate(ctx)
+}
+
+// terminate looks for any running jobs/workflow hooks and deletes the resource
+func (sc *syncContext) terminate(ctx context.Context) {
 	terminateSuccessful := true
 	sc.log.V(1).Info("terminating")
 	tasks, _ := sc.getSyncTasks()
@@ -1190,7 +1238,7 @@ func (sc *syncContext) Terminate() {
 			terminateSuccessful = false
 			continue
 		}
-		phase, msg, err := sc.getOperationPhase(task.liveObj)
+		phase, msg, err := sc.getOperationPhase(ctx, task.liveObj)
 		if err != nil {
 			sc.setOperationPhase(common.OperationError, fmt.Sprintf("Failed to get hook health: %v", err))
 			return

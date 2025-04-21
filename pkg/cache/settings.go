@@ -30,7 +30,10 @@ func (f *noopSettings) IsExcludedResource(_, _, _ string) bool {
 // Settings caching customizations
 type Settings struct {
 	// ResourceHealthOverride contains health assessment overrides
+	// Deprecated: use ResourceHealthOverrideContext insttead.
 	ResourceHealthOverride health.HealthOverride
+	// ResourceHealthOverrideContext contains health assessment overrides
+	ResourceHealthOverrideContext health.HealthOverrideContext
 	// ResourcesFilter holds filter that excludes resources
 	ResourcesFilter kube.ResourceFilter
 }
@@ -54,7 +57,7 @@ func SetPopulateResourceInfoHandler(handler OnPopulateResourceInfoHandler) Updat
 // SetSettings updates caching settings
 func SetSettings(settings Settings) UpdateSettingsFunc {
 	return func(cache *clusterCache) {
-		cache.settings = Settings{settings.ResourceHealthOverride, settings.ResourcesFilter}
+		cache.settings = Settings{settings.ResourceHealthOverride, settings.ResourceHealthOverrideContext, settings.ResourcesFilter}
 	}
 }
 
