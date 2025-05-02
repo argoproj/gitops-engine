@@ -1219,7 +1219,7 @@ func (c *clusterCache) GetManagedLiveObjs(targetObjs []*unstructured.Unstructure
 			if o.GetNamespace() == "" && !c.clusterResources {
 				return nil, fmt.Errorf("Cluster level %s %q can not be managed when in namespaced mode", o.GetKind(), o.GetName())
 			} else if o.GetNamespace() != "" && !c.managesNamespace(o.GetNamespace()) {
-				return nil, fmt.Errorf("Namespace %q for %s %q is not managed", o.GetNamespace(), o.GetKind(), o.GetName())
+				return nil, fmt.Errorf("Destination namespace %q for resource kind %s %q is not managed by argocd", o.GetNamespace(), o.GetKind(), o.GetName())
 			}
 		}
 	}
