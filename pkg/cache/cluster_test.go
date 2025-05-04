@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic/fake"
+	clientfeatures "k8s.io/client-go/features"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	testcore "k8s.io/client-go/testing"
@@ -189,7 +190,15 @@ func Benchmark_sync(t *testing.B) {
 	}
 }
 
-func TestEnsureSynced(t *testing.T) {
+type AlwaysEnabledGates struct{}
+
+func (AlwaysEnabledGates) Enabled(clientfeatures.Feature) bool {
+	return true
+}
+
+func TestEnsureSyncedAndUsingWatchAPIs(t *testing.T) {
+	// Enable WatchListClient in particular. Setting via env variable here is too late.
+	clientfeatures.ReplaceFeatureGates(AlwaysEnabledGates{})
 	obj1 := &appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "apps/v1",
@@ -224,6 +233,9 @@ func TestEnsureSynced(t *testing.T) {
 		names = append(names, k.Name)
 	}
 	assert.ElementsMatch(t, []string{"helm-guestbook1", "helm-guestbook2"}, names)
+
+	assert.Greater(t, cluster.listResourcesUsingWatchAPI.Load(), int32(0))
+	assert.Equal(t, cluster.listResourcesUsingRegularAPI.Load(), int32(0))
 }
 
 func TestStatefulSetOwnershipInferred(t *testing.T) {

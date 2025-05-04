@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -30,6 +31,7 @@ import (
 	"k8s.io/client-go/tools/pager"
 	watchutil "k8s.io/client-go/tools/watch"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/client-go/util/watchlist"
 	"k8s.io/klog/v2/textlogger"
 	"k8s.io/kubectl/pkg/util/openapi"
 
@@ -248,7 +250,9 @@ type clusterCache struct {
 	openAPISchema               openapi.Resources
 	gvkParser                   *managedfields.GvkParser
 
-	respectRBAC int
+	respectRBAC                  int
+	listResourcesUsingWatchAPI   atomic.Int32
+	listResourcesUsingRegularAPI atomic.Int32
 }
 
 type clusterCacheSync struct {
@@ -600,10 +604,26 @@ func (c *clusterCache) listResources(ctx context.Context, resClient dynamic.Reso
 			listRetry = retry.DefaultRetry
 		}
 
+		if opts.ResourceVersion == "" {
+			opts.ResourceVersion = "0"
+		}
+
+		watchListOpts, success, watchListErr := watchlist.PrepareWatchListOptionsFromListOptions(opts)
+		var listOpts metav1.ListOptions
+		if success {
+			listOpts = watchListOpts
+			c.listResourcesUsingWatchAPI.Add(1)
+			c.log.Info("Would use watch list options to list resources.")
+		} else {
+			listOpts = opts
+			c.listResourcesUsingRegularAPI.Add(1)
+			c.log.Info(fmt.Sprintf("Would use regular options to list resources. Watch list options couldn't be prepared. Optional error: %v", watchListErr))
+		}
+
 		listRetry.Steps = int(c.listRetryLimit)
 		err := retry.OnError(listRetry, c.listRetryFunc, func() error {
 			var ierr error
-			res, ierr = resClient.List(ctx, opts)
+			res, ierr = resClient.List(ctx, listOpts)
 			if ierr != nil {
 				// Log out a retry
 				if c.listRetryLimit > 1 && c.listRetryFunc(ierr) {
