@@ -234,8 +234,8 @@ func TestEnsureSyncedAndUsingWatchAPIs(t *testing.T) {
 	}
 	assert.ElementsMatch(t, []string{"helm-guestbook1", "helm-guestbook2"}, names)
 
-	assert.Greater(t, cluster.listResourcesUsingWatchAPI.Load(), int32(0))
-	assert.Equal(t, cluster.listResourcesUsingRegularAPI.Load(), int32(0))
+	assert.Positive(t, cluster.listResourcesUsingWatchAPI.Load())
+	assert.Equal(t, int32(0), cluster.listResourcesUsingRegularAPI.Load())
 }
 
 func TestStatefulSetOwnershipInferred(t *testing.T) {
