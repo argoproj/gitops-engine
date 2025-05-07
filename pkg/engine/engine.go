@@ -59,7 +59,7 @@ func NewEngine(config *rest.Config, clusterCache cache.ClusterCache, opts ...Opt
 func (e *gitOpsEngine) Run() (StopFunc, error) {
 	err := e.cache.EnsureSynced()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to ensure the cluster cache is synced: %w", err)
 	}
 
 	return func() {
