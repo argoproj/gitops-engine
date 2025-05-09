@@ -993,8 +993,8 @@ func TestUnnamedHooksGetUniqueNames(t *testing.T) {
 		assert.Contains(t, tasks[0].name(), "f.ooba-presync-")
 		assert.Contains(t, tasks[1].name(), "f.ooba-postsync-")
 		assert.Equal(t, "", pod.GetName())
-		assert.Len(t, validation.IsDNS1123Subdomain(tasks[0].name()), 0)
-		assert.Len(t, validation.IsDNS1123Subdomain(tasks[1].name()), 0)
+    assert.Empty(t, validation.IsDNS1123Subdomain(tasks[0].name()))
+    assert.Empty(t, validation.IsDNS1123Subdomain(tasks[1].name()))
 	})
 }
 
