@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -754,7 +755,9 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 				if targetObj.GetName() == "" {
 					var syncRevision string
 					if len(sc.revision) >= 8 {
-						syncRevision = strings.Trim(sc.revision[0:7], ".")
+						syncRevision = strings.TrimFunc(sc.revision[0:7], func(r rune) bool {
+							return !unicode.IsLetter(r) && !unicode.IsNumber(r) && r != '-'
+						})
 					} else {
 						syncRevision = sc.revision
 					}
