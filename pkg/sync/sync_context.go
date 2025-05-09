@@ -754,7 +754,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 				if targetObj.GetName() == "" {
 					var syncRevision string
 					if len(sc.revision) >= 8 {
-						syncRevision = sc.revision[0:7]
+						syncRevision = strings.Trim(sc.revision[0:7], ".")
 					} else {
 						syncRevision = sc.revision
 					}
