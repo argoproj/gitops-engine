@@ -613,7 +613,7 @@ func (c *clusterCache) listResources(ctx context.Context, resClient dynamic.Reso
 		if success {
 			listOpts = watchListOpts
 			c.listResourcesUsingWatchAPI.Add(1)
-			c.log.Info("Would use watch list options to list resources.")
+			c.log.Info("Would try to use watch list options to list resources.")
 		} else {
 			listOpts = opts
 			c.listResourcesUsingRegularAPI.Add(1)
