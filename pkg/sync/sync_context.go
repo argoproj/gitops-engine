@@ -1391,7 +1391,7 @@ func (sc *syncContext) processCreateTasks(state runState, tasks syncTasks, dryRu
 			}
 			var phase common.OperationPhase
 			if !dryRun || sc.dryRun || result == common.ResultCodeSyncFailed {
-				phase := operationPhases[result]
+				phase = operationPhases[result]
 				// no resources are created in dry-run, so running phase means validation was
 				// successful and sync operation succeeded
 				if sc.dryRun && phase == common.OperationRunning {
