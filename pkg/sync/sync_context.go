@@ -1389,8 +1389,9 @@ func (sc *syncContext) createSpan(operation string, dryrun bool) tracing.Span {
 	ctx := context.Background()
 	if sc.syncTracer == nil {
 		span = tracing.NopTracer{}.StartSpan(ctx, operation)
+	} else {
+		span = sc.syncTracer.StartSpanFromTraceParent(ctx, operation, sc.syncTraceID, sc.syncTraceRootSpanID)
 	}
-	span = sc.syncTracer.StartSpanFromTraceParent(ctx, operation, sc.syncTraceID, sc.syncTraceRootSpanID)
 	span.SetBaggageItem("dryrun", strconv.FormatBool(dryrun))
 	return span
 }
