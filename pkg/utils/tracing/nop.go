@@ -1,5 +1,7 @@
 package tracing
 
+import "context"
+
 var (
 	_ Tracer = NopTracer{}
 	_ Span   = nopSpan{}
@@ -7,11 +9,11 @@ var (
 
 type NopTracer struct{}
 
-func (n NopTracer) StartSpan(_ string) Span {
+func (n NopTracer) StartSpan(_ context.Context, _ string) Span {
 	return nopSpan{}
 }
 
-func (n NopTracer) StartSpanFromTraceParent(_, _, _ string) Span {
+func (n NopTracer) StartSpanFromTraceParent(_ context.Context, _, _, _ string) Span {
 	return nopSpan{}
 }
 

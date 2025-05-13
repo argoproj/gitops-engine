@@ -1,6 +1,7 @@
 package tracing
 
 import (
+	"context"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -21,7 +22,7 @@ func NewLoggingTracer(logger logr.Logger) *LoggingTracer {
 	}
 }
 
-func (l LoggingTracer) StartSpan(operationName string) Span {
+func (l LoggingTracer) StartSpan(_ context.Context, operationName string) Span {
 	return loggingSpan{
 		logger:        l.logger,
 		operationName: operationName,
@@ -32,8 +33,8 @@ func (l LoggingTracer) StartSpan(operationName string) Span {
 
 // loggingSpan is not a real distributed tracing system.
 // so no need to implement real StartSpanFromTraceParent method.
-func (l LoggingTracer) StartSpanFromTraceParent(operationName string, _, _ string) Span {
-	return l.StartSpan(operationName)
+func (l LoggingTracer) StartSpanFromTraceParent(ctx context.Context, operationName string, _, _ string) Span {
+	return l.StartSpan(ctx, operationName)
 }
 
 type loggingSpan struct {

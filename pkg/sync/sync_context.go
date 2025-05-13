@@ -1303,12 +1303,12 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 			t := task
 			ss.Go(func(state runState) runState {
 				sc.log.WithValues("dryRun", dryRun, "task", t).V(1).Info("Deleting")
+				span := sc.createSpan("hooksDeletion", dryRun)
+				defer span.Finish()
+				message := "deleted"
+				operationPhase := common.OperationRunning
 				if !dryRun {
-					span := sc.createSpan("hooksDeletion", dryRun)
-					defer span.Finish()
 					err := sc.deleteResource(t)
-					message := "deleted"
-					operationPhase := common.OperationRunning
 					if err != nil {
 						// it is possible to get a race condition here, such that the resource does not exist when
 						// delete is requested, we treat this as a nop
@@ -1319,6 +1319,7 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 							sc.setResourceResult(t, "", operationPhase, message)
 						}
 					} else {
+						message = "deleted(dry-run)"
 						// if there is anything that needs deleting, we are at best now in pending and
 						// want to return and wait for sync to be invoked again
 						state = pending
@@ -1354,11 +1355,15 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 }
 
 func (sc *syncContext) createSpan(operation string, dryrun bool) tracing.Span {
-	// skip tracing if dryrun
-	if dryrun || sc.syncTracer == nil {
-		return tracing.NopTracer{}.StartSpan(operation)
+	// NOTE: we use context.Background() here because we don't want to inherit any trace context from the parent
+	var span tracing.Span
+	ctx := context.Background()
+	if sc.syncTracer == nil {
+		span = tracing.NopTracer{}.StartSpan(ctx, operation)
 	}
-	return sc.syncTracer.StartSpanFromTraceParent(operation, sc.syncTraceID, sc.syncTraceRootSpanID)
+	span = sc.syncTracer.StartSpanFromTraceParent(ctx, operation, sc.syncTraceID, sc.syncTraceRootSpanID)
+	span.SetBaggageItem("dryrun", strconv.FormatBool(dryrun))
+	return span
 }
 
 func (sc *syncContext) setBaggageItemForTasks(span *tracing.Span, t *syncTask, message string, result common.ResultCode, operationPhase common.OperationPhase) {

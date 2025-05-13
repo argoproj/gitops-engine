@@ -17,12 +17,12 @@ func NewOpenTelemetryTracer(t trace.Tracer) Tracer {
 	}
 }
 
-func (t OpenTelemetryTracer) StartSpan(operationName string) Span {
-	_, realspan := t.realTracer.Start(context.Background(), operationName)
+func (t OpenTelemetryTracer) StartSpan(ctx context.Context, operationName string) Span {
+	_, realspan := t.realTracer.Start(ctx, operationName)
 	return openTelemetrySpan{realSpan: realspan}
 }
 
-func (t OpenTelemetryTracer) StartSpanFromTraceParent(operationName string, parentTraceId, parentSpanId string) Span {
+func (t OpenTelemetryTracer) StartSpanFromTraceParent(ctx context.Context, operationName string, parentTraceId, parentSpanId string) Span {
 	traceID, _ := trace.TraceIDFromHex(parentTraceId)
 	parentSpanID, _ := trace.SpanIDFromHex(parentSpanId)
 	spanCtx := trace.NewSpanContext(trace.SpanContextConfig{
@@ -30,7 +30,7 @@ func (t OpenTelemetryTracer) StartSpanFromTraceParent(operationName string, pare
 		SpanID:     parentSpanID,
 		TraceFlags: trace.FlagsSampled,
 	})
-	ctx := trace.ContextWithSpanContext(context.Background(), spanCtx)
+	ctx = trace.ContextWithSpanContext(ctx, spanCtx)
 	_, realSpan := t.realTracer.Start(ctx, operationName)
 	return openTelemetrySpan{realSpan: realSpan}
 }
