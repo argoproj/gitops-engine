@@ -1,6 +1,7 @@
 package tracing
 
 import (
+	"context"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -22,7 +23,7 @@ func TestLoggingTracer(t *testing.T) {
 
 	tr := NewLoggingTracer(logr.New(l))
 
-	span := tr.StartSpan("my-operation")
+	span := tr.StartSpan(context.Background(), "my-operation")
 	span.SetBaggageItem("my-key", "my-value")
 	span.Finish()
 }

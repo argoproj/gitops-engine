@@ -163,7 +163,7 @@ func (k *KubectlCmd) newGVKParser(oapiGetter discovery.OpenAPISchemaInterface) (
 }
 
 func (k *KubectlCmd) GetAPIResources(config *rest.Config, preferred bool, resourceFilter ResourceFilter) ([]APIResourceInfo, error) {
-	span := k.Tracer.StartSpan("GetAPIResources")
+	span := k.Tracer.StartSpan(context.Background(), "GetAPIResources")
 	defer span.Finish()
 	apiResIfs, err := k.filterAPIResources(config, preferred, resourceFilter, func(apiResource *metav1.APIResource) bool {
 		return isSupportedVerb(apiResource, listVerb) && isSupportedVerb(apiResource, watchVerb)
@@ -176,7 +176,7 @@ func (k *KubectlCmd) GetAPIResources(config *rest.Config, preferred bool, resour
 
 // GetResource returns resource
 func (k *KubectlCmd) GetResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string) (*unstructured.Unstructured, error) {
-	span := k.Tracer.StartSpan("GetResource")
+	span := k.Tracer.StartSpan(context.Background(), "GetResource")
 	span.SetBaggageItem("kind", gvk.Kind)
 	span.SetBaggageItem("name", name)
 	defer span.Finish()
@@ -199,7 +199,7 @@ func (k *KubectlCmd) GetResource(ctx context.Context, config *rest.Config, gvk s
 
 // CreateResource creates resource
 func (k *KubectlCmd) CreateResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string, obj *unstructured.Unstructured, createOptions metav1.CreateOptions, subresources ...string) (*unstructured.Unstructured, error) {
-	span := k.Tracer.StartSpan("CreateResource")
+	span := k.Tracer.StartSpan(context.Background(), "CreateResource")
 	span.SetBaggageItem("kind", gvk.Kind)
 	span.SetBaggageItem("name", name)
 	defer span.Finish()
@@ -222,7 +222,7 @@ func (k *KubectlCmd) CreateResource(ctx context.Context, config *rest.Config, gv
 
 // PatchResource patches resource
 func (k *KubectlCmd) PatchResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string, patchType types.PatchType, patchBytes []byte, subresources ...string) (*unstructured.Unstructured, error) {
-	span := k.Tracer.StartSpan("PatchResource")
+	span := k.Tracer.StartSpan(context.Background(), "PatchResource")
 	span.SetBaggageItem("kind", gvk.Kind)
 	span.SetBaggageItem("name", name)
 	defer span.Finish()
@@ -245,7 +245,7 @@ func (k *KubectlCmd) PatchResource(ctx context.Context, config *rest.Config, gvk
 
 // DeleteResource deletes resource
 func (k *KubectlCmd) DeleteResource(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string, deleteOptions metav1.DeleteOptions) error {
-	span := k.Tracer.StartSpan("DeleteResource")
+	span := k.Tracer.StartSpan(context.Background(), "DeleteResource")
 	span.SetBaggageItem("kind", gvk.Kind)
 	span.SetBaggageItem("name", name)
 	defer span.Finish()
@@ -323,7 +323,7 @@ func ManageServerSideDiffDryRuns(config *rest.Config, openAPISchema openapi.Reso
 
 // ConvertToVersion converts an unstructured object into the specified group/version
 func (k *KubectlCmd) ConvertToVersion(obj *unstructured.Unstructured, group string, version string) (*unstructured.Unstructured, error) {
-	span := k.Tracer.StartSpan("ConvertToVersion")
+	span := k.Tracer.StartSpan(context.Background(), "ConvertToVersion")
 	from := obj.GroupVersionKind().GroupVersion()
 	span.SetBaggageItem("from", from.String())
 	span.SetBaggageItem("to", schema.GroupVersion{Group: group, Version: version}.String())
@@ -335,7 +335,7 @@ func (k *KubectlCmd) ConvertToVersion(obj *unstructured.Unstructured, group stri
 }
 
 func (k *KubectlCmd) GetServerVersion(config *rest.Config) (string, error) {
-	span := k.Tracer.StartSpan("GetServerVersion")
+	span := k.Tracer.StartSpan(context.Background(), "GetServerVersion")
 	defer span.Finish()
 	client, err := discovery.NewDiscoveryClientForConfig(config)
 	if err != nil {

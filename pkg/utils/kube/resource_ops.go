@@ -221,7 +221,7 @@ func kubeCmdFactory(kubeconfig, ns string, config *rest.Config) cmdutil.Factory 
 }
 
 func (k *kubectlResourceOperations) ReplaceResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force bool) (string, error) {
-	span := k.tracer.StartSpan("ReplaceResource")
+	span := k.tracer.StartSpan(context.Background(), "ReplaceResource")
 	span.SetBaggageItem("kind", obj.GetKind())
 	span.SetBaggageItem("name", obj.GetName())
 	defer span.Finish()
@@ -243,7 +243,7 @@ func (k *kubectlResourceOperations) ReplaceResource(ctx context.Context, obj *un
 
 func (k *kubectlResourceOperations) CreateResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, validate bool) (string, error) {
 	gvk := obj.GroupVersionKind()
-	span := k.tracer.StartSpan("CreateResource")
+	span := k.tracer.StartSpan(context.Background(), "CreateResource")
 	span.SetBaggageItem("kind", gvk.Kind)
 	span.SetBaggageItem("name", obj.GetName())
 	defer span.Finish()
@@ -273,7 +273,7 @@ func (k *kubectlResourceOperations) CreateResource(ctx context.Context, obj *uns
 
 func (k *kubectlResourceOperations) UpdateResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy) (*unstructured.Unstructured, error) {
 	gvk := obj.GroupVersionKind()
-	span := k.tracer.StartSpan("UpdateResource")
+	span := k.tracer.StartSpan(context.Background(), "UpdateResource")
 	span.SetBaggageItem("kind", gvk.Kind)
 	span.SetBaggageItem("name", obj.GetName())
 	defer span.Finish()
@@ -302,7 +302,7 @@ func (k *kubectlResourceOperations) UpdateResource(ctx context.Context, obj *uns
 
 // ApplyResource performs an apply of a unstructured resource
 func (k *kubectlServerSideDiffDryRunApplier) ApplyResource(_ context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force bool, validate bool, serverSideApply bool, manager string) (string, error) {
-	span := k.tracer.StartSpan("ApplyResource")
+	span := k.tracer.StartSpan(context.Background(), "ApplyResource")
 	span.SetBaggageItem("kind", obj.GetKind())
 	span.SetBaggageItem("name", obj.GetName())
 	defer span.Finish()
@@ -328,7 +328,7 @@ func (k *kubectlServerSideDiffDryRunApplier) ApplyResource(_ context.Context, ob
 
 // ApplyResource performs an apply of a unstructured resource
 func (k *kubectlResourceOperations) ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string) (string, error) {
-	span := k.tracer.StartSpan("ApplyResource")
+	span := k.tracer.StartSpan(context.Background(), "ApplyResource")
 	span.SetBaggageItem("kind", obj.GetKind())
 	span.SetBaggageItem("name", obj.GetName())
 	defer span.Finish()
