@@ -7,12 +7,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -146,9 +148,10 @@ func TestSyncCreateInSortedOrder(t *testing.T) {
 
 func TestSyncCustomResources(t *testing.T) {
 	type fields struct {
-		skipDryRunAnnotationPresent bool
-		crdAlreadyPresent           bool
-		crdInSameSync               bool
+		skipDryRunAnnotationPresent                bool
+		skipDryRunAnnotationPresentForAllResources bool
+		crdAlreadyPresent                          bool
+		crdInSameSync                              bool
 	}
 
 	tests := []struct {
@@ -171,6 +174,9 @@ func TestSyncCustomResources(t *testing.T) {
 		}, true, true},
 		{"unknown crd, skip dry run annotated", fields{
 			skipDryRunAnnotationPresent: true, crdAlreadyPresent: false, crdInSameSync: false,
+		}, false, true},
+		{"unknown crd, skip dry run annotated on app level", fields{
+			skipDryRunAnnotationPresentForAllResources: true, crdAlreadyPresent: false, crdInSameSync: false,
 		}, false, true},
 	}
 	for _, tt := range tests {
@@ -207,6 +213,10 @@ func TestSyncCustomResources(t *testing.T) {
 
 			if tt.fields.skipDryRunAnnotationPresent {
 				cr.SetAnnotations(map[string]string{synccommon.AnnotationSyncOptions: "SkipDryRunOnMissingResource=true"})
+			}
+
+			if tt.fields.skipDryRunAnnotationPresentForAllResources {
+				syncCtx.skipDryRunOnMissingResource = true
 			}
 
 			resources := []*unstructured.Unstructured{cr}
@@ -841,6 +851,34 @@ func TestSync_ServerSideApply(t *testing.T) {
 	}
 }
 
+func TestSyncContext_ServerSideApplyWithDryRun(t *testing.T) {
+	tests := []struct {
+		name        string
+		scDryRun    bool
+		dryRun      bool
+		expectedSSA bool
+		objToUse    func(*unstructured.Unstructured) *unstructured.Unstructured
+	}{
+		{"BothFlagsFalseAnnotated", false, false, true, withServerSideApplyAnnotation},
+		{"scDryRunTrueAnnotated", true, false, false, withServerSideApplyAnnotation},
+		{"dryRunTrueAnnotated", false, true, false, withServerSideApplyAnnotation},
+		{"BothFlagsTrueAnnotated", true, true, false, withServerSideApplyAnnotation},
+		{"AnnotatedDisabledSSA", false, false, false, withDisableServerSideApplyAnnotation},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sc := newTestSyncCtx(nil)
+			sc.dryRun = tc.scDryRun
+			targetObj := tc.objToUse(testingutils.NewPod())
+
+			// Execute the shouldUseServerSideApply method and assert expectations
+			serverSideApply := sc.shouldUseServerSideApply(targetObj, tc.dryRun)
+			assert.Equal(t, tc.expectedSSA, serverSideApply)
+		})
+	}
+}
+
 func withForceAnnotation(un *unstructured.Unstructured) *unstructured.Unstructured {
 	un.SetAnnotations(map[string]string{synccommon.AnnotationSyncOptions: synccommon.SyncOptionForce})
 	return un
@@ -1153,6 +1191,39 @@ func TestNamespaceAutoCreationForNonExistingNs(t *testing.T) {
 			liveObj:        nil,
 			targetObj:      tasks[0].targetObj,
 			skipDryRun:     false,
+			syncStatus:     synccommon.ResultCodeSyncFailed,
+			operationState: synccommon.OperationError,
+			message:        "namespaceModifier error: some error",
+			waveOverride:   nil,
+		}, tasks[0])
+	})
+
+	t.Run("pre-sync task error should be ignored if skip dryrun is true", func(t *testing.T) {
+		syncCtx.resources = groupResources(ReconciliationResult{
+			Live:   []*unstructured.Unstructured{nil},
+			Target: []*unstructured.Unstructured{pod},
+		})
+
+		fakeDisco := syncCtx.disco.(*fakedisco.FakeDiscovery)
+		fakeDisco.Resources = []*metav1.APIResourceList{}
+		syncCtx.disco = fakeDisco
+
+		syncCtx.skipDryRun = true
+		creatorCalled := false
+		syncCtx.syncNamespace = func(_, _ *unstructured.Unstructured) (bool, error) {
+			creatorCalled = true
+			return true, errors.New("some error")
+		}
+		tasks, successful := syncCtx.getSyncTasks()
+
+		assert.True(t, creatorCalled)
+		assert.True(t, successful)
+		assert.Len(t, tasks, 2)
+		assert.Equal(t, &syncTask{
+			phase:          synccommon.SyncPhasePreSync,
+			liveObj:        nil,
+			targetObj:      tasks[0].targetObj,
+			skipDryRun:     true,
 			syncStatus:     synccommon.ResultCodeSyncFailed,
 			operationState: synccommon.OperationError,
 			message:        "namespaceModifier error: some error",
@@ -2060,4 +2131,52 @@ func TestWaitForCleanUpBeforeNextWave(t *testing.T) {
 	assert.Equal(t, synccommon.ResultCodePruned, result[0].Status)
 	assert.Equal(t, synccommon.ResultCodePruned, result[1].Status)
 	assert.Equal(t, synccommon.ResultCodePruned, result[2].Status)
+}
+
+func BenchmarkSync(b *testing.B) {
+	podManifest := `{
+	  "apiVersion": "v1",
+	  "kind": "Pod",
+	  "metadata": {
+		"name": "my-pod"
+	  },
+	  "spec": {
+		"containers": [
+		${containers}
+		]
+	  }
+	}`
+	container := `{
+			"image": "nginx:1.7.9",
+			"name": "nginx",
+			"resources": {
+			  "requests": {
+				"cpu": "0.2"
+			  }
+			}
+		  }`
+
+	maxContainers := 10
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+
+		containerCount := min(i+1, maxContainers)
+
+		containerStr := strings.Repeat(container+",", containerCount)
+		containerStr = containerStr[:len(containerStr)-1]
+
+		manifest := strings.ReplaceAll(podManifest, "${containers}", containerStr)
+		pod := testingutils.Unstructured(manifest)
+		pod.SetNamespace(testingutils.FakeArgoCDNamespace)
+
+		syncCtx := newTestSyncCtx(nil, WithOperationSettings(false, true, false, false))
+		syncCtx.log = logr.Discard()
+		syncCtx.resources = groupResources(ReconciliationResult{
+			Live:   []*unstructured.Unstructured{nil, pod},
+			Target: []*unstructured.Unstructured{testingutils.NewService(), nil},
+		})
+
+		b.StartTimer()
+		syncCtx.Sync()
+	}
 }

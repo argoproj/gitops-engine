@@ -190,6 +190,18 @@ func WithReplace(replace bool) SyncOpt {
 	}
 }
 
+func WithSkipDryRun(skipDryRun bool) SyncOpt {
+	return func(ctx *syncContext) {
+		ctx.skipDryRun = skipDryRun
+	}
+}
+
+func WithSkipDryRunOnMissingResource(skipDryRunOnMissingResource bool) SyncOpt {
+	return func(ctx *syncContext) {
+		ctx.skipDryRunOnMissingResource = skipDryRunOnMissingResource
+	}
+}
+
 func WithServerSideApply(serverSideApply bool) SyncOpt {
 	return func(ctx *syncContext) {
 		ctx.serverSideApply = serverSideApply
@@ -341,18 +353,20 @@ type syncContext struct {
 	resourceOps         kubeutil.ResourceOperations
 	namespace           string
 
-	dryRun                 bool
-	force                  bool
-	validate               bool
-	skipHooks              bool
-	resourcesFilter        func(key kubeutil.ResourceKey, target *unstructured.Unstructured, live *unstructured.Unstructured) bool
-	prune                  bool
-	replace                bool
-	serverSideApply        bool
-	serverSideApplyManager string
-	pruneLast              bool
-	prunePropagationPolicy *metav1.DeletionPropagation
-	pruneConfirmed         bool
+	dryRun                      bool
+	skipDryRun                  bool
+	skipDryRunOnMissingResource bool
+	force                       bool
+	validate                    bool
+	skipHooks                   bool
+	resourcesFilter             func(key kubeutil.ResourceKey, target *unstructured.Unstructured, live *unstructured.Unstructured) bool
+	prune                       bool
+	replace                     bool
+	serverSideApply             bool
+	serverSideApplyManager      string
+	pruneLast                   bool
+	prunePropagationPolicy      *metav1.DeletionPropagation
+	pruneConfirmed              bool
 
 	syncRes   map[string]common.ResourceSyncResult
 	startedAt time.Time
@@ -823,17 +837,32 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 			}
 		}
 
+		shouldSkipDryRunOnMissingResource := func() bool {
+			// skip dry run on missing resource error for all application resources
+			if sc.skipDryRunOnMissingResource {
+				return true
+			}
+			return (task.targetObj != nil && resourceutil.HasAnnotationOption(task.targetObj, common.AnnotationSyncOptions, common.SyncOptionSkipDryRunOnMissingResource)) ||
+				sc.hasCRDOfGroupKind(task.group(), task.kind())
+		}
+
 		if err != nil {
-			// Special case for custom resources: if CRD is not yet known by the K8s API server,
-			// and the CRD is part of this sync or the resource is annotated with SkipDryRunOnMissingResource=true,
-			// then skip verification during `kubectl apply --dry-run` since we expect the CRD
-			// to be created during app synchronization.
-			if apierrors.IsNotFound(err) &&
-				((task.targetObj != nil && resourceutil.HasAnnotationOption(task.targetObj, common.AnnotationSyncOptions, common.SyncOptionSkipDryRunOnMissingResource)) ||
-					sc.hasCRDOfGroupKind(task.group(), task.kind())) {
+			switch {
+			case apierrors.IsNotFound(err) && shouldSkipDryRunOnMissingResource():
+				// Special case for custom resources: if CRD is not yet known by the K8s API server,
+				// and the CRD is part of this sync or the resource is annotated with SkipDryRunOnMissingResource=true,
+				// then skip verification during `kubectl apply --dry-run` since we expect the CRD
+				// to be created during app synchronization.
 				sc.log.WithValues("task", task).V(1).Info("Skip dry-run for custom resource")
 				task.skipDryRun = true
-			} else {
+			case sc.skipDryRun:
+				// Skip dryrun for task if the sync context is in skip dryrun mode
+				// This can be useful when resource creation is depending on the creation of other resources
+				// like namespaces that need to be created first before the resources in the namespace can be created
+				// For CRD's one can also use the SkipDryRunOnMissingResource annotation.
+				sc.log.WithValues("task", task).V(1).Info("Skipping dry-run for task because skipDryRun is set in the sync context")
+				task.skipDryRun = true
+			default:
 				sc.setResourceResult(task, common.ResultCodeSyncFailed, "", err.Error())
 				successful = false
 			}
@@ -1025,12 +1054,12 @@ func (sc *syncContext) ensureCRDReady(name string) error {
 	})
 }
 
-func (sc *syncContext) shouldUseServerSideApply(targetObj *unstructured.Unstructured) bool {
+func (sc *syncContext) shouldUseServerSideApply(targetObj *unstructured.Unstructured, dryRun bool) bool {
 	// if it is a dry run, disable server side apply, as the goal is to validate only the
 	// yaml correctness of the rendered manifests.
 	// running dry-run in server mode breaks the auto create namespace feature
 	// https://github.com/argoproj/argo-cd/issues/13874
-	if sc.dryRun {
+	if sc.dryRun || dryRun {
 		return false
 	}
 
@@ -1057,7 +1086,7 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 	var message string
 	shouldReplace := sc.replace || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplace)
 	force := sc.force || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionForce)
-	serverSideApply := sc.shouldUseServerSideApply(t.targetObj)
+	serverSideApply := sc.shouldUseServerSideApply(t.targetObj, dryRun)
 	if shouldReplace {
 		if t.liveObj != nil {
 			// Avoid using `kubectl replace` for CRDs since 'replace' might recreate resource and so delete all CRD instances.
@@ -1426,6 +1455,7 @@ func (sc *syncContext) setResourceResult(task *syncTask, syncStatus common.Resul
 
 	res := common.ResourceSyncResult{
 		ResourceKey: kubeutil.GetResourceKey(task.obj()),
+		Images:      kubeutil.GetResourceImages(task.obj()),
 		Version:     task.version(),
 		Status:      task.syncStatus,
 		Message:     task.message,
