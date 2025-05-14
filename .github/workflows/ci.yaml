@@ -24,7 +24,7 @@ jobs:
         with:
           version:  v1.63.4
           args: --verbose
-      - uses: codecov/codecov-action@5c47607acb93fed5485fdbf7232e8a31425f672a # v5.0.2
+      - uses: codecov/codecov-action@ad3126e916f78f00edff4ed0317cf185271ccc2d # v5.4.2
         with:
           token: ${{ secrets.CODECOV_TOKEN }} #required
           files: ./coverage.out
