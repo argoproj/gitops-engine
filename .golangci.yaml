@@ -97,7 +97,6 @@ linters:
       disable:
         - go-require
   exclusions:
-    generated: lax
     presets:
       - comments
       - common-false-positives
@@ -121,7 +120,6 @@ formatters:
       local-prefixes:
         - github.com/argoproj/gitops-engine
   exclusions:
-    generated: lax
     paths:
       - pkg/diff/internal/fieldmanager/borrowed_.*\.go$
       - internal/kubernetes_vendor
