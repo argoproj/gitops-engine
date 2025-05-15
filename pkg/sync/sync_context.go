@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +33,7 @@ import (
 	"github.com/argoproj/gitops-engine/pkg/sync/hook"
 	resourceutil "github.com/argoproj/gitops-engine/pkg/sync/resource"
 	kubeutil "github.com/argoproj/gitops-engine/pkg/utils/kube"
+	"github.com/argoproj/gitops-engine/pkg/utils/tracing"
 )
 
 type reconciledResource struct {
@@ -221,6 +223,8 @@ func NewSyncContext(
 	kubectl kubeutil.Kubectl,
 	namespace string,
 	openAPISchema openapi.Resources,
+	syncTracer tracing.Tracer,
+	syncTraceID, syncTraceRootSpanID string,
 	opts ...SyncOpt,
 ) (SyncContext, func(), error) {
 	dynamicIf, err := dynamic.NewForConfig(restConfig)
@@ -258,6 +262,9 @@ func NewSyncContext(
 		permissionValidator: func(_ *unstructured.Unstructured, _ *metav1.APIResource) error {
 			return nil
 		},
+		syncTracer:          syncTracer,
+		syncTraceID:         syncTraceID,
+		syncTraceRootSpanID: syncTraceRootSpanID,
 	}
 	for _, opt := range opts {
 		opt(ctx)
@@ -370,6 +377,11 @@ type syncContext struct {
 	log logr.Logger
 	// lock to protect concurrent updates of the result list
 	lock sync.Mutex
+
+	// tracer for tracing the sync operation
+	syncTraceID         string
+	syncTraceRootSpanID string
+	syncTracer          tracing.Tracer
 
 	// syncNamespace is a function that will determine if the managed
 	// namespace should be synced
@@ -1291,6 +1303,8 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 			ss.Go(func(state runState) runState {
 				logCtx := sc.log.WithValues("dryRun", dryRun, "task", t)
 				logCtx.V(1).Info("Pruning")
+				span := sc.createSpan("pruneObject", dryRun)
+				defer span.Finish()
 				result, message := sc.pruneObject(t.liveObj, sc.prune, dryRun)
 				if result == common.ResultCodeSyncFailed {
 					state = failed
@@ -1299,6 +1313,7 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 				if !dryRun || sc.dryRun || result == common.ResultCodeSyncFailed {
 					sc.setResourceResult(t, result, operationPhases[result], message)
 				}
+				sc.setBaggageItemForTasks(&span, t, message, result, operationPhases[result])
 				return state
 			})
 		}
@@ -1317,6 +1332,10 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 			t := task
 			ss.Go(func(state runState) runState {
 				sc.log.WithValues("dryRun", dryRun, "task", t).V(1).Info("Deleting")
+				span := sc.createSpan("hooksDeletion", dryRun)
+				defer span.Finish()
+				message := "deleted"
+				operationPhase := common.OperationRunning
 				if !dryRun {
 					err := sc.deleteResource(t)
 					if err != nil {
@@ -1324,13 +1343,18 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 						// delete is requested, we treat this as a nop
 						if !apierrors.IsNotFound(err) {
 							state = failed
-							sc.setResourceResult(t, "", common.OperationError, fmt.Sprintf("failed to delete resource: %v", err))
+							message = fmt.Sprintf("failed to delete resource: %v", err)
+							operationPhase = common.OperationError
+							sc.setResourceResult(t, "", operationPhase, message)
 						}
 					} else {
+						message = "deleted(dry-run)"
 						// if there is anything that needs deleting, we are at best now in pending and
 						// want to return and wait for sync to be invoked again
 						state = pending
+						operationPhase = common.OperationSucceeded
 					}
+					sc.setBaggageItemForTasks(&span, t, message, "", operationPhase)
 				}
 				return state
 			})
@@ -1359,6 +1383,29 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 	return state
 }
 
+func (sc *syncContext) createSpan(operation string, dryrun bool) tracing.Span {
+	// NOTE: we use context.Background() here because we don't want to inherit any trace context from the parent
+	var span tracing.Span
+	ctx := context.Background()
+	if sc.syncTracer == nil {
+		span = tracing.NopTracer{}.StartSpan(ctx, operation)
+	} else {
+		span = sc.syncTracer.StartSpanFromTraceParent(ctx, operation, sc.syncTraceID, sc.syncTraceRootSpanID)
+	}
+	span.SetBaggageItem("dryrun", strconv.FormatBool(dryrun))
+	return span
+}
+
+func (sc *syncContext) setBaggageItemForTasks(span *tracing.Span, t *syncTask, message string, result common.ResultCode, operationPhase common.OperationPhase) {
+	resourceKey := t.resourceKey()
+	(*span).SetBaggageItem("resource", resourceKey.String())
+	(*span).SetBaggageItem("result", string(result))
+	(*span).SetBaggageItem("operationPhase", string(operationPhase))
+	(*span).SetBaggageItem("message", message)
+	(*span).SetBaggageItem("phase", string(t.phase))
+	(*span).SetBaggageItem("wave", strconv.Itoa(t.wave()))
+}
+
 func (sc *syncContext) processCreateTasks(state runState, tasks syncTasks, dryRun bool) runState {
 	ss := newStateSync(state)
 	for _, task := range tasks {
@@ -1370,13 +1417,16 @@ func (sc *syncContext) processCreateTasks(state runState, tasks syncTasks, dryRu
 			logCtx := sc.log.WithValues("dryRun", dryRun, "task", t)
 			logCtx.V(1).Info("Applying")
 			validate := sc.validate && !resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionsDisableValidation)
+			span := sc.createSpan("applyObject", dryRun)
+			defer span.Finish()
 			result, message := sc.applyObject(t, dryRun, validate)
 			if result == common.ResultCodeSyncFailed {
 				logCtx.WithValues("message", message).Info("Apply failed")
 				state = failed
 			}
+			var phase common.OperationPhase
 			if !dryRun || sc.dryRun || result == common.ResultCodeSyncFailed {
-				phase := operationPhases[result]
+				phase = operationPhases[result]
 				// no resources are created in dry-run, so running phase means validation was
 				// successful and sync operation succeeded
 				if sc.dryRun && phase == common.OperationRunning {
@@ -1384,6 +1434,7 @@ func (sc *syncContext) processCreateTasks(state runState, tasks syncTasks, dryRu
 				}
 				sc.setResourceResult(t, result, phase, message)
 			}
+			sc.setBaggageItemForTasks(&span, t, message, result, phase)
 			return state
 		})
 	}
