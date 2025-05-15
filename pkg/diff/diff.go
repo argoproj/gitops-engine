@@ -12,9 +12,11 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 
 	jsonpatch "github.com/evanphx/json-patch/v5"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -22,11 +24,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/managedfields"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
 	"sigs.k8s.io/structured-merge-diff/v4/merge"
 	"sigs.k8s.io/structured-merge-diff/v4/typed"
 
-	"github.com/argoproj/gitops-engine/internal/kubernetes_vendor/pkg/api/v1/endpoints"
 	"github.com/argoproj/gitops-engine/pkg/diff/internal/fieldmanager"
 	"github.com/argoproj/gitops-engine/pkg/sync/resource"
 	jsonutil "github.com/argoproj/gitops-engine/pkg/utils/json"
@@ -905,7 +907,7 @@ func normalizeEndpoint(un *unstructured.Unstructured, o options) {
 	if gvk.Group != "" || gvk.Kind != "Endpoints" {
 		return
 	}
-	var ep corev1.Endpoints
+	var ep discoveryv1.EndpointSlice
 	err := runtime.DefaultUnstructuredConverter.FromUnstructured(un.Object, &ep)
 	if err != nil {
 		o.log.Error(err, "Failed to convert from unstructured into Endpoints")
@@ -913,17 +915,18 @@ func normalizeEndpoint(un *unstructured.Unstructured, o options) {
 	}
 
 	// add default protocol to subsets ports if it is empty
-	for s := range ep.Subsets {
-		subset := &ep.Subsets[s]
-		for p := range subset.Ports {
-			port := &subset.Ports[p]
-			if port.Protocol == "" {
-				port.Protocol = corev1.ProtocolTCP
-			}
+	for i := range ep.Ports {
+		port := &ep.Ports[i]
+		if port.Protocol == nil {
+			port.Protocol = ptr.To(corev1.ProtocolTCP)
 		}
 	}
 
-	endpoints.SortSubsets(ep.Subsets)
+	for i := range ep.Endpoints {
+		e := &ep.Endpoints[i]
+		sort.Strings(e.Addresses)
+	}
+	sort.Sort(ports(ep.Ports))
 
 	newObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&ep)
 	if err != nil {
