@@ -28,6 +28,8 @@ type CleanupFunc func()
 
 type OnKubectlRunFunc func(command string) (CleanupFunc, error)
 
+type OnKubectlRunFuncContext func(ctx context.Context, command string) (CleanupFunc, error)
+
 type Kubectl interface {
 	ManageResources(config *rest.Config, openAPISchema openapi.Resources) (ResourceOperations, func(), error)
 	LoadOpenAPISchema(config *rest.Config) (openapi.Resources, *managedfields.GvkParser, error)
@@ -39,13 +41,16 @@ type Kubectl interface {
 	GetAPIResources(config *rest.Config, preferred bool, resourceFilter ResourceFilter) ([]APIResourceInfo, error)
 	GetServerVersion(config *rest.Config) (string, error)
 	NewDynamicClient(config *rest.Config) (dynamic.Interface, error)
+	// Deprecated: use SetOnKubectlRunContext instead.
 	SetOnKubectlRun(onKubectlRun OnKubectlRunFunc)
+	SetOnKubectlRunContext(onKubectlRun OnKubectlRunFuncContext)
 }
 
 type KubectlCmd struct {
-	Log          logr.Logger
-	Tracer       tracing.Tracer
-	OnKubectlRun OnKubectlRunFunc
+	Log                 logr.Logger
+	Tracer              tracing.Tracer
+	OnKubectlRun        OnKubectlRunFunc
+	OnKubectlRunContext OnKubectlRunFuncContext
 }
 
 type APIResourceInfo struct {
@@ -292,11 +297,23 @@ func (k *KubectlCmd) ManageResources(config *rest.Config, openAPISchema openapi.
 		openAPISchema: openAPISchema,
 		tracer:        k.Tracer,
 		log:           k.Log,
-		onKubectlRun:  k.OnKubectlRun,
+		onKubectlRun:  k.OnKubectlRunContext,
 	}, cleanup, nil
 }
 
+// Deprecated: use ManageServerSideDiffDryRunsContext instead.
 func ManageServerSideDiffDryRuns(config *rest.Config, openAPISchema openapi.Resources, tracer tracing.Tracer, log logr.Logger, onKubectlRun OnKubectlRunFunc) (diff.KubeApplier, func(), error) {
+	onKubectlRunContext := func(_ context.Context, command string) (CleanupFunc, error) {
+		return onKubectlRun(command)
+	}
+	return manageServerSideDiffDryRunsContext(config, openAPISchema, tracer, log, onKubectlRunContext)
+}
+
+func ManageServerSideDiffDryRunsContext(config *rest.Config, openAPISchema openapi.Resources, tracer tracing.Tracer, log logr.Logger, onKubectlRunContext OnKubectlRunFuncContext) (diff.KubeApplier, func(), error) {
+	return manageServerSideDiffDryRunsContext(config, openAPISchema, tracer, log, onKubectlRunContext)
+}
+
+func manageServerSideDiffDryRunsContext(config *rest.Config, openAPISchema openapi.Resources, tracer tracing.Tracer, log logr.Logger, onKubectlRunContext OnKubectlRunFuncContext) (diff.KubeApplier, func(), error) {
 	f, err := os.CreateTemp(utils.TempDir, "")
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to generate temp file for kubeconfig: %w", err)
@@ -317,7 +334,7 @@ func ManageServerSideDiffDryRuns(config *rest.Config, openAPISchema openapi.Reso
 		openAPISchema: openAPISchema,
 		tracer:        tracer,
 		log:           log,
-		onKubectlRun:  onKubectlRun,
+		onKubectlRun:  onKubectlRunContext,
 	}, cleanup, nil
 }
 
@@ -354,6 +371,10 @@ func (k *KubectlCmd) NewDynamicClient(config *rest.Config) (dynamic.Interface, e
 
 func (k *KubectlCmd) SetOnKubectlRun(onKubectlRun OnKubectlRunFunc) {
 	k.OnKubectlRun = onKubectlRun
+}
+
+func (k *KubectlCmd) SetOnKubectlRunContext(onKubectlRunContext OnKubectlRunFuncContext) {
+	k.OnKubectlRunContext = onKubectlRunContext
 }
 
 func RunAllAsync(count int, action func(i int) error) error {

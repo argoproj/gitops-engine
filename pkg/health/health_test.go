@@ -5,6 +5,7 @@ Package provides functionality that allows assessing the health state of a Kuber
 package health
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -28,7 +29,7 @@ func getHealthStatus(t *testing.T, yamlPath string) *HealthStatus {
 	var obj unstructured.Unstructured
 	err = yaml.Unmarshal(yamlBytes, &obj)
 	require.NoError(t, err)
-	health, err := GetResourceHealth(&obj, nil)
+	health, err := GetResourceHealthContext(context.Background(), &obj, nil)
 	require.NoError(t, err)
 	return health
 }

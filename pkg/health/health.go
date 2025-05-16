@@ -1,6 +1,8 @@
 package health
 
 import (
+	"context"
+
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -32,6 +34,13 @@ const (
 type HealthOverride interface {
 	GetResourceHealth(obj *unstructured.Unstructured) (*HealthStatus, error)
 }
+
+// Implements custom health assessment that overrides built-in assessment
+type HealthOverrideContext interface {
+	GetResourceHealth(ctx context.Context, obj *unstructured.Unstructured) (*HealthStatus, error)
+}
+
+type HealthOverrideFuncContext func(ctx context.Context, obj *unstructured.Unstructured) (*HealthStatus, error)
 
 // Holds health assessment results
 type HealthStatus struct {
@@ -66,6 +75,25 @@ func IsWorse(current, new HealthStatusCode) bool {
 
 // GetResourceHealth returns the health of a k8s resource
 func GetResourceHealth(obj *unstructured.Unstructured, healthOverride HealthOverride) (health *HealthStatus, err error) {
+	healthOverrideContext := func(_ context.Context, obj *unstructured.Unstructured) (*HealthStatus, error) {
+		return healthOverride.GetResourceHealth(obj)
+	}
+	return getResourceHealth(context.Background(), obj, healthOverrideContext)
+}
+
+// GetResourceHealth returns the health of a k8s resource
+func GetResourceHealthContext(ctx context.Context, obj *unstructured.Unstructured, healthOverride HealthOverrideContext) (health *HealthStatus, err error) {
+	var healthOverrideFunc HealthOverrideFuncContext
+	if healthOverride != nil {
+		healthOverrideFunc = func(ctx context.Context, obj *unstructured.Unstructured) (*HealthStatus, error) {
+			return healthOverride.GetResourceHealth(ctx, obj)
+		}
+	}
+	return getResourceHealth(ctx, obj, healthOverrideFunc)
+}
+
+// GetResourceHealth returns the health of a k8s resource
+func getResourceHealth(ctx context.Context, obj *unstructured.Unstructured, healthOverride HealthOverrideFuncContext) (health *HealthStatus, err error) {
 	if obj.GetDeletionTimestamp() != nil && !hook.HasHookFinalizer(obj) {
 		return &HealthStatus{
 			Status:  HealthStatusProgressing,
@@ -74,7 +102,7 @@ func GetResourceHealth(obj *unstructured.Unstructured, healthOverride HealthOver
 	}
 
 	if healthOverride != nil {
-		health, err := healthOverride.GetResourceHealth(obj)
+		health, err := healthOverride(ctx, obj)
 		if err != nil {
 			health = &HealthStatus{
 				Status:  HealthStatusUnknown,
