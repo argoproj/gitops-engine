@@ -61,9 +61,15 @@ func (n *noopNormalizer) Normalize(_ *unstructured.Unstructured) error {
 	return nil
 }
 
+func (n *noopNormalizer) NormalizeContext(_ context.Context, _ *unstructured.Unstructured) error {
+	return nil
+}
+
 // Normalizer updates resource before comparing it
 type Normalizer interface {
+	// Deprecated: use NormalizeContext instead
 	Normalize(un *unstructured.Unstructured) error
+	NormalizeContext(ctx context.Context, un *unstructured.Unstructured) error
 }
 
 // GetNoopNormalizer returns normalizer that does not apply any resource modifications
