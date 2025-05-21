@@ -23,6 +23,7 @@ import (
 	"github.com/argoproj/gitops-engine/pkg/sync"
 	"github.com/argoproj/gitops-engine/pkg/sync/common"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
+	"github.com/argoproj/gitops-engine/pkg/utils/tracing"
 )
 
 const (
@@ -84,7 +85,7 @@ func (e *gitOpsEngine) Sync(ctx context.Context,
 		return nil, err
 	}
 	opts = append(opts, sync.WithSkipHooks(!diffRes.Modified))
-	syncCtx, cleanup, err := sync.NewSyncContext(revision, result, e.config, e.config, e.kubectl, namespace, e.cache.GetOpenAPISchema(), opts...)
+	syncCtx, cleanup, err := sync.NewSyncContext(revision, result, e.config, e.config, e.kubectl, namespace, e.cache.GetOpenAPISchema(), tracing.NopTracer{}, "", "", opts...)
 	if err != nil {
 		return nil, err
 	}
