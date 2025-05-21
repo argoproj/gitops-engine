@@ -24,6 +24,7 @@ type MockResourceOps struct {
 	serverSideApply        bool
 	serverSideApplyManager string
 	lastForce              bool
+	lastDryRunStrategy     cmdutil.DryRunStrategy
 
 	recordLock sync.RWMutex
 
@@ -106,12 +107,26 @@ func (r *MockResourceOps) GetLastResourceCommand(key kube.ResourceKey) string {
 	return r.lastCommandPerResource[key]
 }
 
-func (r *MockResourceOps) ApplyResource(_ context.Context, obj *unstructured.Unstructured, _ cmdutil.DryRunStrategy, force bool, validate bool, serverSideApply bool, manager string) (string, error) {
+func (r *MockResourceOps) SetLastDryRunStrategy(dryRunStrategy cmdutil.DryRunStrategy) {
+	r.recordLock.Lock()
+	r.lastDryRunStrategy = dryRunStrategy
+	r.recordLock.Unlock()
+}
+
+func (r *MockResourceOps) GetLastDryRunStrategy() cmdutil.DryRunStrategy {
+	r.recordLock.RLock()
+	dryRunStrategy := r.lastDryRunStrategy
+	r.recordLock.RUnlock()
+	return dryRunStrategy
+}
+
+func (r *MockResourceOps) ApplyResource(_ context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force bool, validate bool, serverSideApply bool, manager string) (string, error) {
 	r.SetLastValidate(validate)
 	r.SetLastServerSideApply(serverSideApply)
 	r.SetLastServerSideApplyManager(manager)
 	r.SetLastForce(force)
 	r.SetLastResourceCommand(kube.GetResourceKey(obj), "apply")
+	r.SetLastDryRunStrategy(dryRunStrategy)
 	command, ok := r.Commands[obj.GetName()]
 	if !ok {
 		return "", nil
