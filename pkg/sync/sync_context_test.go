@@ -27,6 +27,7 @@ import (
 	"k8s.io/client-go/rest"
 	testcore "k8s.io/client-go/testing"
 	"k8s.io/klog/v2/textlogger"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/argoproj/gitops-engine/pkg/diff"
 	"github.com/argoproj/gitops-engine/pkg/health"
@@ -860,9 +861,9 @@ func TestSyncContext_ServerSideApplyWithDryRun(t *testing.T) {
 		objToUse    func(*unstructured.Unstructured) *unstructured.Unstructured
 	}{
 		{"BothFlagsFalseAnnotated", false, false, true, withServerSideApplyAnnotation},
-		{"scDryRunTrueAnnotated", true, false, false, withServerSideApplyAnnotation},
-		{"dryRunTrueAnnotated", false, true, false, withServerSideApplyAnnotation},
-		{"BothFlagsTrueAnnotated", true, true, false, withServerSideApplyAnnotation},
+		{"scDryRunTrueAnnotated", true, false, true, withServerSideApplyAnnotation},
+		{"dryRunTrueAnnotated", false, true, true, withServerSideApplyAnnotation},
+		{"BothFlagsTrueAnnotated", true, true, true, withServerSideApplyAnnotation},
 		{"AnnotatedDisabledSSA", false, false, false, withDisableServerSideApplyAnnotation},
 	}
 
@@ -873,7 +874,7 @@ func TestSyncContext_ServerSideApplyWithDryRun(t *testing.T) {
 			targetObj := tc.objToUse(testingutils.NewPod())
 
 			// Execute the shouldUseServerSideApply method and assert expectations
-			serverSideApply := sc.shouldUseServerSideApply(targetObj, tc.dryRun)
+			serverSideApply := sc.shouldUseServerSideApply(targetObj)
 			assert.Equal(t, tc.expectedSSA, serverSideApply)
 		})
 	}
@@ -2178,5 +2179,72 @@ func BenchmarkSync(b *testing.B) {
 
 		b.StartTimer()
 		syncCtx.Sync()
+	}
+}
+
+func TestSyncContext_ApplyObjectDryRun(t *testing.T) {
+	testCases := []struct {
+		name            string
+		target          *unstructured.Unstructured
+		live            *unstructured.Unstructured
+		dryRun          bool
+		syncNamespace   func(*unstructured.Unstructured, *unstructured.Unstructured) (bool, error)
+		serverSideApply bool
+		expectedDryRun  cmdutil.DryRunStrategy
+	}{
+		{
+			name:            "DryRunWithNoAutoCreateNamespace",
+			target:          withServerSideApplyAnnotation(testingutils.NewPod()),
+			live:            testingutils.NewPod(),
+			dryRun:          true,
+			syncNamespace:   nil,
+			serverSideApply: true,
+			expectedDryRun:  cmdutil.DryRunServer,
+		},
+		{
+			name:            "DryRunWithAutoCreateNamespace",
+			target:          withServerSideApplyAnnotation(testingutils.NewPod()),
+			live:            testingutils.NewPod(),
+			dryRun:          true,
+			syncNamespace:   func(*unstructured.Unstructured, *unstructured.Unstructured) (bool, error) { return true, nil },
+			serverSideApply: true,
+			expectedDryRun:  cmdutil.DryRunClient,
+		},
+		{
+			name:            "NoDryRun",
+			target:          withServerSideApplyAnnotation(testingutils.NewPod()),
+			live:            testingutils.NewPod(),
+			dryRun:          false,
+			syncNamespace:   nil,
+			serverSideApply: true,
+			expectedDryRun:  cmdutil.DryRunNone,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			syncCtx := newTestSyncCtx(nil)
+			syncCtx.serverSideApply = tc.serverSideApply
+			syncCtx.syncNamespace = tc.syncNamespace
+
+			tc.target.SetNamespace(testingutils.FakeArgoCDNamespace)
+			if tc.live != nil {
+				tc.live.SetNamespace(testingutils.FakeArgoCDNamespace)
+			}
+
+			task := &syncTask{
+				targetObj: tc.target,
+				liveObj:   tc.live,
+			}
+
+			result, _ := syncCtx.applyObject(task, tc.dryRun, true)
+
+			assert.Equal(t, synccommon.ResultCodeSynced, result)
+
+			resourceOps, _ := syncCtx.resourceOps.(*kubetest.MockResourceOps)
+			assert.Equal(t, tc.expectedDryRun, resourceOps.GetLastDryRunStrategy())
+		})
 	}
 }

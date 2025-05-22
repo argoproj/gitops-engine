@@ -1042,15 +1042,7 @@ func (sc *syncContext) ensureCRDReady(name string) error {
 	})
 }
 
-func (sc *syncContext) shouldUseServerSideApply(targetObj *unstructured.Unstructured, dryRun bool) bool {
-	// if it is a dry run, disable server side apply, as the goal is to validate only the
-	// yaml correctness of the rendered manifests.
-	// running dry-run in server mode breaks the auto create namespace feature
-	// https://github.com/argoproj/argo-cd/issues/13874
-	if sc.dryRun || dryRun {
-		return false
-	}
-
+func (sc *syncContext) shouldUseServerSideApply(targetObj *unstructured.Unstructured) bool {
 	resourceHasDisableSSAAnnotation := resourceutil.HasAnnotationOption(targetObj, common.AnnotationSyncOptions, common.SyncOptionDisableServerSideApply)
 	if resourceHasDisableSSAAnnotation {
 		return false
@@ -1059,22 +1051,36 @@ func (sc *syncContext) shouldUseServerSideApply(targetObj *unstructured.Unstruct
 	return sc.serverSideApply || resourceutil.HasAnnotationOption(targetObj, common.AnnotationSyncOptions, common.SyncOptionServerSideApply)
 }
 
+func (sc *syncContext) getDryRunStrategy(serverSideApply bool, isAutoCreateNamespaceFeatureEnabled bool) cmdutil.DryRunStrategy {
+	if serverSideApply {
+		// if auto create namespace is not enabled (CreateNamespace option not set),
+		// then server apply can be used for dry runs. Users can choose whether to prioritise
+		// convenience of namespaces being created automatically with client side only feedback,
+		// or manage the namespace themselves and have rich feedback with server side apply.
+		// https://github.com/argoproj/argo-cd/issues/13874
+		if !isAutoCreateNamespaceFeatureEnabled {
+			return cmdutil.DryRunServer
+		}
+		sc.log.Info("server side apply is not supported for dry run when auto create namespace is enabled. Falling back to client side dry run")
+	}
+	return cmdutil.DryRunClient
+}
+
 func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.ResultCode, string) {
+	isResourceEligibleForServerSideApply := sc.shouldUseServerSideApply(t.targetObj)
+
 	dryRunStrategy := cmdutil.DryRunNone
 	if dryRun {
-		// irrespective of the dry run mode set in the sync context, always run
-		// in client dry run mode as the goal is to validate only the
-		// yaml correctness of the rendered manifests.
-		// running dry-run in server mode breaks the auto create namespace feature
-		// https://github.com/argoproj/argo-cd/issues/13874
-		dryRunStrategy = cmdutil.DryRunClient
+		dryRunStrategy = sc.getDryRunStrategy(isResourceEligibleForServerSideApply, sc.syncNamespace != nil)
 	}
+
+	serverSideApply := isResourceEligibleForServerSideApply && dryRunStrategy != cmdutil.DryRunClient
 
 	var err error
 	var message string
 	shouldReplace := sc.replace || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplace)
 	force := sc.force || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionForce)
-	serverSideApply := sc.shouldUseServerSideApply(t.targetObj, dryRun)
+
 	if shouldReplace {
 		if t.liveObj != nil {
 			// Avoid using `kubectl replace` for CRDs since 'replace' might recreate resource and so delete all CRD instances.
