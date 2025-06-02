@@ -2196,13 +2196,13 @@ func TestNeedsClientSideApplyMigration(t *testing.T) {
 		},
 		{
 			name:     "object with no managed fields",
-			liveObj:  NewPod(),
+			liveObj:  testingutils.NewPod(),
 			expected: false,
 		},
 		{
 			name: "object with kubectl-client-side-apply fields",
 			liveObj: func() *unstructured.Unstructured {
-				obj := NewPod()
+				obj := testingutils.NewPod()
 				obj.SetManagedFields([]metav1.ManagedFieldsEntry{
 					{
 						Manager:   "kubectl-client-side-apply",
@@ -2217,7 +2217,7 @@ func TestNeedsClientSideApplyMigration(t *testing.T) {
 		{
 			name: "object with only argocd-controller fields",
 			liveObj: func() *unstructured.Unstructured {
-				obj := NewPod()
+				obj := testingutils.NewPod()
 				obj.SetManagedFields([]metav1.ManagedFieldsEntry{
 					{
 						Manager:   "argocd-controller",
@@ -2232,7 +2232,7 @@ func TestNeedsClientSideApplyMigration(t *testing.T) {
 		{
 			name: "object with mixed field managers",
 			liveObj: func() *unstructured.Unstructured {
-				obj := NewPod()
+				obj := testingutils.NewPod()
 				obj.SetManagedFields([]metav1.ManagedFieldsEntry{
 					{
 						Manager:   "kubectl-client-side-apply",

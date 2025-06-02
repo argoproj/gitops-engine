@@ -1083,7 +1083,7 @@ func (sc *syncContext) needsClientSideApplyMigration(liveObj *unstructured.Unstr
 // performClientSideApplyMigration performs a client-side apply with kubectl-client-side-apply as the manager
 // to enable automatic migration to server-side apply manager in the next step
 func (sc *syncContext) performClientSideApplyMigration(targetObj *unstructured.Unstructured) error {
-	sc.log.WithValues("resource", kube.GetResourceKey(targetObj)).V(1).Info("Performing client-side apply migration step")
+	sc.log.WithValues("resource", kubeutil.GetResourceKey(targetObj)).V(1).Info("Performing client-side apply migration step")
 
 	// Apply with kubectl-client-side-apply as the manager to set up the migration
 	_, err := sc.resourceOps.ApplyResource(
@@ -1124,7 +1124,7 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 	if serverSideApply && !dryRun && sc.needsClientSideApplyMigration(t.liveObj) {
 		err = sc.performClientSideApplyMigration(t.targetObj)
 		if err != nil {
-			sc.log.WithValues("resource", kube.GetResourceKey(t.targetObj)).Error(err, "Failed to perform client-side apply migration")
+			sc.log.WithValues("resource", kubeutil.GetResourceKey(t.targetObj)).Error(err, "Failed to perform client-side apply migration")
 		}
 	}
 
