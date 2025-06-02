@@ -1095,7 +1095,6 @@ func (sc *syncContext) performClientSideApplyMigration(targetObj *unstructured.U
 		false,
 		"kubectl-client-side-apply",
 	)
-
 	if err != nil {
 		return fmt.Errorf("failed to perform client-side apply migration step: %w", err)
 	}
