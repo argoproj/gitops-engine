@@ -601,6 +601,10 @@ func (c *clusterCache) listResources(ctx context.Context, resClient dynamic.Reso
 		}
 
 		listRetry.Steps = int(c.listRetryLimit)
+		// We set the resource version to 0 below to proactively prevent the
+		// list API call from reaching etcd and make the server fetch the data
+		// from the watch cache instead.
+		opts.ResourceVersion = "0"
 		err := retry.OnError(listRetry, c.listRetryFunc, func() error {
 			var ierr error
 			res, ierr = resClient.List(ctx, opts)
