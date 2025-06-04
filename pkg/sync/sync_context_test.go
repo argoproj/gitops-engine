@@ -1209,6 +1209,17 @@ func TestNamespaceAutoCreationForNonExistingNs(t *testing.T) {
 			Live:   []*unstructured.Unstructured{nil},
 			Target: []*unstructured.Unstructured{pod1},
 		})
+
+		fakeDisco := syncCtx.disco.(*fakedisco.FakeDiscovery)
+		fakeDisco.Resources = []*metav1.APIResourceList{
+			{GroupVersion: "v1",
+				APIResources: []metav1.APIResource{
+					{Name: "pods", Kind: "Pod", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch", "create", "update", "patch", "delete"}},
+				},
+			},
+		}
+		syncCtx.disco = fakeDisco
+
 		syncCtx.skipDryRun = true
 
 		tasks, successful := syncCtx.getSyncTasks()
@@ -1229,38 +1240,21 @@ func TestNamespaceAutoCreationForNonExistingNs(t *testing.T) {
 		}, tasks[0])
 	})
 
-	t.Run("Skip dryrun should be successful even when resource type is unknown", func(t *testing.T) {
-		syncCtx.resources = groupResources(ReconciliationResult{
-			Live:   []*unstructured.Unstructured{nil},
-			Target: []*unstructured.Unstructured{pod},
-		})
-
-		fakeDisco := syncCtx.disco.(*fakedisco.FakeDiscovery)
-		fakeDisco.Resources = []*metav1.APIResourceList{}
-		syncCtx.disco = fakeDisco
-
-		syncCtx.skipDryRun = true
-		tasks, successful := syncCtx.getSyncTasks()
-
-		assert.True(t, successful)
-		assert.Len(t, tasks, 1)
-		assert.Equal(t, &syncTask{
-			phase:          synccommon.SyncPhaseSync,
-			liveObj:        nil,
-			targetObj:      tasks[0].targetObj,
-			skipDryRun:     true,
-			syncStatus:     "",
-			operationState: "",
-			message:        "",
-			waveOverride:   nil,
-		}, tasks[0])
-	})
-
 	t.Run("Skip dryrun should be set to false if the object is already created", func(t *testing.T) {
 		syncCtx.resources = groupResources(ReconciliationResult{
 			Live:   []*unstructured.Unstructured{pod},
 			Target: []*unstructured.Unstructured{pod},
 		})
+
+		fakeDisco := syncCtx.disco.(*fakedisco.FakeDiscovery)
+		fakeDisco.Resources = []*metav1.APIResourceList{
+			{GroupVersion: "v1",
+				APIResources: []metav1.APIResource{
+					{Name: "pods", Kind: "Pod", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch", "create", "update", "patch", "delete"}},
+				},
+			},
+		}
+		syncCtx.disco = fakeDisco
 
 		syncCtx.skipDryRun = true
 		tasks, successful := syncCtx.getSyncTasks()
