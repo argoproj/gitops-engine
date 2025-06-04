@@ -1212,7 +1212,8 @@ func TestNamespaceAutoCreationForNonExistingNs(t *testing.T) {
 
 		fakeDisco := syncCtx.disco.(*fakedisco.FakeDiscovery)
 		fakeDisco.Resources = []*metav1.APIResourceList{
-			{GroupVersion: "v1",
+			{
+				GroupVersion: "v1",
 				APIResources: []metav1.APIResource{
 					{Name: "pods", Kind: "Pod", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch", "create", "update", "patch", "delete"}},
 				},
@@ -1254,7 +1255,8 @@ func TestNamespaceAutoCreationForNonExistingNs(t *testing.T) {
 
 		fakeDisco := syncCtx.disco.(*fakedisco.FakeDiscovery)
 		fakeDisco.Resources = []*metav1.APIResourceList{
-			{GroupVersion: "v1",
+			{
+				GroupVersion: "v1",
 				APIResources: []metav1.APIResource{
 					{Name: "pods", Kind: "Pod", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch", "create", "update", "patch", "delete"}},
 				},
@@ -1265,7 +1267,6 @@ func TestNamespaceAutoCreationForNonExistingNs(t *testing.T) {
 		syncCtx.skipDryRun = true
 		tasks, successful := syncCtx.getSyncTasks()
 
-		//assert.True(t, creatorCalled)
 		assert.True(t, successful)
 		assert.Len(t, tasks, 1)
 		assert.Equal(t, &syncTask{
