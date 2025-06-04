@@ -1208,6 +1208,7 @@ func TestNamespaceAutoCreationForNonExistingNs(t *testing.T) {
 }
 
 func testSkipDryRunOnlySetWhenResouceIsntCreated(t *testing.T, objectExists bool, podName string) {
+	t.Helper()
 	pod1 := testingutils.NewPod()
 	pod1.SetName(podName)
 
