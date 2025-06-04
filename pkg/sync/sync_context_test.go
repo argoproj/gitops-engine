@@ -1199,87 +1199,59 @@ func TestNamespaceAutoCreationForNonExistingNs(t *testing.T) {
 	})
 
 	t.Run("Skip dryrun should be set if resource type is known", func(t *testing.T) {
-		pod1 := testingutils.NewPod()
-		pod1.SetName("pod-dryrun")
-
-		syncCtx := newTestSyncCtx(nil, WithResourcesFilter(func(key kube.ResourceKey, _ *unstructured.Unstructured, _ *unstructured.Unstructured) bool {
-			return key.Kind == pod1.GetKind() && key.Name == pod1.GetName()
-		}))
-		syncCtx.resources = groupResources(ReconciliationResult{
-			Live:   []*unstructured.Unstructured{nil},
-			Target: []*unstructured.Unstructured{pod1},
-		})
-
-		fakeDisco := syncCtx.disco.(*fakedisco.FakeDiscovery)
-		fakeDisco.Resources = []*metav1.APIResourceList{
-			{
-				GroupVersion: "v1",
-				APIResources: []metav1.APIResource{
-					{Name: "pods", Kind: "Pod", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch", "create", "update", "patch", "delete"}},
-				},
-			},
-		}
-		syncCtx.disco = fakeDisco
-
-		syncCtx.skipDryRun = true
-
-		tasks, successful := syncCtx.getSyncTasks()
-
-		assert.True(t, successful)
-		assert.Len(t, tasks, 1)
-		assert.Equal(t, "pod-dryrun", tasks[0].name())
-
-		assert.Equal(t, &syncTask{
-			phase:          synccommon.SyncPhaseSync,
-			liveObj:        nil,
-			targetObj:      tasks[0].targetObj,
-			skipDryRun:     true,
-			syncStatus:     "",
-			operationState: "",
-			message:        "",
-			waveOverride:   nil,
-		}, tasks[0])
+		testSkipDryRunOnlySetWhenResouceIsntCreated(t, false, "pod-dryrun")
 	})
 
 	t.Run("Skip dryrun should be set to false if the object is already created", func(t *testing.T) {
-		pod1 := testingutils.NewPod()
-		pod1.SetName("pod-dryrun2")
+		testSkipDryRunOnlySetWhenResouceIsntCreated(t, true, "pod-dryrun2")
+	})
+}
 
-		syncCtx := newTestSyncCtx(nil, WithResourcesFilter(func(key kube.ResourceKey, _ *unstructured.Unstructured, _ *unstructured.Unstructured) bool {
-			return key.Kind == pod1.GetKind() && key.Name == pod1.GetName()
-		}))
+func testSkipDryRunOnlySetWhenResouceIsntCreated(t *testing.T, objectExists bool, Podname string) {
+	pod1 := testingutils.NewPod()
+	pod1.SetName(Podname)
+
+	syncCtx := newTestSyncCtx(nil, WithResourcesFilter(func(key kube.ResourceKey, _ *unstructured.Unstructured, _ *unstructured.Unstructured) bool {
+		return key.Kind == pod1.GetKind() && key.Name == pod1.GetName()
+	}))
+	syncCtx.resources = groupResources(ReconciliationResult{
+		Live:   []*unstructured.Unstructured{nil},
+		Target: []*unstructured.Unstructured{pod1},
+	})
+
+	if objectExists {
 		syncCtx.resources = groupResources(ReconciliationResult{
 			Live:   []*unstructured.Unstructured{pod1},
 			Target: []*unstructured.Unstructured{pod1},
 		})
+	}
 
-		fakeDisco := syncCtx.disco.(*fakedisco.FakeDiscovery)
-		fakeDisco.Resources = []*metav1.APIResourceList{
-			{
-				GroupVersion: "v1",
-				APIResources: []metav1.APIResource{
-					{Name: "pods", Kind: "Pod", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch", "create", "update", "patch", "delete"}},
-				},
+	fakeDisco := syncCtx.disco.(*fakedisco.FakeDiscovery)
+	fakeDisco.Resources = []*metav1.APIResourceList{
+		{
+			GroupVersion: "v1",
+			APIResources: []metav1.APIResource{
+				{Name: "pods", Kind: "Pod", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch", "create", "update", "patch", "delete"}},
 			},
-		}
-		syncCtx.disco = fakeDisco
+		},
+	}
+	syncCtx.disco = fakeDisco
 
-		syncCtx.skipDryRun = true
-		tasks, successful := syncCtx.getSyncTasks()
+	syncCtx.skipDryRun = true
+	tasks, successful := syncCtx.getSyncTasks()
 
-		assert.True(t, successful)
-		assert.Len(t, tasks, 1)
-		assert.Equal(t, &syncTask{
-			phase:          synccommon.SyncPhaseSync,
-			liveObj:        tasks[0].liveObj,
-			targetObj:      tasks[0].targetObj,
-			skipDryRun:     false,
-			syncStatus:     "",
-			operationState: "",
-			message:        "",
-			waveOverride:   nil,
-		}, tasks[0])
-	})
+	assert.True(t, successful)
+	assert.Len(t, tasks, 1)
+	assert.Equal(t, &syncTask{
+		phase:          synccommon.SyncPhaseSync,
+		liveObj:        tasks[0].liveObj,
+		targetObj:      tasks[0].targetObj,
+		skipDryRun:     !objectExists,
+		syncStatus:     "",
+		operationState: "",
+		message:        "",
+		waveOverride:   nil,
+	}, tasks[0])
 }
 
 func createNamespaceTask(namespace string) (*syncTask, error) {
