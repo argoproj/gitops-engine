@@ -1198,7 +1198,38 @@ func TestNamespaceAutoCreationForNonExistingNs(t *testing.T) {
 		}, tasks[0])
 	})
 
-	t.Run("pre-sync task error should be ignored if skip dryrun is true", func(t *testing.T) {
+	t.Run("Skip dryrun should be set if resource type is known", func(t *testing.T) {
+		pod1 := testingutils.NewPod()
+		pod1.SetName("pod-dryrun")
+
+		syncCtx := newTestSyncCtx(nil, WithResourcesFilter(func(key kube.ResourceKey, _ *unstructured.Unstructured, _ *unstructured.Unstructured) bool {
+			return key.Kind == pod1.GetKind() && key.Name == pod1.GetName()
+		}))
+		syncCtx.resources = groupResources(ReconciliationResult{
+			Live:   []*unstructured.Unstructured{nil},
+			Target: []*unstructured.Unstructured{pod1},
+		})
+		syncCtx.skipDryRun = true
+
+		tasks, successful := syncCtx.getSyncTasks()
+
+		assert.True(t, successful)
+		assert.Len(t, tasks, 1)
+		assert.Equal(t, "pod-dryrun", tasks[0].name())
+
+		assert.Equal(t, &syncTask{
+			phase:          synccommon.SyncPhaseSync,
+			liveObj:        nil,
+			targetObj:      tasks[0].targetObj,
+			skipDryRun:     true,
+			syncStatus:     "",
+			operationState: "",
+			message:        "",
+			waveOverride:   nil,
+		}, tasks[0])
+	})
+
+	t.Run("Skip dryrun should be successful even when resource type is unknown", func(t *testing.T) {
 		syncCtx.resources = groupResources(ReconciliationResult{
 			Live:   []*unstructured.Unstructured{nil},
 			Target: []*unstructured.Unstructured{pod},
@@ -1209,24 +1240,42 @@ func TestNamespaceAutoCreationForNonExistingNs(t *testing.T) {
 		syncCtx.disco = fakeDisco
 
 		syncCtx.skipDryRun = true
-		creatorCalled := false
-		syncCtx.syncNamespace = func(_, _ *unstructured.Unstructured) (bool, error) {
-			creatorCalled = true
-			return true, errors.New("some error")
-		}
 		tasks, successful := syncCtx.getSyncTasks()
 
-		assert.True(t, creatorCalled)
 		assert.True(t, successful)
-		assert.Len(t, tasks, 2)
+		assert.Len(t, tasks, 1)
 		assert.Equal(t, &syncTask{
-			phase:          synccommon.SyncPhasePreSync,
+			phase:          synccommon.SyncPhaseSync,
 			liveObj:        nil,
 			targetObj:      tasks[0].targetObj,
 			skipDryRun:     true,
-			syncStatus:     synccommon.ResultCodeSyncFailed,
-			operationState: synccommon.OperationError,
-			message:        "namespaceModifier error: some error",
+			syncStatus:     "",
+			operationState: "",
+			message:        "",
+			waveOverride:   nil,
+		}, tasks[0])
+	})
+
+	t.Run("Skip dryrun should be set to false if the object is already created", func(t *testing.T) {
+		syncCtx.resources = groupResources(ReconciliationResult{
+			Live:   []*unstructured.Unstructured{pod},
+			Target: []*unstructured.Unstructured{pod},
+		})
+
+		syncCtx.skipDryRun = true
+		tasks, successful := syncCtx.getSyncTasks()
+
+		//assert.True(t, creatorCalled)
+		assert.True(t, successful)
+		assert.Len(t, tasks, 1)
+		assert.Equal(t, &syncTask{
+			phase:          synccommon.SyncPhaseSync,
+			liveObj:        tasks[0].liveObj,
+			targetObj:      tasks[0].targetObj,
+			skipDryRun:     false,
+			syncStatus:     "",
+			operationState: "",
+			message:        "",
 			waveOverride:   nil,
 		}, tasks[0])
 	})

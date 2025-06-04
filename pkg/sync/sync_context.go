@@ -834,23 +834,21 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 				sc.hasCRDOfGroupKind(task.group(), task.kind())
 		}
 
-		if err != nil {
-			switch {
-			case apierrors.IsNotFound(err) && shouldSkipDryRunOnMissingResource():
-				// Special case for custom resources: if CRD is not yet known by the K8s API server,
-				// and the CRD is part of this sync or the resource is annotated with SkipDryRunOnMissingResource=true,
-				// then skip verification during `kubectl apply --dry-run` since we expect the CRD
-				// to be created during app synchronization.
+		if sc.skipDryRun && task.liveObj == nil {
+			// Skip dryrun for task if the sync context is in skip dryrun mode and the object is not yet created.
+			// This can be useful when resource creation is depending on the creation of other resources
+			// like namespaces that need to be created first before the resources in the namespace can be created
+			// For CRD's one can also use the SkipDryRunOnMissingResource annotation.
+			sc.log.WithValues("task", task).V(1).Info("Skipping dry-run for task because skipDryRun is set in the sync context")
+			task.skipDryRun = true
+		} else if err != nil {
+			// if skipdryrun is not set and the resourcedefinition is not found, we can check for CRD specific skip dryrun.
+			if apierrors.IsNotFound(err) && shouldSkipDryRunOnMissingResource() {
+				// Skip dry-run for custom resources if CRD is not yet known by the K8s API server,
+				// and the CRD is part of this sync or the resource is annotated with SkipDryRunOnMissingResource=true.
 				sc.log.WithValues("task", task).V(1).Info("Skip dry-run for custom resource")
 				task.skipDryRun = true
-			case sc.skipDryRun:
-				// Skip dryrun for task if the sync context is in skip dryrun mode
-				// This can be useful when resource creation is depending on the creation of other resources
-				// like namespaces that need to be created first before the resources in the namespace can be created
-				// For CRD's one can also use the SkipDryRunOnMissingResource annotation.
-				sc.log.WithValues("task", task).V(1).Info("Skipping dry-run for task because skipDryRun is set in the sync context")
-				task.skipDryRun = true
-			default:
+			} else {
 				sc.setResourceResult(task, common.ResultCodeSyncFailed, "", err.Error())
 				successful = false
 			}
