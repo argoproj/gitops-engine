@@ -1207,9 +1207,9 @@ func TestNamespaceAutoCreationForNonExistingNs(t *testing.T) {
 	})
 }
 
-func testSkipDryRunOnlySetWhenResouceIsntCreated(t *testing.T, objectExists bool, Podname string) {
+func testSkipDryRunOnlySetWhenResouceIsntCreated(t *testing.T, objectExists bool, podName string) {
 	pod1 := testingutils.NewPod()
-	pod1.SetName(Podname)
+	pod1.SetName(podName)
 
 	syncCtx := newTestSyncCtx(nil, WithResourcesFilter(func(key kube.ResourceKey, _ *unstructured.Unstructured, _ *unstructured.Unstructured) bool {
 		return key.Kind == pod1.GetKind() && key.Name == pod1.GetName()
