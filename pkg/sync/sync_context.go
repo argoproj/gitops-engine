@@ -834,14 +834,15 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 				sc.hasCRDOfGroupKind(task.group(), task.kind())
 		}
 
-		if sc.skipDryRun && task.liveObj == nil {
+		switch {
+		case sc.skipDryRun && task.liveObj == nil:
 			// Skip dryrun for task if the sync context is in skip dryrun mode and the object is not yet created.
 			// This can be useful when resource creation is depending on the creation of other resources
 			// like namespaces that need to be created first before the resources in the namespace can be created
 			// For CRD's one can also use the SkipDryRunOnMissingResource annotation.
 			sc.log.WithValues("task", task).V(1).Info("Skipping dry-run for task because skipDryRun is set in the sync context")
 			task.skipDryRun = true
-		} else if err != nil {
+		case err != nil:
 			// if skipdryrun is not set and the resourcedefinition is not found, we can check for CRD specific skip dryrun.
 			if apierrors.IsNotFound(err) && shouldSkipDryRunOnMissingResource() {
 				// Skip dry-run for custom resources if CRD is not yet known by the K8s API server,
@@ -852,7 +853,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 				sc.setResourceResult(task, common.ResultCodeSyncFailed, "", err.Error())
 				successful = false
 			}
-		} else {
+		default:
 			if err := sc.permissionValidator(task.obj(), serverRes); err != nil {
 				sc.setResourceResult(task, common.ResultCodeSyncFailed, "", err.Error())
 				successful = false
