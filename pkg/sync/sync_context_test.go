@@ -1241,9 +1241,15 @@ func TestNamespaceAutoCreationForNonExistingNs(t *testing.T) {
 	})
 
 	t.Run("Skip dryrun should be set to false if the object is already created", func(t *testing.T) {
+		pod1 := testingutils.NewPod()
+		pod1.SetName("pod-dryrun2")
+
+		syncCtx := newTestSyncCtx(nil, WithResourcesFilter(func(key kube.ResourceKey, _ *unstructured.Unstructured, _ *unstructured.Unstructured) bool {
+			return key.Kind == pod1.GetKind() && key.Name == pod1.GetName()
+		}))
 		syncCtx.resources = groupResources(ReconciliationResult{
-			Live:   []*unstructured.Unstructured{pod},
-			Target: []*unstructured.Unstructured{pod},
+			Live:   []*unstructured.Unstructured{pod1},
+			Target: []*unstructured.Unstructured{pod1},
 		})
 
 		fakeDisco := syncCtx.disco.(*fakedisco.FakeDiscovery)
