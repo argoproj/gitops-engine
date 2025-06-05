@@ -340,19 +340,19 @@ type syncContext struct {
 	resourceOps         kubeutil.ResourceOperations
 	namespace           string
 
-	dryRun                 bool
+	dryRun                      bool
 	skipDryRunOnMissingResource bool
-	force                  bool
-	validate               bool
-	skipHooks              bool
-	resourcesFilter        func(key kubeutil.ResourceKey, target *unstructured.Unstructured, live *unstructured.Unstructured) bool
-	prune                  bool
-	replace                bool
-	serverSideApply        bool
-	serverSideApplyManager string
-	pruneLast              bool
-	prunePropagationPolicy *metav1.DeletionPropagation
-	pruneConfirmed         bool
+	force                       bool
+	validate                    bool
+	skipHooks                   bool
+	resourcesFilter             func(key kubeutil.ResourceKey, target *unstructured.Unstructured, live *unstructured.Unstructured) bool
+	prune                       bool
+	replace                     bool
+	serverSideApply             bool
+	serverSideApplyManager      string
+	pruneLast                   bool
+	prunePropagationPolicy      *metav1.DeletionPropagation
+	pruneConfirmed              bool
 
 	syncRes   map[string]common.ResourceSyncResult
 	startedAt time.Time
