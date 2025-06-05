@@ -225,19 +225,19 @@ func NewSyncContext(
 ) (SyncContext, func(), error) {
 	dynamicIf, err := dynamic.NewForConfig(restConfig)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to create dynamic client: %w", err)
 	}
 	disco, err := discovery.NewDiscoveryClientForConfig(restConfig)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to create discovery client: %w", err)
 	}
 	extensionsclientset, err := clientset.NewForConfig(restConfig)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to create extensions client: %w", err)
 	}
 	resourceOps, cleanup, err := kubectl.ManageResources(rawConfig, openAPISchema)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to manage resources: %w", err)
 	}
 	ctx := &syncContext{
 		revision:            revision,
@@ -314,7 +314,7 @@ func (sc *syncContext) getOperationPhase(obj *unstructured.Unstructured) (common
 
 	resHealth, err := health.GetResourceHealth(obj, sc.healthOverride)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("failed to get resource health: %w", err)
 	}
 	if resHealth != nil {
 		switch resHealth.Status {
@@ -617,7 +617,7 @@ func (sc *syncContext) removeHookFinalizer(task *syncTask) error {
 	// The cached live object may be stale in the controller cache, and the actual object may have been updated in the meantime,
 	// and Kubernetes API will return a conflict error on the Update call.
 	// In that case, we need to get the latest version of the object and retry the update.
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		mutated := removeFinalizerMutation(task.liveObj)
 		if !mutated {
 			return nil
@@ -628,14 +628,14 @@ func (sc *syncContext) removeHookFinalizer(task *syncTask) error {
 			sc.log.WithValues("task", task).V(1).Info("Retrying hook finalizer removal due to conflict on update")
 			resIf, err := sc.getResourceIf(task, "get")
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to get resource interface: %w", err)
 			}
 			liveObj, err := resIf.Get(context.TODO(), task.liveObj.GetName(), metav1.GetOptions{})
 			if apierrors.IsNotFound(err) {
 				sc.log.WithValues("task", task).V(1).Info("Resource is already deleted")
 				return nil
 			} else if err != nil {
-				return err
+				return fmt.Errorf("failed to get resource: %w", err)
 			}
 			task.liveObj = liveObj
 		} else if apierrors.IsNotFound(updateErr) {
@@ -643,8 +643,13 @@ func (sc *syncContext) removeHookFinalizer(task *syncTask) error {
 			sc.log.WithValues("task", task).V(1).Info("Resource is already deleted")
 			return nil
 		}
-		return updateErr
+		if updateErr != nil {
+			return fmt.Errorf("failed to update resource: %w", updateErr)
+		}
+		return nil
 	})
+	//nolint:wrapcheck // wrap inside the retried function instead
+	return err
 }
 
 func (sc *syncContext) updateResource(task *syncTask) error {
@@ -654,7 +659,10 @@ func (sc *syncContext) updateResource(task *syncTask) error {
 		return err
 	}
 	_, err = resIf.Update(context.TODO(), task.liveObj, metav1.UpdateOptions{})
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to update resource: %w", err)
+	}
+	return nil
 }
 
 func (sc *syncContext) deleteHooks(hooksPendingDeletion syncTasks) {
@@ -818,6 +826,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 		} else {
 			err = retry.OnError(retry.DefaultRetry, isRetryable, func() error {
 				serverRes, err = kubeutil.ServerResourceForGroupVersionKind(sc.disco, task.groupVersionKind(), "get")
+				//nolint:wrapcheck // complicated function, not wrapping to avoid failure of error type checks
 				return err
 			})
 			if serverRes != nil {
@@ -1028,9 +1037,10 @@ func (sc *syncContext) setOperationPhase(phase common.OperationPhase, message st
 
 // ensureCRDReady waits until specified CRD is ready (established condition is true).
 func (sc *syncContext) ensureCRDReady(name string) error {
-	return wait.PollUntilContextTimeout(context.Background(), time.Duration(100)*time.Millisecond, crdReadinessTimeout, true, func(_ context.Context) (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), time.Duration(100)*time.Millisecond, crdReadinessTimeout, true, func(_ context.Context) (bool, error) {
 		crd, err := sc.extensionsclientset.ApiextensionsV1().CustomResourceDefinitions().Get(context.TODO(), name, metav1.GetOptions{})
 		if err != nil {
+			//nolint:wrapcheck // wrapped outside the retry
 			return false, err
 		}
 		for _, condition := range crd.Status.Conditions {
@@ -1040,6 +1050,10 @@ func (sc *syncContext) ensureCRDReady(name string) error {
 		}
 		return false, nil
 	})
+	if err != nil {
+		return fmt.Errorf("failed to ensure CRD ready: %w", err)
+	}
+	return nil
 }
 
 func (sc *syncContext) shouldUseServerSideApply(targetObj *unstructured.Unstructured, dryRun bool) bool {
@@ -1220,17 +1234,21 @@ func (sc *syncContext) deleteResource(task *syncTask) error {
 	if err != nil {
 		return err
 	}
-	return resIf.Delete(context.TODO(), task.name(), sc.getDeleteOptions())
+	err = resIf.Delete(context.TODO(), task.name(), sc.getDeleteOptions())
+	if err != nil {
+		return fmt.Errorf("failed to delete resource: %w", err)
+	}
+	return nil
 }
 
 func (sc *syncContext) getResourceIf(task *syncTask, verb string) (dynamic.ResourceInterface, error) {
 	apiResource, err := kubeutil.ServerResourceForGroupVersionKind(sc.disco, task.groupVersionKind(), verb)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get api resource: %w", err)
 	}
 	res := kubeutil.ToGroupVersionResource(task.groupVersionKind().GroupVersion().String(), apiResource)
 	resIf := kubeutil.ToResourceInterface(sc.dynamicIf, apiResource, res, task.namespace())
-	return resIf, err
+	return resIf, nil
 }
 
 var operationPhases = map[common.ResultCode]common.OperationPhase{
