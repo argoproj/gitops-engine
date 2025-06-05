@@ -1044,7 +1044,7 @@ func TestNamespaceAutoCreation(t *testing.T) {
 
 	// Namespace auto creation pre-sync task should not be there
 	// since there is namespace resource in syncCtx.resources
-	t.Run("no pre-sync task 1", func(t *testing.T) {
+	t.Run("no pre-sync task if resource is managed", func(t *testing.T) {
 		syncCtx.resources = groupResources(ReconciliationResult{
 			Live:   []*unstructured.Unstructured{nil},
 			Target: []*unstructured.Unstructured{namespace},
@@ -1056,9 +1056,8 @@ func TestNamespaceAutoCreation(t *testing.T) {
 		assert.NotContains(t, tasks, task)
 	})
 
-	// Namespace auto creation pre-sync task should not be there
-	// since there is no existing sync result
-	t.Run("no pre-sync task 2", func(t *testing.T) {
+	// Namespace auto creation pre-sync task should be there when it is not managed
+	t.Run("pre-sync task when resource is not managed", func(t *testing.T) {
 		syncCtx.resources = groupResources(ReconciliationResult{
 			Live:   []*unstructured.Unstructured{nil},
 			Target: []*unstructured.Unstructured{pod},
@@ -1066,13 +1065,12 @@ func TestNamespaceAutoCreation(t *testing.T) {
 		tasks, successful := syncCtx.getSyncTasks()
 
 		assert.True(t, successful)
-		assert.Len(t, tasks, 1)
-		assert.NotContains(t, tasks, task)
+		assert.Len(t, tasks, 2)
+		assert.Contains(t, tasks, task)
 	})
 
-	// Namespace auto creation pre-sync task should be there
-	// since there is existing sync result which means that task created this namespace
-	t.Run("pre-sync task created", func(t *testing.T) {
+	// Namespace auto creation pre-sync task should be there after sync
+	t.Run("pre-sync task when resource is not managed with existing sync", func(t *testing.T) {
 		syncCtx.resources = groupResources(ReconciliationResult{
 			Live:   []*unstructured.Unstructured{nil},
 			Target: []*unstructured.Unstructured{pod},
@@ -1099,24 +1097,13 @@ func TestNamespaceAutoCreation(t *testing.T) {
 
 	// Namespace auto creation pre-sync task not should be there
 	// since there is no namespace modifier present
-	t.Run("no pre-sync task created", func(t *testing.T) {
+	t.Run("no pre-sync task created if no modifier", func(t *testing.T) {
 		syncCtx.resources = groupResources(ReconciliationResult{
 			Live:   []*unstructured.Unstructured{nil},
 			Target: []*unstructured.Unstructured{pod},
 		})
-		syncCtx.syncNamespace = nil
 
-		res := synccommon.ResourceSyncResult{
-			ResourceKey: kube.GetResourceKey(task.obj()),
-			Version:     task.version(),
-			Status:      task.syncStatus,
-			Message:     task.message,
-			HookType:    task.hookType(),
-			HookPhase:   task.operationState,
-			SyncPhase:   task.phase,
-		}
-		syncCtx.syncRes = map[string]synccommon.ResourceSyncResult{}
-		syncCtx.syncRes[task.resultKey()] = res
+		syncCtx.syncNamespace = nil
 
 		tasks, successful := syncCtx.getSyncTasks()
 
