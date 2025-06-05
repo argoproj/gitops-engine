@@ -1123,7 +1123,7 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 	if serverSideApply && !dryRun && sc.needsClientSideApplyMigration(t.liveObj) {
 		err = sc.performClientSideApplyMigration(t.targetObj)
 		if err != nil {
-			sc.log.WithValues("resource", kubeutil.GetResourceKey(t.targetObj)).Error(err, "Failed to perform client-side apply migration")
+			return common.ResultCodeSyncFailed, fmt.Sprintf("Failed to perform client-side apply migration: %v", err)
 		}
 	}
 
