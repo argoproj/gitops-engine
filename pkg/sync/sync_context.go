@@ -422,6 +422,21 @@ func (sc *syncContext) Sync() {
 		// is harmless, but redundant. The indicator we use to detect if we have already performed
 		// the dry-run for this operation, is if the resource or hook list is empty.
 
+		// Before doing any validation, we have to create the application namespace if it does not exist.
+		// The validation is expected to fail in multiple scenarios if a namespace does not exist.
+		if nsCreateTask := sc.getNamespaceCreationTask(tasks); nsCreateTask != nil {
+			nsSyncTasks := syncTasks{nsCreateTask}
+			// No need to perform a dry-run on the namespace creation, because if it fails we stop anyway
+			sc.log.WithValues("task", nsCreateTask).Info("Creating namespace")
+			if sc.runTasks(nsSyncTasks, false) == failed {
+				sc.setOperationFailed(syncTasks{}, nsSyncTasks, "the namespace failed to apply")
+				return
+			}
+
+			// The namespace was created, we can remove this task
+			tasks = tasks.Filter(func(t *syncTask) bool { return t != nsCreateTask })
+		}
+
 		dryRunTasks := tasks
 		if sc.applyOutOfSyncOnly {
 			dryRunTasks = sc.filterOutOfSyncTasks(tasks)
@@ -597,6 +612,18 @@ func (sc *syncContext) filterOutOfSyncTasks(tasks syncTasks) syncTasks {
 		}
 		return true
 	})
+}
+
+// getNamespaceCreationTask returns a task that will create the current namespace
+// or nil if the syncTasks does not contain one
+func (sc *syncContext) getNamespaceCreationTask(tasks syncTasks) *syncTask {
+	creationTasks := tasks.Filter(func(task *syncTask) bool {
+		return task.liveObj == nil && isNamespaceWithName(task.targetObj, sc.namespace)
+	})
+	if len(creationTasks) > 0 {
+		return creationTasks[0]
+	}
+	return nil
 }
 
 func (sc *syncContext) removeHookFinalizer(task *syncTask) error {
@@ -951,12 +978,11 @@ func (sc *syncContext) autoCreateNamespace(tasks syncTasks) syncTasks {
 			case err == nil:
 				nsTask := &syncTask{phase: common.SyncPhasePreSync, targetObj: managedNs, liveObj: liveObj}
 				_, ok := sc.syncRes[nsTask.resultKey()]
-				if ok {
-					tasks = sc.appendNsTask(tasks, nsTask, managedNs, liveObj)
-				} else if liveObj != nil {
+				if !ok && liveObj != nil {
 					sc.log.WithValues("namespace", sc.namespace).Info("Namespace already exists")
-					tasks = sc.appendNsTask(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: managedNs, liveObj: liveObj}, managedNs, liveObj)
 				}
+				tasks = sc.appendNsTask(tasks, nsTask, managedNs, liveObj)
+
 			case apierrors.IsNotFound(err):
 				tasks = sc.appendNsTask(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: managedNs, liveObj: nil}, managedNs, nil)
 			default:
