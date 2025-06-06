@@ -133,7 +133,7 @@ func TestSyncNamespaceCreatedBeforeDryRunWithoutFailure(t *testing.T) {
 	phase, msg, resources := syncCtx.GetState()
 	assert.Equal(t, synccommon.OperationRunning, phase)
 	assert.Equal(t, "waiting for healthy state of /Namespace/fake-argocd-ns", msg)
-	require.Equal(t, 1, len(resources))
+	require.Len(t, resources, 1)
 	assert.Equal(t, "Namespace", resources[0].ResourceKey.Kind)
 	assert.Equal(t, synccommon.ResultCodeSynced, resources[0].Status)
 }
@@ -158,7 +158,7 @@ func TestSyncNamespaceCreatedBeforeDryRunWithFailure(t *testing.T) {
 	phase, msg, resources := syncCtx.GetState()
 	assert.Equal(t, synccommon.OperationFailed, phase)
 	assert.Equal(t, "one or more objects failed to apply (dry run)", msg)
-	require.Equal(t, 2, len(resources))
+	require.Len(t, resources, 2)
 	assert.Equal(t, "Namespace", resources[0].ResourceKey.Kind)
 	assert.Equal(t, synccommon.ResultCodeSynced, resources[0].Status)
 	assert.Equal(t, "Pod", resources[1].ResourceKey.Kind)
