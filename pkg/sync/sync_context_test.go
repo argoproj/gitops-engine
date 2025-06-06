@@ -123,7 +123,7 @@ func TestSyncNotPermittedNamespace(t *testing.T) {
 
 func TestSyncNamespaceCreatedBeforeDryRunWithoutFailure(t *testing.T) {
 	pod := testingutils.NewPod()
-	syncCtx := newTestSyncCtx(nil, WithNamespaceModifier(func(u1, u2 *unstructured.Unstructured) (bool, error) {
+	syncCtx := newTestSyncCtx(nil, WithNamespaceModifier(func(_, _ *unstructured.Unstructured) (bool, error) {
 		return true, nil
 	}))
 	syncCtx.resources = groupResources(ReconciliationResult{
