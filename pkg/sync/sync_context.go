@@ -1086,7 +1086,8 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 	var err error
 	var message string
 	shouldReplace := sc.replace || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplace)
-	force := sc.force || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionForce)
+	// force is not required when running dry-run in client mode
+	shouldForce := !dryRun && (sc.force || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionForce))
 	serverSideApply := sc.shouldUseServerSideApply(t.targetObj, dryRun)
 	if shouldReplace {
 		if t.liveObj != nil {
@@ -1103,13 +1104,13 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 					message = fmt.Sprintf("error when updating: %v", err.Error())
 				}
 			} else {
-				message, err = sc.resourceOps.ReplaceResource(context.TODO(), t.targetObj, dryRunStrategy, force)
+				message, err = sc.resourceOps.ReplaceResource(context.TODO(), t.targetObj, dryRunStrategy, shouldForce)
 			}
 		} else {
 			message, err = sc.resourceOps.CreateResource(context.TODO(), t.targetObj, dryRunStrategy, validate)
 		}
 	} else {
-		message, err = sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager)
+		message, err = sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, shouldForce, validate, serverSideApply, sc.serverSideApplyManager)
 	}
 	if err != nil {
 		return common.ResultCodeSyncFailed, err.Error()
