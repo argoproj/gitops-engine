@@ -36,6 +36,10 @@ const (
 	SyncOptionServerSideApply = "ServerSideApply=true"
 	// Sync option that disables use of --server-side flag instead of client-side
 	SyncOptionDisableServerSideApply = "ServerSideApply=false"
+	// Sync option that enables client-side apply migration for server-side apply
+	SyncOptionClientSideApplyMigration = "ClientSideApplyMigration=true"
+	// Sync option that disables client-side apply migration for server-side apply
+	SyncOptionDisableClientSideApplyMigration = "ClientSideApplyMigration=false"
 	// Sync option that disables resource deletion
 	SyncOptionDisableDeletion = "Delete=false"
 	// Sync option that sync only out of sync resources

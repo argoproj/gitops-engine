@@ -1072,6 +1072,55 @@ func (sc *syncContext) shouldUseServerSideApply(targetObj *unstructured.Unstruct
 	return sc.serverSideApply || resourceutil.HasAnnotationOption(targetObj, common.AnnotationSyncOptions, common.SyncOptionServerSideApply)
 }
 
+// shouldUseClientSideApplyMigration determines if client-side apply field migration should be performed
+// Migration is enabled by default, unless explicitly disabled via annotation
+func (sc *syncContext) shouldUseClientSideApplyMigration(targetObj *unstructured.Unstructured) bool {
+	return !resourceutil.HasAnnotationOption(targetObj, common.AnnotationSyncOptions, common.SyncOptionDisableClientSideApplyMigration)
+}
+
+// needsClientSideApplyMigration checks if a resource has fields managed by kubectl-client-side-apply
+// that need to be migrated to the server-side apply manager
+func (sc *syncContext) needsClientSideApplyMigration(liveObj *unstructured.Unstructured) bool {
+	if liveObj == nil {
+		return false
+	}
+
+	managedFields := liveObj.GetManagedFields()
+	if len(managedFields) == 0 {
+		return false
+	}
+
+	for _, field := range managedFields {
+		if field.Manager == "kubectl-client-side-apply" && field.Operation == metav1.ManagedFieldsOperationUpdate {
+			return true
+		}
+	}
+
+	return false
+}
+
+// performClientSideApplyMigration performs a client-side apply with kubectl-client-side-apply as the manager
+// to enable automatic migration to server-side apply manager in the next step
+func (sc *syncContext) performClientSideApplyMigration(targetObj *unstructured.Unstructured) error {
+	sc.log.WithValues("resource", kubeutil.GetResourceKey(targetObj)).V(1).Info("Performing client-side apply migration step")
+
+	// Apply with kubectl-client-side-apply as the manager to set up the migration
+	_, err := sc.resourceOps.ApplyResource(
+		context.TODO(),
+		targetObj,
+		cmdutil.DryRunNone,
+		false,
+		false,
+		false,
+		"kubectl-client-side-apply",
+	)
+	if err != nil {
+		return fmt.Errorf("failed to perform client-side apply migration step: %w", err)
+	}
+
+	return nil
+}
+
 func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.ResultCode, string) {
 	dryRunStrategy := cmdutil.DryRunNone
 	if dryRun {
@@ -1088,6 +1137,15 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 	shouldReplace := sc.replace || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplace)
 	force := sc.force || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionForce)
 	serverSideApply := sc.shouldUseServerSideApply(t.targetObj, dryRun)
+
+	// Check if we need to perform client-side apply migration for server-side apply
+	if serverSideApply && !dryRun && sc.shouldUseClientSideApplyMigration(t.targetObj) && sc.needsClientSideApplyMigration(t.liveObj) {
+		err = sc.performClientSideApplyMigration(t.targetObj)
+		if err != nil {
+			return common.ResultCodeSyncFailed, fmt.Sprintf("Failed to perform client-side apply migration: %v", err)
+		}
+	}
+
 	if shouldReplace {
 		if t.liveObj != nil {
 			// Avoid using `kubectl replace` for CRDs since 'replace' might recreate resource and so delete all CRD instances.
