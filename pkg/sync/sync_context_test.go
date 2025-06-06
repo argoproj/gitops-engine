@@ -120,6 +120,52 @@ func TestSyncNotPermittedNamespace(t *testing.T) {
 	assert.Contains(t, resources[0].Message, "not permitted in project")
 }
 
+func TestSyncNamespaceCreatedBeforeDryRunWithoutFailure(t *testing.T) {
+	pod := testingutils.NewPod()
+	syncCtx := newTestSyncCtx(nil, WithNamespaceModifier(func(u1, u2 *unstructured.Unstructured) (bool, error) {
+		return true, nil
+	}))
+	syncCtx.resources = groupResources(ReconciliationResult{
+		Live:   []*unstructured.Unstructured{nil, nil},
+		Target: []*unstructured.Unstructured{pod},
+	})
+	syncCtx.Sync()
+	phase, msg, resources := syncCtx.GetState()
+	assert.Equal(t, synccommon.OperationRunning, phase)
+	assert.Equal(t, "waiting for healthy state of /Namespace/fake-argocd-ns", msg)
+	require.Equal(t, 1, len(resources))
+	assert.Equal(t, "Namespace", resources[0].ResourceKey.Kind)
+	assert.Equal(t, synccommon.ResultCodeSynced, resources[0].Status)
+}
+
+func TestSyncNamespaceCreatedBeforeDryRunWithFailure(t *testing.T) {
+	pod := testingutils.NewPod()
+	syncCtx := newTestSyncCtx(nil, WithNamespaceModifier(func(u1, u2 *unstructured.Unstructured) (bool, error) {
+		return true, nil
+	}), func(ctx *syncContext) {
+		resourceOps := ctx.resourceOps.(*kubetest.MockResourceOps)
+		resourceOps.Commands = map[string]kubetest.KubectlOutput{}
+		resourceOps.Commands[pod.GetName()] = kubetest.KubectlOutput{
+			Output: "should not be returned",
+			Err:    errors.New("invalid object failing dry-run"),
+		}
+	})
+	syncCtx.resources = groupResources(ReconciliationResult{
+		Live:   []*unstructured.Unstructured{nil, nil},
+		Target: []*unstructured.Unstructured{pod},
+	})
+	syncCtx.Sync()
+	phase, msg, resources := syncCtx.GetState()
+	assert.Equal(t, synccommon.OperationFailed, phase)
+	assert.Equal(t, "one or more objects failed to apply (dry run)", msg)
+	require.Equal(t, 2, len(resources))
+	assert.Equal(t, "Namespace", resources[0].ResourceKey.Kind)
+	assert.Equal(t, synccommon.ResultCodeSynced, resources[0].Status)
+	assert.Equal(t, "Pod", resources[1].ResourceKey.Kind)
+	assert.Equal(t, synccommon.ResultCodeSyncFailed, resources[1].Status)
+	assert.Equal(t, "invalid object failing dry-run", resources[1].Message)
+}
+
 func TestSyncCreateInSortedOrder(t *testing.T) {
 	syncCtx := newTestSyncCtx(nil)
 	syncCtx.resources = groupResources(ReconciliationResult{

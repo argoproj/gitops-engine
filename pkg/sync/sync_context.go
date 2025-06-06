@@ -421,10 +421,11 @@ func (sc *syncContext) Sync() {
 		// to perform the sync. we only wish to do this once per operation, performing additional dry-runs
 		// is harmless, but redundant. The indicator we use to detect if we have already performed
 		// the dry-run for this operation, is if the resource or hook list is empty.
+		dryRunTasks := tasks
 
 		// Before doing any validation, we have to create the application namespace if it does not exist.
 		// The validation is expected to fail in multiple scenarios if a namespace does not exist.
-		if nsCreateTask := sc.getNamespaceCreationTask(tasks); nsCreateTask != nil {
+		if nsCreateTask := sc.getNamespaceCreationTask(dryRunTasks); nsCreateTask != nil {
 			nsSyncTasks := syncTasks{nsCreateTask}
 			// No need to perform a dry-run on the namespace creation, because if it fails we stop anyway
 			sc.log.WithValues("task", nsCreateTask).Info("Creating namespace")
@@ -433,13 +434,12 @@ func (sc *syncContext) Sync() {
 				return
 			}
 
-			// The namespace was created, we can remove this task
-			tasks = tasks.Filter(func(t *syncTask) bool { return t != nsCreateTask })
+			// The namespace was created, we can remove this task from the dry-run
+			dryRunTasks = tasks.Filter(func(t *syncTask) bool { return t != nsCreateTask })
 		}
 
-		dryRunTasks := tasks
 		if sc.applyOutOfSyncOnly {
-			dryRunTasks = sc.filterOutOfSyncTasks(tasks)
+			dryRunTasks = sc.filterOutOfSyncTasks(dryRunTasks)
 		}
 
 		sc.log.WithValues("tasks", dryRunTasks).Info("Tasks (dry-run)")
