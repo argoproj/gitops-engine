@@ -1239,7 +1239,7 @@ func createNamespaceTask(namespace string) (*syncTask, error) {
 
 	task := &syncTask{phase: synccommon.SyncPhasePreSync, targetObj: unstructuredObj}
 	if err != nil {
-		return task, fmt.Errorf("failed to conver namespace spec to unstructured: %w", err)
+		return task, fmt.Errorf("failed to convert namespace spec to unstructured: %w", err)
 	}
 	return task, nil
 }

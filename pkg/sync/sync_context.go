@@ -617,7 +617,8 @@ func (sc *syncContext) removeHookFinalizer(task *syncTask) error {
 	// The cached live object may be stale in the controller cache, and the actual object may have been updated in the meantime,
 	// and Kubernetes API will return a conflict error on the Update call.
 	// In that case, we need to get the latest version of the object and retry the update.
-	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	//nolint:wrapcheck // wrap inside the retried function instead
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		mutated := removeFinalizerMutation(task.liveObj)
 		if !mutated {
 			return nil
@@ -648,8 +649,6 @@ func (sc *syncContext) removeHookFinalizer(task *syncTask) error {
 		}
 		return nil
 	})
-	//nolint:wrapcheck // wrap inside the retried function instead
-	return err
 }
 
 func (sc *syncContext) updateResource(task *syncTask) error {
