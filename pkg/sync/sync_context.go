@@ -1062,11 +1062,7 @@ func (sc *syncContext) shouldUseServerSideApply(targetObj *unstructured.Unstruct
 // shouldUseClientSideApplyMigration determines if client-side apply field migration should be performed
 // Migration is enabled by default, unless explicitly disabled via annotation
 func (sc *syncContext) shouldUseClientSideApplyMigration(targetObj *unstructured.Unstructured) bool {
-	if resourceutil.HasAnnotationOption(targetObj, common.AnnotationSyncOptions, common.SyncOptionDisableClientSideApplyMigration) {
-		return false
-	}
-
-	return true
+	return !resourceutil.HasAnnotationOption(targetObj, common.AnnotationSyncOptions, common.SyncOptionDisableClientSideApplyMigration)
 }
 
 // needsClientSideApplyMigration checks if a resource has fields managed by kubectl-client-side-apply
