@@ -617,7 +617,7 @@ func (c *clusterCache) listResources(ctx context.Context, resClient dynamic.Reso
 			return nil
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to list resources: %w", err)
+			return res, fmt.Errorf("failed to list resources: %w", err)
 		}
 		return res, nil
 	})
