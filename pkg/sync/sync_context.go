@@ -1059,6 +1059,16 @@ func (sc *syncContext) shouldUseServerSideApply(targetObj *unstructured.Unstruct
 	return sc.serverSideApply || resourceutil.HasAnnotationOption(targetObj, common.AnnotationSyncOptions, common.SyncOptionServerSideApply)
 }
 
+// shouldUseClientSideApplyMigration determines if client-side apply field migration should be performed
+// Migration is enabled by default, unless explicitly disabled via annotation
+func (sc *syncContext) shouldUseClientSideApplyMigration(targetObj *unstructured.Unstructured) bool {
+	if resourceutil.HasAnnotationOption(targetObj, common.AnnotationSyncOptions, common.SyncOptionDisableClientSideApplyMigration) {
+		return false
+	}
+
+	return true
+}
+
 // needsClientSideApplyMigration checks if a resource has fields managed by kubectl-client-side-apply
 // that need to be migrated to the server-side apply manager
 func (sc *syncContext) needsClientSideApplyMigration(liveObj *unstructured.Unstructured) bool {
@@ -1120,7 +1130,7 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 	serverSideApply := sc.shouldUseServerSideApply(t.targetObj, dryRun)
 
 	// Check if we need to perform client-side apply migration for server-side apply
-	if serverSideApply && !dryRun && sc.needsClientSideApplyMigration(t.liveObj) {
+	if serverSideApply && !dryRun && sc.shouldUseClientSideApplyMigration(t.targetObj) && sc.needsClientSideApplyMigration(t.liveObj) {
 		err = sc.performClientSideApplyMigration(t.targetObj)
 		if err != nil {
 			return common.ResultCodeSyncFailed, fmt.Sprintf("Failed to perform client-side apply migration: %v", err)
