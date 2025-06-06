@@ -140,7 +140,7 @@ func TestSyncNamespaceCreatedBeforeDryRunWithoutFailure(t *testing.T) {
 
 func TestSyncNamespaceCreatedBeforeDryRunWithFailure(t *testing.T) {
 	pod := testingutils.NewPod()
-	syncCtx := newTestSyncCtx(nil, WithNamespaceModifier(func(u1, u2 *unstructured.Unstructured) (bool, error) {
+	syncCtx := newTestSyncCtx(nil, WithNamespaceModifier(func(_, _ *unstructured.Unstructured) (bool, error) {
 		return true, nil
 	}), func(ctx *syncContext) {
 		resourceOps := ctx.resourceOps.(*kubetest.MockResourceOps)
