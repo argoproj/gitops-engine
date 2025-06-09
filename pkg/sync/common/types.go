@@ -36,10 +36,6 @@ const (
 	SyncOptionServerSideApply = "ServerSideApply=true"
 	// Sync option that disables use of --server-side flag instead of client-side
 	SyncOptionDisableServerSideApply = "ServerSideApply=false"
-	// Sync option that enables client-side apply migration for server-side apply
-	SyncOptionClientSideApplyMigration = "ClientSideApplyMigration=true"
-	// Sync option that disables client-side apply migration for server-side apply
-	SyncOptionDisableClientSideApplyMigration = "ClientSideApplyMigration=false"
 	// Sync option that disables resource deletion
 	SyncOptionDisableDeletion = "Delete=false"
 	// Sync option that sync only out of sync resources
@@ -48,6 +44,8 @@ const (
 	SyncOptionDeleteRequireConfirm = "Delete=confirm"
 	// Sync option that requires confirmation before deleting the resource
 	SyncOptionPruneRequireConfirm = "Prune=confirm"
+	// Default field manager for client-side apply migration
+	DefaultClientSideApplyMigrationManager = "kubectl-client-side-apply"
 )
 
 type PermissionValidator func(un *unstructured.Unstructured, res *metav1.APIResource) error
