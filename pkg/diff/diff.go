@@ -257,11 +257,6 @@ func removeWebhookMutation(predictedLive, live *unstructured.Unstructured, gvkPa
 	if comparison.Removed != nil && !comparison.Removed.Empty() {
 		// exclude the removed fields not owned by this manager from the comparison
 		comparison.Removed = comparison.Removed.Difference(nonArgoFieldsSet)
-		// refresh annotation does not exist in predicedLive
-		// so it will be in comparisonRemoved
-		// nonArgoFieldSet contains kubectl-client-side-apply annotations : {}
-		// normally since refresh annotation is nonArgoCD controller it would not be remoevd
-		// But since in predLive, it does not exist in managed fields, it is considered a argocd-controller fieldset
 	}
 
 	// In case any of the removed fields cause schema violations, we will keep those fields
