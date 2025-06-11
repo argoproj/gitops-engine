@@ -52,9 +52,7 @@ func strToUnstructured(jsonStr string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: obj}
 }
 
-var (
-	testCreationTime, _ = time.Parse(time.RFC3339, "2018-09-20T06:47:27Z")
-)
+var testCreationTime, _ = time.Parse(time.RFC3339, "2018-09-20T06:47:27Z")
 
 func newCluster(tb testing.TB, objs ...runtime.Object) *clusterCache {
 	tb.Helper()
