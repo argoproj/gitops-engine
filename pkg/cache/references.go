@@ -24,14 +24,6 @@ func (c *clusterCache) resolveResourceReferences(un *unstructured.Unstructured) 
 	gvk := un.GroupVersionKind()
 
 	switch {
-	// Special case for endpoint. Remove after https://github.com/kubernetes/kubernetes/issues/28483 is fixed
-	case gvk.Group == "" && gvk.Kind == kube.EndpointsKind && len(ownerRefs) == 0:
-		ownerRefs = append(ownerRefs, metav1.OwnerReference{
-			Name:       un.GetName(),
-			Kind:       kube.ServiceKind,
-			APIVersion: "v1",
-		})
-
 	// Special case for Operator Lifecycle Manager ClusterServiceVersion:
 	case gvk.Group == "operators.coreos.com" && gvk.Kind == "ClusterServiceVersion":
 		if un.GetAnnotations()["olm.operatorGroup"] != "" {
