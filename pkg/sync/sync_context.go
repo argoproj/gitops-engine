@@ -1096,8 +1096,11 @@ func (sc *syncContext) needsClientSideApplyMigration(liveObj *unstructured.Unstr
 	return false
 }
 
-// performClientSideApplyMigration performs a client-side apply with the specified manager.
-// kubectl-client-side-apply is used as the default manager.
+// performClientSideApplyMigration does a client-side-apply with the specified field manager.
+// This moves the 'last-applied-configuration' field to be managed by the specified manager.
+// Then the next time server-side apply happens, kubernetes automatically migrates all fields from the manager
+// that owns 'last-applied-configuration' to the manager that uses server-side apply.
+// kubectl-client-side-apply is used as the default manager if one is not specified.
 func (sc *syncContext) performClientSideApplyMigration(targetObj *unstructured.Unstructured, fieldManager string) error {
 	sc.log.WithValues("resource", kubeutil.GetResourceKey(targetObj)).V(1).Info("Performing client-side apply migration step")
 
