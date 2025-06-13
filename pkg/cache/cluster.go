@@ -670,6 +670,29 @@ func (c *clusterCache) watchEvents(ctx context.Context, api kube.APIResourceInfo
 			}
 		}
 
+		// If the resourceVersion is still missing, watchutil.NewRetryWatcher will fail.
+		// https://github.com/kubernetes/client-go/blob/78d2af792babf2dd937ba2e2a8d99c753a5eda89/tools/watch/retrywatcher.go#L68-L71
+		// Instead, let's just check if the resourceVersion exists at the next resync ...
+		if resourceVersion == "" {
+			c.log.V(1).Info(fmt.Sprintf("Ignoring watch for %s on %s due to missing resourceVersion", api.GroupKind, c.config.Host))
+
+			var watchResyncTimeoutCh <-chan time.Time
+			if c.watchResyncTimeout > 0 {
+				shouldResync := time.NewTimer(c.watchResyncTimeout)
+				defer shouldResync.Stop()
+				watchResyncTimeoutCh = shouldResync.C
+			}
+
+			for {
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-watchResyncTimeoutCh:
+					return fmt.Errorf("Resyncing %s on %s due to timeout", api.GroupKind, c.config.Host)
+				}
+			}
+		}
+
 		w, err := watchutil.NewRetryWatcher(resourceVersion, &cache.ListWatch{
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 				res, err := resClient.Watch(ctx, options)
