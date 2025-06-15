@@ -72,3 +72,12 @@ func TestSetEventsProcessingInterval(t *testing.T) {
 	cache.Invalidate(SetEventProcessingInterval(interval))
 	assert.Equal(t, interval, cache.eventProcessingInterval)
 }
+
+func TestSetListItemSemaphoreWeight(t *testing.T) {
+	cache := NewClusterCache(&rest.Config{})
+	assert.Equal(t, defaultListItemSemaphoreWeight, cache.listItemSemaphoreWeight)
+
+	weight := int64(8)
+	cache.Invalidate(SetListItemSemaphoreWeight(weight))
+	assert.Equal(t, weight, cache.listItemSemaphoreWeight)
+}
