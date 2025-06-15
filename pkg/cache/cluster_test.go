@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic/fake"
+	clientfeatures "k8s.io/client-go/features"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	testcore "k8s.io/client-go/testing"
@@ -189,41 +190,80 @@ func Benchmark_sync(t *testing.B) {
 	}
 }
 
+type AlwaysEnabledGates struct{}
+
+func (AlwaysEnabledGates) Enabled(clientfeatures.Feature) bool {
+	return true
+}
+
 func TestEnsureSynced(t *testing.T) {
-	obj1 := &appsv1.Deployment{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: "apps/v1",
-			Kind:       "Deployment",
+	tests := []struct {
+		name               string
+		listUsingWatchAPIs bool
+	}{
+		{
+			name:               "WatchAPIUsed",
+			listUsingWatchAPIs: true,
 		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "helm-guestbook1",
-			Namespace: "default1",
-		},
-	}
-	obj2 := &appsv1.Deployment{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: "apps/v1",
-			Kind:       "Deployment",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "helm-guestbook2",
-			Namespace: "default2",
+		{
+			name:               "WatchAPINotUsed",
+			listUsingWatchAPIs: false,
 		},
 	}
 
-	cluster := newCluster(t, obj1, obj2)
-	err := cluster.EnsureSynced()
-	require.NoError(t, err)
+	originalFeatureGates := clientfeatures.FeatureGates()
 
-	cluster.lock.Lock()
-	defer cluster.lock.Unlock()
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.listUsingWatchAPIs {
+				// Enable WatchListClient in particular. Setting via env variable here is too late.
+				clientfeatures.ReplaceFeatureGates(AlwaysEnabledGates{})
+			}
+			obj1 := &appsv1.Deployment{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: "apps/v1",
+					Kind:       "Deployment",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "helm-guestbook1",
+					Namespace: "default1",
+				},
+			}
+			obj2 := &appsv1.Deployment{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: "apps/v1",
+					Kind:       "Deployment",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "helm-guestbook2",
+					Namespace: "default2",
+				},
+			}
 
-	assert.Len(t, cluster.resources, 2)
-	var names []string
-	for k := range cluster.resources {
-		names = append(names, k.Name)
+			cluster := newCluster(t, obj1, obj2)
+			err := cluster.EnsureSynced()
+			require.NoError(t, err)
+
+			cluster.lock.Lock()
+			defer cluster.lock.Unlock()
+
+			assert.Len(t, cluster.resources, 2)
+			var names []string
+			for k := range cluster.resources {
+				names = append(names, k.Name)
+			}
+			assert.ElementsMatch(t, []string{"helm-guestbook1", "helm-guestbook2"}, names)
+
+			if tc.listUsingWatchAPIs {
+				assert.Positive(t, cluster.listResourcesUsingWatchAPI.Load())
+				assert.Equal(t, int32(0), cluster.listResourcesUsingRegularAPI.Load())
+			} else {
+				assert.Equal(t, int32(0), cluster.listResourcesUsingWatchAPI.Load())
+				assert.Positive(t, cluster.listResourcesUsingRegularAPI.Load())
+			}
+			clientfeatures.ReplaceFeatureGates(originalFeatureGates)
+		})
 	}
-	assert.ElementsMatch(t, []string{"helm-guestbook1", "helm-guestbook2"}, names)
 }
 
 func TestStatefulSetOwnershipInferred(t *testing.T) {
