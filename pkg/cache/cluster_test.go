@@ -147,8 +147,39 @@ func getChildren(cluster *clusterCache, un *unstructured.Unstructured) []*Resour
 	return hierarchy[1:]
 }
 
-// Benchmark_sync is meant to simulate cluster initialization when populateResourceInfoHandler does nontrivial work.
-func Benchmark_sync(t *testing.B) {
+// BenchmarkSync benchmarks cluster initialization when populateResourceInfoHandler does nontrivial work.
+// The benchmark is executed using different list item semaphore weights.
+func BenchmarkSync(b *testing.B) {
+	b.Run("weight=1,overhead=100μs", func(bb *testing.B) {
+		runBenchmarkSync(bb, 1, 100*time.Microsecond)
+	})
+	b.Run("weight=2,overhead=100μs", func(bb *testing.B) {
+		runBenchmarkSync(bb, 2, 100*time.Microsecond)
+	})
+	b.Run("weight=4,overhead=100μs", func(bb *testing.B) {
+		runBenchmarkSync(bb, 4, 100*time.Microsecond)
+	})
+	b.Run("weight=8,overhead=100μs", func(bb *testing.B) {
+		runBenchmarkSync(bb, 8, 100*time.Microsecond)
+	})
+
+	b.Run("weight=1,overhead=500μs", func(bb *testing.B) {
+		runBenchmarkSync(bb, 1, 500*time.Microsecond)
+	})
+	b.Run("weight=2,overhead=500μs", func(bb *testing.B) {
+		runBenchmarkSync(bb, 2, 500*time.Microsecond)
+	})
+	b.Run("weight=4,overhead=500μs", func(bb *testing.B) {
+		runBenchmarkSync(bb, 4, 500*time.Microsecond)
+	})
+	b.Run("weight=8,overhead=500μs", func(bb *testing.B) {
+		runBenchmarkSync(bb, 8, 500*time.Microsecond)
+	})
+}
+
+func runBenchmarkSync(b *testing.B, weight int64, overhead time.Duration) {
+	b.Helper()
+
 	resources := []runtime.Object{}
 	for i := 0; i < 100; i++ {
 		resources = append(resources, &corev1.Pod{
@@ -174,18 +205,19 @@ func Benchmark_sync(t *testing.B) {
 		})
 	}
 
-	c := newCluster(t, resources...)
+	c := newCluster(b, resources...)
+	c.listItemSemaphoreWeight = weight
 
 	c.populateResourceInfoHandler = func(_ *unstructured.Unstructured, _ bool) (info any, cacheManifest bool) {
-		time.Sleep(10 * time.Microsecond)
+		time.Sleep(overhead)
 		return nil, false
 	}
 
-	t.ResetTimer()
+	b.ResetTimer()
 
-	for n := 0; n < t.N; n++ {
+	for n := 0; n < b.N; n++ {
 		err := c.sync()
-		require.NoError(t, err)
+		require.NoError(b, err)
 	}
 }
 
