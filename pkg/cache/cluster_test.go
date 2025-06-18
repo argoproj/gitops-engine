@@ -52,27 +52,7 @@ func strToUnstructured(jsonStr string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: obj}
 }
 
-var (
-	testCreationTime, _ = time.Parse(time.RFC3339, "2018-09-20T06:47:27Z")
-
-	testService = strToUnstructured(fmt.Sprintf(`
-  apiVersion: v1
-  kind: Service
-  metadata:
-    name: helm-guestbook
-    namespace: default
-    resourceVersion: "123"
-    uid: "4"
-    creationTimestamp: "%s"
-  spec:
-    selector:
-      app: guestbook
-    type: LoadBalancer
-  status:
-    loadBalancer:
-      ingress:
-      - hostname: localhost`, testCreationTime.UTC().Format(time.RFC3339)))
-)
+var testCreationTime, _ = time.Parse(time.RFC3339, "2018-09-20T06:47:27Z")
 
 func newCluster(tb testing.TB, objs ...runtime.Object) *clusterCache {
 	tb.Helper()
