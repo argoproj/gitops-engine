@@ -22,9 +22,9 @@ require (
 	k8s.io/kube-aggregator v0.33.1
 	k8s.io/kube-openapi v0.0.0-20250610211856-8b98d1ed966a
 	k8s.io/kubectl v0.33.1
-	k8s.io/kubernetes v1.33.1
+	k8s.io/kubernetes v1.33.2
 	sigs.k8s.io/structured-merge-diff/v4 v4.7.0
-	sigs.k8s.io/yaml v1.4.0
+	sigs.k8s.io/yaml v1.5.0
 )
 
 require (
@@ -78,6 +78,8 @@ require (
 	github.com/xlab/treeprint v1.2.0 // indirect
 	go.opentelemetry.io/otel v1.36.0 // indirect
 	go.opentelemetry.io/otel/trace v1.36.0 // indirect
+	go.yaml.in/yaml/v2 v2.4.2 // indirect
+	go.yaml.in/yaml/v3 v3.0.3 // indirect
 	golang.org/x/net v0.41.0 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
