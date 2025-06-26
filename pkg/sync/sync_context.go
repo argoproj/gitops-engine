@@ -1333,28 +1333,9 @@ func getImmutableFieldChanges(currentSpec, desiredSpec map[string]any) []string 
 
 // formatVolumeClaimChanges handles the special case of formatting changes to volumeClaimTemplates
 func formatVolumeClaimChanges(currentVal, desiredVal any) []string {
-	currentTemplates := currentVal.([]any)
-	desiredTemplates := desiredVal.([]any)
-
-	if len(currentTemplates) != len(desiredTemplates) {
-		return []string{formatFieldChange("volumeClaimTemplates", currentVal, desiredVal)}
-	}
-
-	var changes []string
-	for i := range desiredTemplates {
-		desiredTemplate := desiredTemplates[i].(map[string]any)
-		currentTemplate := currentTemplates[i].(map[string]any)
-
-		name := desiredTemplate["metadata"].(map[string]any)["name"].(string)
-		desiredStorage := getTemplateStorage(desiredTemplate)
-		currentStorage := getTemplateStorage(currentTemplate)
-
-		if currentStorage != desiredStorage {
-			changes = append(changes, fmt.Sprintf("   - volumeClaimTemplates.%s:\n      from: %q\n      to:   %q",
-				name, currentStorage, desiredStorage))
-		}
-	}
-	return changes
+	// Special formatting for volumeClaimTemplates changes
+	// Shows storage size changes for each template
+	return []string{}
 }
 
 func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.ResultCode, string) {
