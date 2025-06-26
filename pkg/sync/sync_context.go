@@ -1110,7 +1110,6 @@ func (sc *syncContext) shouldUseServerSideApply(targetObj *unstructured.Unstruct
 	return sc.serverSideApply || resourceutil.HasAnnotationOption(targetObj, common.AnnotationSyncOptions, common.SyncOptionServerSideApply)
 }
 
-<<<<<<< HEAD
 // needsClientSideApplyMigration checks if a resource has fields managed by the specified manager
 // that need to be migrated to the server-side apply manager
 func (sc *syncContext) needsClientSideApplyMigration(liveObj *unstructured.Unstructured, fieldManager string) bool {
@@ -1157,10 +1156,8 @@ func (sc *syncContext) performClientSideApplyMigration(targetObj *unstructured.U
 	return nil
 }
 
-=======
 // formatValue converts any value to its string representation with special handling for
 // templates, maps, and strings. Returns "<nil>" for nil values.
->>>>>>> 3df63b1 (refactor formatValue method to reduce complexity)
 func formatValue(v any) string {
 	if v == nil {
 		return "<nil>"
@@ -1333,15 +1330,8 @@ func getImmutableFieldChanges(currentSpec, desiredSpec map[string]any) []string 
 
 // formatVolumeClaimChanges handles the special case of formatting changes to volumeClaimTemplates
 func formatVolumeClaimChanges(currentVal, desiredVal any) []string {
-	currentTemplates, ok := currentVal.([]any)
-	if !ok {
-		return []string{formatFieldChange("volumeClaimTemplates", currentVal, desiredVal)}
-	}
-
-	desiredTemplates, ok := desiredVal.([]any)
-	if !ok {
-		return []string{formatFieldChange("volumeClaimTemplates", currentVal, desiredVal)}
-	}
+	currentTemplates := currentVal.([]any)
+	desiredTemplates := desiredVal.([]any)
 
 	if len(currentTemplates) != len(desiredTemplates) {
 		return []string{formatFieldChange("volumeClaimTemplates", currentVal, desiredVal)}
@@ -1349,25 +1339,10 @@ func formatVolumeClaimChanges(currentVal, desiredVal any) []string {
 
 	var changes []string
 	for i := range desiredTemplates {
-		desiredTemplate, ok := desiredTemplates[i].(map[string]any)
-		if !ok {
-			continue
-		}
-		currentTemplate, ok := currentTemplates[i].(map[string]any)
-		if !ok {
-			continue
-		}
+		desiredTemplate := desiredTemplates[i].(map[string]any)
+		currentTemplate := currentTemplates[i].(map[string]any)
 
-		// Extract just the template name without storage size
-		metadata, ok := desiredTemplate["metadata"].(map[string]any)
-		if !ok {
-			continue
-		}
-		name, ok := metadata["name"].(string)
-		if !ok || name == "" {
-			continue
-		}
-
+		name := desiredTemplate["metadata"].(map[string]any)["name"].(string)
 		desiredStorage := getTemplateStorage(desiredTemplate)
 		currentStorage := getTemplateStorage(currentTemplate)
 
