@@ -9,11 +9,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/kubectl/pkg/util/podutils"
 
+	"github.com/argoproj/gitops-engine/pkg/sync/common"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
-)
-
-const (
-	AnnotationIgnoreRestartPolicy = "argocd.argoproj.io/ignore-restart-policy"
 )
 
 func getPodHealth(obj *unstructured.Unstructured) (*HealthStatus, error) {
@@ -123,7 +120,7 @@ func getCorev1PodHealth(pod *corev1.Pod) (*HealthStatus, error) {
 			}, nil
 		}
 		policy := pod.Spec.RestartPolicy
-		if _, ok := pod.Annotations[AnnotationIgnoreRestartPolicy]; ok || policy == corev1.RestartPolicyAlways {
+		if _, ok := pod.Annotations[common.AnnotationIgnoreRestartPolicy]; ok || policy == corev1.RestartPolicyAlways {
 			return getHealthStatus(pod)
 		}
 
