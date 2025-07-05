@@ -1631,10 +1631,10 @@ func TestSyncWaveHook(t *testing.T) {
 	syncCtx.hooks = []*unstructured.Unstructured{pod3}
 
 	called := false
-	syncCtx.syncWaveHook = func(phase synccommon.SyncPhase, wave int, final bool) error {
+	syncCtx.syncWaveHook = func(phase synccommon.SyncPhase, waves []int, final bool) error {
 		called = true
 		assert.Equal(t, synccommon.SyncPhaseSync, string(phase))
-		assert.Equal(t, -1, wave)
+		assert.True(t, reflect.DeepEqual([]int{-1}, waves))
 		assert.False(t, final)
 		return nil
 	}
@@ -1644,7 +1644,7 @@ func TestSyncWaveHook(t *testing.T) {
 	// call sync again, it should not invoke the SyncWaveHook callback since we only should be
 	// doing this after an apply, and not every reconciliation
 	called = false
-	syncCtx.syncWaveHook = func(_ synccommon.SyncPhase, _ int, _ bool) error {
+	syncCtx.syncWaveHook = func(_ synccommon.SyncPhase, _ []int, _ bool) error {
 		called = true
 		return nil
 	}
@@ -1657,10 +1657,10 @@ func TestSyncWaveHook(t *testing.T) {
 	pod1Res.HookPhase = synccommon.OperationSucceeded
 	syncCtx.syncRes[resourceResultKey(pod1Res.ResourceKey, synccommon.SyncPhaseSync)] = pod1Res
 	called = false
-	syncCtx.syncWaveHook = func(phase synccommon.SyncPhase, wave int, final bool) error {
+	syncCtx.syncWaveHook = func(phase synccommon.SyncPhase, waves []int, final bool) error {
 		called = true
 		assert.Equal(t, synccommon.SyncPhaseSync, string(phase))
-		assert.Equal(t, 0, wave)
+		assert.True(t, reflect.DeepEqual([]int{0}, waves))
 		assert.False(t, final)
 		return nil
 	}
@@ -1673,10 +1673,10 @@ func TestSyncWaveHook(t *testing.T) {
 	pod2Res.HookPhase = synccommon.OperationSucceeded
 	syncCtx.syncRes[resourceResultKey(pod2Res.ResourceKey, synccommon.SyncPhaseSync)] = pod2Res
 	called = false
-	syncCtx.syncWaveHook = func(phase synccommon.SyncPhase, wave int, final bool) error {
+	syncCtx.syncWaveHook = func(phase synccommon.SyncPhase, waves []int, final bool) error {
 		called = true
 		assert.Equal(t, synccommon.SyncPhasePostSync, string(phase))
-		assert.Equal(t, 0, wave)
+		assert.True(t, reflect.DeepEqual([]int{0}, waves))
 		assert.True(t, final)
 		return nil
 	}
@@ -1695,7 +1695,7 @@ func TestSyncWaveHookFail(t *testing.T) {
 	})
 
 	called := false
-	syncCtx.syncWaveHook = func(_ synccommon.SyncPhase, _ int, _ bool) error {
+	syncCtx.syncWaveHook = func(_ synccommon.SyncPhase, _ []int, _ bool) error {
 		called = true
 		return errors.New("intentional error")
 	}
@@ -1728,7 +1728,8 @@ func TestPruneLast(t *testing.T) {
 		assert.True(t, successful)
 		assert.Len(t, tasks, 3)
 		// last wave is the last sync wave for non-prune task + 1
-		assert.Equal(t, 1, tasks.lastWave())
+		lastWaves, _ := tasks.lastWaves()
+		assert.True(t, reflect.DeepEqual([]int{1}, lastWaves))
 	})
 
 	t.Run("syncPhaseDifferentWave", func(t *testing.T) {
@@ -1744,7 +1745,8 @@ func TestPruneLast(t *testing.T) {
 		assert.True(t, successful)
 		assert.Len(t, tasks, 3)
 		// last wave is the last sync wave for tasks + 1
-		assert.Equal(t, 8, tasks.lastWave())
+		lastWaves, _ := tasks.lastWaves()
+		assert.True(t, reflect.DeepEqual([]int{8}, lastWaves))
 	})
 
 	t.Run("pruneLastIndividualResources", func(t *testing.T) {
@@ -1762,7 +1764,8 @@ func TestPruneLast(t *testing.T) {
 		assert.True(t, successful)
 		assert.Len(t, tasks, 3)
 		// last wave is the last sync wave for tasks + 1
-		assert.Equal(t, 8, tasks.lastWave())
+		lastWaves, _ := tasks.lastWaves()
+		assert.True(t, reflect.DeepEqual([]int{8}, lastWaves))
 	})
 }
 
@@ -2260,5 +2263,309 @@ func TestNeedsClientSideApplyMigration(t *testing.T) {
 			result := syncCtx.needsClientSideApplyMigration(tt.liveObj, "kubectl-client-side-apply")
 			assert.Equal(t, tt.expected, result)
 		})
+	}
+}
+
+func TestWaveReorderingOfPruneTasksUsingBinaryTreeOrdering(t *testing.T) {
+	ns := testingutils.NewNamespace()
+	ns.SetName("ns")
+	pod1 := testingutils.NewPod()
+	pod1.SetName("pod-1")
+	pod2 := testingutils.NewPod()
+	pod2.SetName("pod-2")
+	pod3 := testingutils.NewPod()
+	pod3.SetName("pod-3")
+	pod4 := testingutils.NewPod()
+	pod4.SetName("pod-4")
+	pod5 := testingutils.NewPod()
+	pod5.SetName("pod-5")
+	pod6 := testingutils.NewPod()
+	pod6.SetName("pod-6")
+	pod7 := testingutils.NewPod()
+	pod7.SetName("pod-7")
+
+	type Test struct {
+		name                              string
+		target                            []*unstructured.Unstructured
+		live                              []*unstructured.Unstructured
+		expectedWaveOrder                 map[string]int
+		expectedWaveUseBinaryTreeOrdering map[string]string
+		pruneLast                         bool
+	}
+	runTest := func(test Test) {
+		t.Run(test.name, func(t *testing.T) {
+			fmt.Println(test.name)
+			syncCtx := newTestSyncCtx(nil)
+			syncCtx.pruneLast = test.pruneLast
+			syncCtx.resources = groupResources(ReconciliationResult{
+				Live:   test.live,
+				Target: test.target,
+			})
+			tasks, successful := syncCtx.getSyncTasks()
+
+			assert.True(t, successful)
+			assert.Len(t, tasks, len(test.target))
+
+			for i, task := range tasks {
+				assert.Equal(t, test.expectedWaveOrder[task.name()], task.wave())
+				assert.Equal(t, test.expectedWaveUseBinaryTreeOrdering[task.name()], task.waveUseBinaryTreeOrdering())
+				fmt.Println(i)
+				fmt.Println(test.expectedWaveUseBinaryTreeOrdering[task.name()])
+				fmt.Println(task.waveUseBinaryTreeOrdering())
+			}
+		})
+	}
+
+	// same wave
+	sameWaveTests := []Test{
+		{
+			name:   "sameWave_noPruneTasks",
+			live:   []*unstructured.Unstructured{nil, nil, nil, nil, nil},
+			target: []*unstructured.Unstructured{ns, pod1, pod2, pod3, pod4},
+			// no change in wave order
+			expectedWaveOrder:                 map[string]int{ns.GetName(): 0, pod1.GetName(): 0, pod2.GetName(): 0, pod3.GetName(): 0, pod4.GetName(): 0},
+			expectedWaveUseBinaryTreeOrdering: map[string]string{ns.GetName(): "false", pod1.GetName(): "false", pod2.GetName(): "false", pod3.GetName(): "false", pod4.GetName(): "false"},
+		},
+		{
+			name:   "sameWave_allPruneTasks",
+			live:   []*unstructured.Unstructured{ns, pod1, pod2, pod3, pod4},
+			target: []*unstructured.Unstructured{nil, nil, nil, nil, nil},
+			// no change in wave order
+			expectedWaveOrder:                 map[string]int{ns.GetName(): 0, pod1.GetName(): 0, pod2.GetName(): 0, pod3.GetName(): 0, pod4.GetName(): 0},
+			expectedWaveUseBinaryTreeOrdering: map[string]string{ns.GetName(): "false", pod1.GetName(): "false", pod2.GetName(): "false", pod3.GetName(): "false", pod4.GetName(): "false"},
+		},
+		{
+			name:   "sameWave_mixedTasks",
+			live:   []*unstructured.Unstructured{ns, pod1, nil, pod3, pod4},
+			target: []*unstructured.Unstructured{ns, nil, pod2, nil, nil},
+			// no change in wave order
+			expectedWaveOrder:                 map[string]int{ns.GetName(): 0, pod1.GetName(): 0, pod2.GetName(): 0, pod3.GetName(): 0, pod4.GetName(): 0},
+			expectedWaveUseBinaryTreeOrdering: map[string]string{ns.GetName(): "false", pod1.GetName(): "false", pod2.GetName(): "false", pod3.GetName(): "false", pod4.GetName(): "false"},
+		},
+	}
+
+	for _, test := range sameWaveTests {
+		runTest(test)
+	}
+
+	// different wave
+	differentWaveTests := []Test{
+		{
+			name:   "differentWave_noPruneTasks",
+			target: []*unstructured.Unstructured{ns, pod1, pod2, pod3, pod4},
+			live:   []*unstructured.Unstructured{nil, nil, nil, nil, nil},
+			// no change in wave order
+			expectedWaveOrder: map[string]int{
+				// new wave 		// original wave
+				ns.GetName():   0, // 0
+				pod1.GetName(): 1, // 1
+				pod2.GetName(): 2, // 2
+				pod3.GetName(): 4, // 4
+				pod4.GetName(): 8, // 8
+			},
+			expectedWaveUseBinaryTreeOrdering: map[string]string{
+				ns.GetName():   "true",
+				pod1.GetName(): "true",
+				pod2.GetName(): "true",
+				pod3.GetName(): "true",
+				pod4.GetName(): "true",
+			},
+		},
+		{
+			name:   "differentWave_allPruneTasks",
+			target: []*unstructured.Unstructured{nil, nil, nil, nil, nil},
+			live:   []*unstructured.Unstructured{ns, pod1, pod2, pod3, pod4},
+			// change in prune wave order
+			expectedWaveOrder: map[string]int{
+				// new wave 		// original wave
+				ns.GetName():   16, // 0
+				pod1.GetName(): 8,  // 1
+				pod2.GetName(): 4,  // 2
+				pod3.GetName(): 2,  // 4
+				pod4.GetName(): 1,  // 8
+			},
+			expectedWaveUseBinaryTreeOrdering: map[string]string{
+				ns.GetName():   "true",
+				pod1.GetName(): "true",
+				pod2.GetName(): "true",
+				pod3.GetName(): "true",
+				pod4.GetName(): "true",
+			},
+		},
+		{
+			name:   "differentWave_mixedTasks",
+			target: []*unstructured.Unstructured{ns, nil, pod2, nil, nil},
+			live:   []*unstructured.Unstructured{ns, pod1, nil, pod3, pod4},
+			// change in prune wave order
+			expectedWaveOrder: map[string]int{
+				// new wave 		// original wave
+				pod1.GetName(): 4, // 1
+				pod3.GetName(): 2, // 4
+				pod4.GetName(): 1, // 8
+
+				// no change since non prune tasks
+				ns.GetName():   0, // 0
+				pod2.GetName(): 2, // 2
+			},
+			expectedWaveUseBinaryTreeOrdering: map[string]string{
+				ns.GetName():   "true",
+				pod1.GetName(): "true",
+				pod2.GetName(): "true",
+				pod3.GetName(): "true",
+				pod4.GetName(): "true",
+			},
+		},
+	}
+
+	for _, test := range differentWaveTests {
+		ns.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "0", synccommon.AnnotationUseBinaryTreeWaveOrdering: "true"})
+		pod1.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "1", synccommon.AnnotationUseBinaryTreeWaveOrdering: "true"})
+		pod2.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "2", synccommon.AnnotationUseBinaryTreeWaveOrdering: "true"})
+		pod3.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "4", synccommon.AnnotationUseBinaryTreeWaveOrdering: "true"})
+		pod4.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "8", synccommon.AnnotationUseBinaryTreeWaveOrdering: "true"})
+
+		runTest(test)
+	}
+
+	// different wave
+	differentWaveAndDifferentWaveOrderingTests := []Test{
+		{
+			name:   "differentWaveAndDifferentWaveOrdering_AllPruneTasks",
+			target: []*unstructured.Unstructured{nil, nil, nil, nil, nil},
+			live:   []*unstructured.Unstructured{ns, pod1, pod2, pod3, pod4},
+			// no change in wave order
+			expectedWaveOrder: map[string]int{
+				// new wave 		// original wave
+				ns.GetName():   8, // 0
+				pod1.GetName(): 4, // 1
+				pod2.GetName(): 2, // 2
+				pod3.GetName(): 1, // 4
+				pod4.GetName(): 1, // 5
+			},
+			expectedWaveUseBinaryTreeOrdering: map[string]string{
+				ns.GetName():   "true",
+				pod1.GetName(): "true",
+				pod2.GetName(): "true",
+				pod3.GetName(): "true",
+				pod4.GetName(): "true",
+			},
+		},
+	}
+
+	for _, test := range differentWaveAndDifferentWaveOrderingTests {
+		ns.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "0"})
+		pod1.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "1"})
+		pod2.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "2", synccommon.AnnotationUseBinaryTreeWaveOrdering: "true"})
+		pod3.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "4", synccommon.AnnotationUseBinaryTreeWaveOrdering: "true"})
+		pod4.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "5", synccommon.AnnotationUseBinaryTreeWaveOrdering: "true"})
+
+		runTest(test)
+	}
+
+	// prune last
+	pruneLastTests := []Test{
+		{
+			name:      "pruneLast",
+			pruneLast: true,
+			live:      []*unstructured.Unstructured{ns, pod1, pod2, pod3, pod4},
+			target:    []*unstructured.Unstructured{ns, nil, nil, nil, nil},
+			// change in prune wave order
+			expectedWaveOrder: map[string]int{
+				// new wave 		// original wave
+				pod1.GetName(): 16, // 1
+				pod2.GetName(): 16, // 2
+				pod3.GetName(): 16, // 4
+				pod4.GetName(): 16, // 8
+
+				// no change since non prune tasks
+				ns.GetName(): 0, // 0
+			},
+			expectedWaveUseBinaryTreeOrdering: map[string]string{
+				ns.GetName():   "true",
+				pod1.GetName(): "true",
+				pod2.GetName(): "true",
+				pod3.GetName(): "true",
+				pod4.GetName(): "true",
+			},
+		},
+		{
+			name:      "pruneLastIndividualResources",
+			pruneLast: false,
+			live:      []*unstructured.Unstructured{ns, pod1, pod2, pod3, pod4},
+			target:    []*unstructured.Unstructured{ns, nil, nil, nil, nil},
+			// change in wave order
+			expectedWaveOrder: map[string]int{
+				// new wave 		// original wave
+				pod1.GetName(): 4,  // 1
+				pod2.GetName(): 16, // 2
+				pod3.GetName(): 2,  // 3
+				pod4.GetName(): 1,  // 4
+
+				// no change since non prune tasks
+				ns.GetName(): 0, // 0
+			},
+			expectedWaveUseBinaryTreeOrdering: map[string]string{
+				ns.GetName():   "true",
+				pod1.GetName(): "true",
+				pod2.GetName(): "true",
+				pod3.GetName(): "true",
+				pod4.GetName(): "true",
+			},
+		},
+	}
+
+	for _, test := range pruneLastTests {
+		ns.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "0", synccommon.AnnotationUseBinaryTreeWaveOrdering: "true"})
+		pod1.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "1", synccommon.AnnotationUseBinaryTreeWaveOrdering: "true"})
+		pod2.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "2", synccommon.AnnotationSyncOptions: synccommon.SyncOptionPruneLast})
+		pod3.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "4", synccommon.AnnotationUseBinaryTreeWaveOrdering: "true"})
+		pod4.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "8", synccommon.AnnotationUseBinaryTreeWaveOrdering: "true"})
+
+		runTest(test)
+	}
+
+	// additional test
+	tests := []Test{
+		{
+			name:   "mixedTasks",
+			target: []*unstructured.Unstructured{ns, nil, pod2, nil, nil, nil, pod6, nil},
+			live:   []*unstructured.Unstructured{ns, pod1, nil, pod3, pod4, pod5, pod6, pod7},
+			// change in prune wave order
+			expectedWaveOrder: map[string]int{
+				// new wave 		// original wave
+				pod1.GetName(): 5, // 1
+				pod3.GetName(): 4, // 3
+				pod4.GetName(): 4, // 3
+				pod5.GetName(): 3, // 4
+				pod7.GetName(): 1, // 5
+
+				// no change since non prune tasks
+				ns.GetName():   -1, // -1
+				pod2.GetName(): 3,  // 3
+				pod6.GetName(): 5,  // 5
+			},
+			expectedWaveUseBinaryTreeOrdering: map[string]string{
+				pod1.GetName(): "false",
+				pod3.GetName(): "false",
+				pod4.GetName(): "false",
+				pod5.GetName(): "false",
+				pod7.GetName(): "false",
+				ns.GetName():   "false",
+				pod2.GetName(): "false",
+				pod6.GetName(): "false",
+			},
+		},
+	}
+	for _, test := range tests {
+		ns.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "-1"})
+		pod1.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "1"})
+		pod2.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "3"})
+		pod3.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "3"})
+		pod4.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "3"})
+		pod5.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "4"})
+		pod6.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "5"})
+		pod7.SetAnnotations(map[string]string{synccommon.AnnotationSyncWave: "5"})
+
+		runTest(test)
 	}
 }
