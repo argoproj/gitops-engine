@@ -218,6 +218,14 @@ func WithClientSideApplyMigration(enabled bool, manager string) SyncOpt {
 	}
 }
 
+// WithCacheInvalidationCallback sets a callback that will be invoked after successful sync operations
+// to invalidate the cache
+func WithCacheInvalidationCallback(callback func()) SyncOpt {
+	return func(ctx *syncContext) {
+		ctx.cacheInvalidationCallback = callback
+	}
+}
+
 // NewSyncContext creates new instance of a SyncContext
 func NewSyncContext(
 	revision string,
@@ -389,6 +397,10 @@ type syncContext struct {
 	applyOutOfSyncOnly bool
 	// stores whether the resource is modified or not
 	modificationResult map[kubeutil.ResourceKey]bool
+
+	// cacheInvalidationCallback is a callback that will be invoked after successful sync operations
+	// to invalidate the cache
+	cacheInvalidationCallback func()
 }
 
 func (sc *syncContext) setRunningPhase(tasks []*syncTask, isPendingDeletion bool) {
@@ -598,6 +610,11 @@ func (sc *syncContext) Sync() {
 			// delete all completed hooks which have appropriate delete policy
 			sc.deleteHooks(hooksPendingDeletionSuccessful)
 			sc.setOperationPhase(common.OperationSucceeded, "successfully synced (all tasks run)")
+
+			// Invalidate cache after successful sync
+			if sc.cacheInvalidationCallback != nil {
+				sc.cacheInvalidationCallback()
+			}
 		} else {
 			sc.setRunningPhase(remainingTasks, false)
 		}

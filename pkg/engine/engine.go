@@ -84,6 +84,13 @@ func (e *gitOpsEngine) Sync(ctx context.Context,
 		return nil, fmt.Errorf("failed to diff objects: %w", err)
 	}
 	opts = append(opts, sync.WithSkipHooks(!diffRes.Modified))
+
+	// Add cache invalidation callback to invalidate cache for modified resources after sync
+	opts = append(opts, sync.WithCacheInvalidationCallback(func() {
+		// Invalidate the entire cache to ensure consistency
+		e.cache.Invalidate()
+	}))
+
 	syncCtx, cleanup, err := sync.NewSyncContext(revision, result, e.config, e.config, e.kubectl, namespace, e.cache.GetOpenAPISchema(), opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create sync context: %w", err)
