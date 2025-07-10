@@ -220,7 +220,7 @@ func WithClientSideApplyMigration(enabled bool, manager string) SyncOpt {
 
 // WithCacheInvalidationCallback sets a callback that will be invoked after successful sync operations
 // to invalidate the cache
-func WithCacheInvalidationCallback(callback func()) SyncOpt {
+func WithCacheInvalidationCallback(callback func([]kubeutil.ResourceKey)) SyncOpt {
 	return func(ctx *syncContext) {
 		ctx.cacheInvalidationCallback = callback
 	}
@@ -400,7 +400,7 @@ type syncContext struct {
 
 	// cacheInvalidationCallback is a callback that will be invoked after successful sync operations
 	// to invalidate the cache
-	cacheInvalidationCallback func()
+	cacheInvalidationCallback func([]kubeutil.ResourceKey)
 }
 
 func (sc *syncContext) setRunningPhase(tasks []*syncTask, isPendingDeletion bool) {
@@ -569,6 +569,15 @@ func (sc *syncContext) Sync() {
 		// delete all completed hooks which have appropriate delete policy
 		sc.deleteHooks(hooksPendingDeletionSuccessful)
 		sc.setOperationPhase(common.OperationSucceeded, "successfully synced (no more tasks)")
+
+		// Invalidate cache after successful sync
+		if sc.cacheInvalidationCallback != nil {
+			modifiedResources := make([]kubeutil.ResourceKey, 0, len(sc.syncRes))
+			for _, result := range sc.syncRes {
+				modifiedResources = append(modifiedResources, result.ResourceKey)
+			}
+			sc.cacheInvalidationCallback(modifiedResources)
+		}
 		return
 	}
 
@@ -605,6 +614,20 @@ func (sc *syncContext) Sync() {
 		syncFailedTasks, _ := tasks.Split(func(t *syncTask) bool { return t.syncStatus == common.ResultCodeSyncFailed })
 		sc.deleteHooks(hooksPendingDeletionFailed)
 		sc.setOperationFailed(syncFailTasks, syncFailedTasks, "one or more objects failed to apply")
+
+		// Invalidate cache for successfully synced resources even if overall operation failed
+		if sc.cacheInvalidationCallback != nil {
+			var modifiedResources []kubeutil.ResourceKey
+			for _, result := range sc.syncRes {
+				// Only invalidate resources that were successfully synced
+				if result.Status == common.ResultCodeSynced {
+					modifiedResources = append(modifiedResources, result.ResourceKey)
+				}
+			}
+			if len(modifiedResources) > 0 {
+				sc.cacheInvalidationCallback(modifiedResources)
+			}
+		}
 	case successful:
 		if remainingTasks.Len() == 0 {
 			// delete all completed hooks which have appropriate delete policy
@@ -613,7 +636,11 @@ func (sc *syncContext) Sync() {
 
 			// Invalidate cache after successful sync
 			if sc.cacheInvalidationCallback != nil {
-				sc.cacheInvalidationCallback()
+				modifiedResources := make([]kubeutil.ResourceKey, 0, len(sc.syncRes))
+				for _, result := range sc.syncRes {
+					modifiedResources = append(modifiedResources, result.ResourceKey)
+				}
+				sc.cacheInvalidationCallback(modifiedResources)
 			}
 		} else {
 			sc.setRunningPhase(remainingTasks, false)

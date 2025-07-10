@@ -93,9 +93,11 @@ func (e *gitOpsEngine) Sync(ctx context.Context,
 	opts = append(opts, sync.WithSkipHooks(!diffRes.Modified))
 
 	// Add cache invalidation callback to invalidate cache for modified resources after sync
-	opts = append(opts, sync.WithCacheInvalidationCallback(func() {
-		// Invalidate the entire cache to ensure consistency
-		e.cache.Invalidate()
+	opts = append(opts, sync.WithCacheInvalidationCallback(func(modifiedResources []kube.ResourceKey) {
+		// Only invalidate the specific resources that were modified
+		if len(modifiedResources) > 0 {
+			e.cache.InvalidateResources(modifiedResources)
+		}
 	}))
 
 	syncCtx, cleanup, err := sync.NewSyncContext(revision, result, e.config, e.config, e.kubectl, namespace, e.cache.GetOpenAPISchema(), opts...)

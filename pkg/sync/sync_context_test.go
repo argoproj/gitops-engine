@@ -36,6 +36,7 @@ import (
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube/kubetest"
 	testingutils "github.com/argoproj/gitops-engine/pkg/utils/testing"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 )
 
 var standardVerbs = metav1.Verbs{"create", "delete", "deletecollection", "get", "list", "patch", "update", "watch"}
@@ -2261,4 +2262,197 @@ func TestNeedsClientSideApplyMigration(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestSyncContext_CacheInvalidationCallback(t *testing.T) {
+	// Track which resources are passed to the callback
+	var callbackInvoked bool
+	var invalidatedResources []kube.ResourceKey
+
+	callback := func(resources []kube.ResourceKey) {
+		callbackInvoked = true
+		invalidatedResources = append(invalidatedResources, resources...)
+	}
+
+	syncCtx := newTestSyncCtx(nil,
+		WithOperationSettings(false, false, false, false),
+		WithCacheInvalidationCallback(callback),
+	)
+
+	// Create test resources
+	pod := testingutils.NewPod()
+	pod.SetName("test-pod")
+	pod.SetNamespace(testingutils.FakeArgoCDNamespace)
+	service := testingutils.NewService()
+	service.SetName("test-service")
+	service.SetNamespace(testingutils.FakeArgoCDNamespace)
+
+	syncCtx.resources = groupResources(ReconciliationResult{
+		Live:   []*unstructured.Unstructured{nil, nil},
+		Target: []*unstructured.Unstructured{pod, service},
+	})
+
+	// Run sync
+	syncCtx.Sync()
+	phase, _, resources := syncCtx.GetState()
+
+	// Verify sync completed successfully
+	assert.Equal(t, synccommon.OperationSucceeded, phase)
+	assert.Len(t, resources, 2)
+
+	// Verify callback was invoked with the modified resources
+	assert.True(t, callbackInvoked, "Cache invalidation callback should have been invoked")
+	assert.Len(t, invalidatedResources, 2, "Should have invalidated 2 resources")
+
+	// Verify the correct resources were passed to the callback
+	expectedKeys := []kube.ResourceKey{
+		kube.GetResourceKey(pod),
+		kube.GetResourceKey(service),
+	}
+
+	for _, expectedKey := range expectedKeys {
+		assert.Contains(t, invalidatedResources, expectedKey, "Expected resource key should be in invalidated resources")
+	}
+}
+
+func TestSyncContext_CacheInvalidationCallback_NoResources(t *testing.T) {
+	// Track whether callback is invoked
+	var callbackInvoked bool
+	var invalidatedResources []kube.ResourceKey
+
+	callback := func(resources []kube.ResourceKey) {
+		callbackInvoked = true
+		invalidatedResources = append(invalidatedResources, resources...)
+	}
+
+	syncCtx := newTestSyncCtx(nil,
+		WithOperationSettings(false, false, false, false),
+		WithCacheInvalidationCallback(callback),
+	)
+
+	// No resources to sync
+	syncCtx.resources = groupResources(ReconciliationResult{
+		Live:   []*unstructured.Unstructured{},
+		Target: []*unstructured.Unstructured{},
+	})
+
+	// Run sync
+	syncCtx.Sync()
+	phase, _, resources := syncCtx.GetState()
+
+	// Verify sync completed successfully
+	assert.Equal(t, synccommon.OperationSucceeded, phase)
+	assert.Len(t, resources, 0)
+
+	// Verify callback was invoked with empty resource list
+	assert.True(t, callbackInvoked, "Cache invalidation callback should have been invoked")
+	assert.Len(t, invalidatedResources, 0, "Should have invalidated 0 resources")
+}
+
+func TestSyncContext_CacheInvalidationCallback_PartialFailure(t *testing.T) {
+	// Track which resources are passed to the callback
+	var callbackInvoked bool
+	var invalidatedResources []kube.ResourceKey
+
+	callback := func(resources []kube.ResourceKey) {
+		callbackInvoked = true
+		invalidatedResources = append(invalidatedResources, resources...)
+	}
+
+	syncCtx := newTestSyncCtx(nil,
+		WithOperationSettings(false, false, false, false),
+		WithCacheInvalidationCallback(callback),
+	)
+
+	// Create test resources - one will succeed, one will fail
+	pod := testingutils.NewPod()
+	pod.SetName("test-pod")
+	pod.SetNamespace(testingutils.FakeArgoCDNamespace)
+	service := testingutils.NewService()
+	service.SetName("test-service")
+	service.SetNamespace(testingutils.FakeArgoCDNamespace)
+
+	// Create a custom mock that can distinguish between dry-run and wet-run
+	customMockResourceOps := &customMockResourceOps{
+		MockResourceOps: &kubetest.MockResourceOps{
+			Commands: map[string]kubetest.KubectlOutput{
+				// No commands in the default map - will succeed
+			},
+		},
+	}
+
+	syncCtx.resourceOps = customMockResourceOps
+
+	syncCtx.resources = groupResources(ReconciliationResult{
+		Live:   []*unstructured.Unstructured{nil, nil},
+		Target: []*unstructured.Unstructured{pod, service},
+	})
+
+	// Run sync
+	syncCtx.Sync()
+	phase, _, resources := syncCtx.GetState()
+
+	// Verify sync completed with failure
+	assert.Equal(t, synccommon.OperationFailed, phase)
+	assert.Len(t, resources, 2)
+
+	// Verify callback was invoked (should be called even on partial failure)
+	assert.True(t, callbackInvoked, "Cache invalidation callback should have been invoked")
+
+	// Should only invalidate the successfully synced resource
+	assert.Len(t, invalidatedResources, 1, "Should have invalidated 1 resource")
+
+	// Verify the successful resource was invalidated
+	serviceKey := kube.GetResourceKey(service)
+	assert.Contains(t, invalidatedResources, serviceKey, "Should have invalidated the successful resource")
+}
+
+// customMockResourceOps is a custom mock that can distinguish between dry-run and wet-run
+type customMockResourceOps struct {
+	*kubetest.MockResourceOps
+}
+
+func (c *customMockResourceOps) ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string) (string, error) {
+	// Let dry-run succeed for both resources
+	if dryRunStrategy == cmdutil.DryRunClient {
+		return "dry-run successful", nil
+	}
+
+	// During wet-run, fail the pod but succeed the service
+	if obj.GetKind() == "Pod" && obj.GetName() == "test-pod" {
+		return "", errors.New("pod sync failed")
+	}
+
+	// For service, succeed
+	if obj.GetKind() == "Service" && obj.GetName() == "test-service" {
+		return "service sync successful", nil
+	}
+
+	// Default behavior for other resources
+	return c.MockResourceOps.ApplyResource(ctx, obj, dryRunStrategy, force, validate, serverSideApply, manager)
+}
+
+func TestSyncContext_CacheInvalidationCallback_NilCallback(t *testing.T) {
+	// Test with nil callback (should not panic)
+	syncCtx := newTestSyncCtx(nil,
+		WithOperationSettings(false, false, false, false),
+		WithCacheInvalidationCallback(nil),
+	)
+
+	pod := testingutils.NewPod()
+	pod.SetName("test-pod")
+	pod.SetNamespace(testingutils.FakeArgoCDNamespace)
+
+	syncCtx.resources = groupResources(ReconciliationResult{
+		Live:   []*unstructured.Unstructured{nil},
+		Target: []*unstructured.Unstructured{pod},
+	})
+
+	// Run sync - should not panic
+	syncCtx.Sync()
+	phase, _, resources := syncCtx.GetState()
+
+	// Verify sync completed successfully
+	assert.Equal(t, synccommon.OperationSucceeded, phase)
+	assert.Len(t, resources, 1)
 }

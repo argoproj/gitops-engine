@@ -127,6 +127,8 @@ type ClusterCache interface {
 	GetGVKParser() *managedfields.GvkParser
 	// Invalidate cache and executes callback that optionally might update cache settings
 	Invalidate(opts ...UpdateSettingsFunc)
+	// InvalidateResources invalidates specific resources in the cache
+	InvalidateResources(keys []kube.ResourceKey)
 	// FindResources returns resources that matches given list of predicates from specified namespace or everywhere if specified namespace is empty
 	FindResources(namespace string, predicates ...func(r *Resource) bool) map[kube.ResourceKey]*Resource
 	// IterateHierarchyV2 iterates resource tree starting from the specified top level resources and executes callback for each resource in the tree.
@@ -488,6 +490,29 @@ func (c *clusterCache) Invalidate(opts ...UpdateSettingsFunc) {
 	c.apisMeta = nil
 	c.namespacedResources = nil
 	c.log.Info("Invalidated cluster")
+}
+
+// InvalidateResources invalidates specific resources in the cache by removing them.
+// This forces the resources to be refreshed from the cluster on the next access.
+func (c *clusterCache) InvalidateResources(keys []kube.ResourceKey) {
+	if len(keys) == 0 {
+		return
+	}
+
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	for _, key := range keys {
+		if _, exists := c.resources[key]; exists {
+			// Remove the resource from cache - this will force it to be refreshed on next access
+			c.onNodeRemoved(key)
+			c.log.Info("Invalidated resource from cache", "key", key.String())
+		} else {
+			c.log.Info("Resource not found in cache for invalidation", "key", key.String())
+		}
+	}
+
+	c.log.Info("Invalidated specific resources from cache", "count", len(keys))
 }
 
 // clusterCacheSync's lock should be held before calling this method
