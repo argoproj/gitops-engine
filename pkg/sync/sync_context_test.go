@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -106,7 +107,7 @@ func TestSyncValidate(t *testing.T) {
 
 func TestSyncNotPermittedNamespace(t *testing.T) {
 	syncCtx := newTestSyncCtx(nil, WithPermissionValidator(func(_ *unstructured.Unstructured, _ *metav1.APIResource) error {
-		return apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace)
+		return errors.New("not permitted in project")
 	}))
 	targetPod := testingutils.NewPod()
 	targetPod.SetNamespace("kube-system")
@@ -147,7 +148,7 @@ func TestSyncNamespaceCreatedBeforeDryRunWithFailure(t *testing.T) {
 		resourceOps.Commands = map[string]kubetest.KubectlOutput{}
 		resourceOps.Commands[pod.GetName()] = kubetest.KubectlOutput{
 			Output: "should not be returned",
-			Err:    apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace),
+			Err:    errors.New("invalid object failing dry-run"),
 		}
 	})
 	syncCtx.resources = groupResources(ReconciliationResult{
@@ -511,7 +512,7 @@ func TestSyncPruneFailure(t *testing.T) {
 		Commands: map[string]kubetest.KubectlOutput{
 			"test-service": {
 				Output: "",
-				Err:    apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace),
+				Err:    errors.New("foo"),
 			},
 		},
 	}
@@ -520,7 +521,7 @@ func TestSyncPruneFailure(t *testing.T) {
 		Commands: map[string]kubetest.KubectlOutput{
 			"test-service": {
 				Output: "",
-				Err:    apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace),
+				Err:    errors.New("foo"),
 			},
 		},
 	}
@@ -540,7 +541,7 @@ func TestSyncPruneFailure(t *testing.T) {
 	assert.Len(t, resources, 1)
 	result := resources[0]
 	assert.Equal(t, synccommon.ResultCodeSyncFailed, result.Status)
-	assert.Equal(t, "invalid object failing dry-run", result.Message)
+	assert.Equal(t, "foo", result.Message)
 }
 
 type APIServerMock struct {
@@ -1212,7 +1213,7 @@ func TestNamespaceAutoCreationForNonExistingNs(t *testing.T) {
 		creatorCalled := false
 		syncCtx.syncNamespace = func(_, _ *unstructured.Unstructured) (bool, error) {
 			creatorCalled = true
-			return false, apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace)
+			return false, errors.New("some error")
 		}
 		tasks, successful := syncCtx.getSyncTasks()
 
@@ -1226,7 +1227,7 @@ func TestNamespaceAutoCreationForNonExistingNs(t *testing.T) {
 			skipDryRun:     false,
 			syncStatus:     synccommon.ResultCodeSyncFailed,
 			operationState: synccommon.OperationError,
-			message:        "namespaceModifier error: invalid object failing dry-run",
+			message:        "namespaceModifier error: some error",
 			waveOverride:   nil,
 		}, tasks[0])
 	})
@@ -1696,13 +1697,13 @@ func TestSyncWaveHookFail(t *testing.T) {
 	called := false
 	syncCtx.syncWaveHook = func(_ synccommon.SyncPhase, _ int, _ bool) error {
 		called = true
-		return apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace)
+		return errors.New("intentional error")
 	}
 	syncCtx.Sync()
 	assert.True(t, called)
 	phase, msg, results := syncCtx.GetState()
 	assert.Equal(t, synccommon.OperationFailed, phase)
-	assert.Equal(t, "SyncWaveHook failed: invalid object failing dry-run", msg)
+	assert.Equal(t, "SyncWaveHook failed: intentional error", msg)
 	assert.Equal(t, synccommon.OperationRunning, results[0].HookPhase)
 }
 
