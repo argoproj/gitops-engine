@@ -78,7 +78,7 @@ func (e *gitOpsEngine) Sync(ctx context.Context,
 	// This forces a refresh if the cache was invalidated
 	err := e.cache.EnsureSynced()
 	if err != nil {
-		return nil, fmt.Errorf("failed to ensure cache is synced: %w", err)
+		return nil, fmt.Errorf("error during sync: failed to ensure cache is synced: %w", err)
 	}
 
 	managedResources, err := e.cache.GetManagedLiveObjs(resources, isManaged)

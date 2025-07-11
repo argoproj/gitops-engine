@@ -3,7 +3,6 @@ package sync
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,22 +11,22 @@ import (
 	"testing"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 	fakedisco "k8s.io/client-go/discovery/fake"
 	"k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/rest"
 	testcore "k8s.io/client-go/testing"
 	"k8s.io/klog/v2/textlogger"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/argoproj/gitops-engine/pkg/diff"
 	"github.com/argoproj/gitops-engine/pkg/health"
@@ -36,7 +35,6 @@ import (
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube/kubetest"
 	testingutils "github.com/argoproj/gitops-engine/pkg/utils/testing"
-	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 )
 
 var standardVerbs = metav1.Verbs{"create", "delete", "deletecollection", "get", "list", "patch", "update", "watch"}
@@ -108,7 +106,7 @@ func TestSyncValidate(t *testing.T) {
 
 func TestSyncNotPermittedNamespace(t *testing.T) {
 	syncCtx := newTestSyncCtx(nil, WithPermissionValidator(func(_ *unstructured.Unstructured, _ *metav1.APIResource) error {
-		return errors.New("not permitted in project")
+		return apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace)
 	}))
 	targetPod := testingutils.NewPod()
 	targetPod.SetNamespace("kube-system")
@@ -149,7 +147,7 @@ func TestSyncNamespaceCreatedBeforeDryRunWithFailure(t *testing.T) {
 		resourceOps.Commands = map[string]kubetest.KubectlOutput{}
 		resourceOps.Commands[pod.GetName()] = kubetest.KubectlOutput{
 			Output: "should not be returned",
-			Err:    errors.New("invalid object failing dry-run"),
+			Err:    apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace),
 		}
 	})
 	syncCtx.resources = groupResources(ReconciliationResult{
@@ -363,7 +361,7 @@ func TestSyncCreateFailure(t *testing.T) {
 		Commands: map[string]kubetest.KubectlOutput{
 			testSvc.GetName(): {
 				Output: "",
-				Err:    errors.New("foo"),
+				Err:    apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace),
 			},
 		},
 	}
@@ -372,7 +370,7 @@ func TestSyncCreateFailure(t *testing.T) {
 		Commands: map[string]kubetest.KubectlOutput{
 			testSvc.GetName(): {
 				Output: "",
-				Err:    errors.New("foo"),
+				Err:    apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace),
 			},
 		},
 	}
@@ -388,7 +386,7 @@ func TestSyncCreateFailure(t *testing.T) {
 	assert.Len(t, resources, 1)
 	result := resources[0]
 	assert.Equal(t, synccommon.ResultCodeSyncFailed, result.Status)
-	assert.Equal(t, "foo", result.Message)
+	assert.Equal(t, "invalid object failing dry-run", result.Message)
 }
 
 func TestSync_ApplyOutOfSyncOnly(t *testing.T) {
@@ -513,7 +511,7 @@ func TestSyncPruneFailure(t *testing.T) {
 		Commands: map[string]kubetest.KubectlOutput{
 			"test-service": {
 				Output: "",
-				Err:    errors.New("foo"),
+				Err:    apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace),
 			},
 		},
 	}
@@ -522,7 +520,7 @@ func TestSyncPruneFailure(t *testing.T) {
 		Commands: map[string]kubetest.KubectlOutput{
 			"test-service": {
 				Output: "",
-				Err:    errors.New("foo"),
+				Err:    apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace),
 			},
 		},
 	}
@@ -542,7 +540,7 @@ func TestSyncPruneFailure(t *testing.T) {
 	assert.Len(t, resources, 1)
 	result := resources[0]
 	assert.Equal(t, synccommon.ResultCodeSyncFailed, result.Status)
-	assert.Equal(t, "foo", result.Message)
+	assert.Equal(t, "invalid object failing dry-run", result.Message)
 }
 
 type APIServerMock struct {
@@ -1214,7 +1212,7 @@ func TestNamespaceAutoCreationForNonExistingNs(t *testing.T) {
 		creatorCalled := false
 		syncCtx.syncNamespace = func(_, _ *unstructured.Unstructured) (bool, error) {
 			creatorCalled = true
-			return false, errors.New("some error")
+			return false, apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace)
 		}
 		tasks, successful := syncCtx.getSyncTasks()
 
@@ -1228,7 +1226,7 @@ func TestNamespaceAutoCreationForNonExistingNs(t *testing.T) {
 			skipDryRun:     false,
 			syncStatus:     synccommon.ResultCodeSyncFailed,
 			operationState: synccommon.OperationError,
-			message:        "namespaceModifier error: some error",
+			message:        "namespaceModifier error: invalid object failing dry-run",
 			waveOverride:   nil,
 		}, tasks[0])
 	})
@@ -1269,11 +1267,11 @@ func TestSyncFailureHookWithFailedSync(t *testing.T) {
 	})
 	syncCtx.hooks = []*unstructured.Unstructured{newHook(synccommon.HookTypeSyncFail)}
 	mockKubectl := &kubetest.MockKubectlCmd{
-		Commands: map[string]kubetest.KubectlOutput{pod.GetName(): {Err: errors.New("")}},
+		Commands: map[string]kubetest.KubectlOutput{pod.GetName(): {Err: apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace)}},
 	}
 	syncCtx.kubectl = mockKubectl
 	mockResourceOps := kubetest.MockResourceOps{
-		Commands: map[string]kubetest.KubectlOutput{pod.GetName(): {Err: errors.New("")}},
+		Commands: map[string]kubetest.KubectlOutput{pod.GetName(): {Err: apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace)}},
 	}
 	syncCtx.resourceOps = &mockResourceOps
 
@@ -1322,18 +1320,18 @@ func TestRunSyncFailHooksFailed(t *testing.T) {
 	mockKubectl := &kubetest.MockKubectlCmd{
 		Commands: map[string]kubetest.KubectlOutput{
 			// Fail operation
-			pod.GetName(): {Err: errors.New("")},
+			pod.GetName(): {Err: apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace)},
 			// Fail a single SyncFail hook
-			failedSyncFailHook.GetName(): {Err: errors.New("")},
+			failedSyncFailHook.GetName(): {Err: apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace)},
 		},
 	}
 	syncCtx.kubectl = mockKubectl
 	mockResourceOps := kubetest.MockResourceOps{
 		Commands: map[string]kubetest.KubectlOutput{
 			// Fail operation
-			pod.GetName(): {Err: errors.New("")},
+			pod.GetName(): {Err: apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace)},
 			// Fail a single SyncFail hook
-			failedSyncFailHook.GetName(): {Err: errors.New("")},
+			failedSyncFailHook.GetName(): {Err: apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace)},
 		},
 	}
 	syncCtx.resourceOps = &mockResourceOps
@@ -1698,13 +1696,13 @@ func TestSyncWaveHookFail(t *testing.T) {
 	called := false
 	syncCtx.syncWaveHook = func(_ synccommon.SyncPhase, _ int, _ bool) error {
 		called = true
-		return errors.New("intentional error")
+		return apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace)
 	}
 	syncCtx.Sync()
 	assert.True(t, called)
 	phase, msg, results := syncCtx.GetState()
 	assert.Equal(t, synccommon.OperationFailed, phase)
-	assert.Equal(t, "SyncWaveHook failed: intentional error", msg)
+	assert.Equal(t, "SyncWaveHook failed: invalid object failing dry-run", msg)
 	assert.Equal(t, synccommon.OperationRunning, results[0].HookPhase)
 }
 
@@ -2342,11 +2340,11 @@ func TestSyncContext_CacheInvalidationCallback_NoResources(t *testing.T) {
 
 	// Verify sync completed successfully
 	assert.Equal(t, synccommon.OperationSucceeded, phase)
-	assert.Len(t, resources, 0)
+	assert.Empty(t, resources)
 
 	// Verify callback was invoked with empty resource list
 	assert.True(t, callbackInvoked, "Cache invalidation callback should have been invoked")
-	assert.Len(t, invalidatedResources, 0, "Should have invalidated 0 resources")
+	assert.Empty(t, invalidatedResources, "Should have invalidated 0 resources")
 }
 
 func TestSyncContext_CacheInvalidationCallback_PartialFailure(t *testing.T) {
@@ -2420,7 +2418,7 @@ func (c *customMockResourceOps) ApplyResource(ctx context.Context, obj *unstruct
 
 	// During wet-run, fail the pod but succeed the service
 	if obj.GetKind() == "Pod" && obj.GetName() == "test-pod" {
-		return "", errors.New("pod sync failed")
+		return "", apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace)
 	}
 
 	// For service, succeed
@@ -2429,7 +2427,11 @@ func (c *customMockResourceOps) ApplyResource(ctx context.Context, obj *unstruct
 	}
 
 	// Default behavior for other resources
-	return c.MockResourceOps.ApplyResource(ctx, obj, dryRunStrategy, force, validate, serverSideApply, manager)
+	_, err := c.MockResourceOps.ApplyResource(ctx, obj, dryRunStrategy, force, validate, serverSideApply, manager)
+	if err != nil {
+		return "", fmt.Errorf("apply resource failed: %w", err)
+	}
+	return "default success", nil
 }
 
 func TestSyncContext_CacheInvalidationCallback_NilCallback(t *testing.T) {
