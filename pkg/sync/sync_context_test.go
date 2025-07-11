@@ -362,7 +362,7 @@ func TestSyncCreateFailure(t *testing.T) {
 		Commands: map[string]kubetest.KubectlOutput{
 			testSvc.GetName(): {
 				Output: "",
-				Err:    apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace),
+				Err:    errors.New("invalid object failing dry-run"),
 			},
 		},
 	}
@@ -371,7 +371,7 @@ func TestSyncCreateFailure(t *testing.T) {
 		Commands: map[string]kubetest.KubectlOutput{
 			testSvc.GetName(): {
 				Output: "",
-				Err:    apierrors.NewNotFound(schema.GroupResource{}, testingutils.FakeArgoCDNamespace),
+				Err:    errors.New("invalid object failing dry-run"),
 			},
 		},
 	}
