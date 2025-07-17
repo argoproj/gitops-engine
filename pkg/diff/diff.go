@@ -268,39 +268,50 @@ func restoreIgnoredFieldsFromLive(config, live *unstructured.Unstructured, norma
 func getMergePatch(original, modified *unstructured.Unstructured, lookupPatchMeta *strategicpatch.PatchMetaFromStruct) ([]byte, error) {
 	originalJSON, err := original.MarshalJSON()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to marshal original object: %w", err)
 	}
 	modifiedJSON, err := modified.MarshalJSON()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to marshal modified object: %w", err)
 	}
 	if lookupPatchMeta != nil {
-		return strategicpatch.CreateThreeWayMergePatch(modifiedJSON, modifiedJSON, originalJSON, lookupPatchMeta, true)
+		patch, err := strategicpatch.CreateThreeWayMergePatch(modifiedJSON, modifiedJSON, originalJSON, lookupPatchMeta, true)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create strategic merge patch: %w", err)
+		}
+		return patch, nil
 	}
 
-	return jsonpatch.CreateMergePatch(originalJSON, modifiedJSON)
+	patch, err := jsonpatch.CreateMergePatch(originalJSON, modifiedJSON)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create JSON merge patch: %w", err)
+	}
+	return patch, nil
 }
 
 // applyMergePatch applies the patch to the object (same as in normalizeTargetResources)
 func applyMergePatch(obj *unstructured.Unstructured, patch []byte, versionedObject any) (*unstructured.Unstructured, error) {
 	originalJSON, err := obj.MarshalJSON()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to marshal original object: %w", err)
 	}
 	var patchedJSON []byte
 	if versionedObject == nil {
 		patchedJSON, err = jsonpatch.MergePatch(originalJSON, patch)
+		if err != nil {
+			return nil, fmt.Errorf("failed to apply JSON merge patch: %w", err)
+		}
 	} else {
 		patchedJSON, err = strategicpatch.StrategicMergePatch(originalJSON, patch, versionedObject)
-	}
-	if err != nil {
-		return nil, err
+		if err != nil {
+			return nil, fmt.Errorf("failed to apply strategic merge patch: %w", err)
+		}
 	}
 
 	patchedObj := &unstructured.Unstructured{}
 	_, _, err = unstructured.UnstructuredJSONScheme.Decode(patchedJSON, nil, patchedObj)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to decode patched object: %w", err)
 	}
 	return patchedObj, nil
 }
