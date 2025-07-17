@@ -78,22 +78,11 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 
 	if config != nil {
 		config = remarshal(config, o)
-		if o.serverSideDiff {
-			// For server-side diff, apply essential normalizations but skip ignoreDifferences
-			// The ignoreDifferences logic will be handled during field restoration
-			normalizeEssentials(config, o)
-		} else {
-			Normalize(config, opts...)
-		}
+		Normalize(config, opts...)
 	}
 	if live != nil {
 		live = remarshal(live, o)
-		if o.serverSideDiff {
-			// For server-side diff, apply essential normalizations but skip ignoreDifferences
-			normalizeEssentials(live, o)
-		} else {
-			Normalize(live, opts...)
-		}
+		Normalize(live, opts...)
 	}
 
 	if o.serverSideDiff {
@@ -214,8 +203,7 @@ func serverSideDiff(config, live *unstructured.Unstructured, opts ...Option) (*D
 	return buildDiffResult(predictedLiveBytes, liveBytes), nil
 }
 
-// restoreIgnoredFieldsFromLive uses the exact same pattern as normalizeTargetResources:
-// applies normalization to detect which fields get removed, then restores them using live values.
+// restoreIgnoredFieldsFromLive applies normalization to detect which fields get removed, then restores them using live values.
 // This function receives original, non-normalized config and live, so it can properly detect
 // which fields are removed by normalization and restore them.
 func restoreIgnoredFieldsFromLive(config, live *unstructured.Unstructured, normalizer Normalizer) *unstructured.Unstructured {
@@ -249,13 +237,13 @@ func restoreIgnoredFieldsFromLive(config, live *unstructured.Unstructured, norma
 		return originalConfig
 	}
 
-	// Get what fields were removed from live by normalization (this is livePatch)
+	// Get what fields were removed from live by normalization
 	livePatch, err := getMergePatch(liveCopy, live, lookupPatchMeta)
 	if err != nil {
 		return originalConfig
 	}
 
-	// Apply the live values for the removed fields to the normalized config (same as normalizeTargetResources)
+	// Apply the live values for the removed fields to the normalized config
 	restoredConfig, err := applyMergePatch(normalizedConfig, livePatch, versionedObject)
 	if err != nil {
 		return originalConfig
@@ -264,7 +252,7 @@ func restoreIgnoredFieldsFromLive(config, live *unstructured.Unstructured, norma
 	return restoredConfig
 }
 
-// getMergePatch calculates the patch between original and modified (same as in normalizeTargetResources)
+// getMergePatch calculates the patch between original and modified
 func getMergePatch(original, modified *unstructured.Unstructured, lookupPatchMeta *strategicpatch.PatchMetaFromStruct) ([]byte, error) {
 	originalJSON, err := original.MarshalJSON()
 	if err != nil {
@@ -289,7 +277,7 @@ func getMergePatch(original, modified *unstructured.Unstructured, lookupPatchMet
 	return patch, nil
 }
 
-// applyMergePatch applies the patch to the object (same as in normalizeTargetResources)
+// applyMergePatch applies the patch to the object
 func applyMergePatch(obj *unstructured.Unstructured, patch []byte, versionedObject any) (*unstructured.Unstructured, error) {
 	originalJSON, err := obj.MarshalJSON()
 	if err != nil {
@@ -947,31 +935,6 @@ func DiffArray(configArray, liveArray []*unstructured.Unstructured, opts ...Opti
 	return &diffResultList, nil
 }
 
-// normalizeEssentials applies critical normalizations needed for server-side apply validation
-// but skips ignoreDifferences logic which is handled separately during field restoration.
-func normalizeEssentials(un *unstructured.Unstructured, o options) {
-	if un == nil {
-		return
-	}
-
-	// creationTimestamp is sometimes set to null in the config when exported (e.g. SealedSecrets)
-	// Removing the field allows a cleaner diff and prevents server-side apply validation issues.
-	unstructured.RemoveNestedField(un.Object, "metadata", "creationTimestamp")
-
-	gvk := un.GroupVersionKind()
-	switch {
-	case gvk.Group == "" && gvk.Kind == "Secret":
-		// Convert stringData to data - critical for Secret validation
-		NormalizeSecret(un, WithLogr(o.log))
-	case gvk.Group == "rbac.authorization.k8s.io" && (gvk.Kind == "ClusterRole" || gvk.Kind == "Role"):
-		normalizeRole(un, o)
-	case gvk.Group == "" && gvk.Kind == "Endpoints":
-		normalizeEndpoint(un, o)
-	}
-	// Note: We intentionally skip o.normalizer.Normalize(un) here since it includes
-	// ignoreDifferences logic which is handled during field restoration
-}
-
 func Normalize(un *unstructured.Unstructured, opts ...Option) {
 	if un == nil {
 		return
@@ -992,9 +955,13 @@ func Normalize(un *unstructured.Unstructured, opts ...Option) {
 		normalizeEndpoint(un, o)
 	}
 
-	err := o.normalizer.Normalize(un)
-	if err != nil {
-		o.log.Error(err, fmt.Sprintf("Failed to normalize %s/%s/%s", un.GroupVersionKind(), un.GetNamespace(), un.GetName()))
+	// Skip the normalizer (ignoreDifferences + knownTypes) for server-side diff
+	// The ignoreDifferences fields need to be restored before server-side diff is calculated.
+	if !o.serverSideDiff {
+		err := o.normalizer.Normalize(un)
+		if err != nil {
+			o.log.Error(err, fmt.Sprintf("Failed to normalize %s/%s/%s", un.GroupVersionKind(), un.GetNamespace(), un.GetName()))
+		}
 	}
 }
 
