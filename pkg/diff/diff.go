@@ -75,18 +75,22 @@ func GetNoopNormalizer() Normalizer {
 // "kubectl.kubernetes.io/last-applied-configuration", then perform a three way diff.
 func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult, error) {
 	o := applyOptions(opts)
-
+	// Skip normalization for server-side diff as it is handled after server-side diff is calculated.
 	if config != nil {
 		config = remarshal(config, o)
-		Normalize(config, opts...)
+		if !o.serverSideDiff {
+			Normalize(config, opts...)
+		}
 	}
 	if live != nil {
 		live = remarshal(live, o)
-		Normalize(live, opts...)
+		if !o.serverSideDiff {
+			Normalize(live, opts...)
+		}
 	}
 
 	if o.serverSideDiff {
-		r, err := serverSideDiff(config, live, opts...)
+		r, err := ServerSideDiff(config, live, opts...)
 		if err != nil {
 			return nil, fmt.Errorf("error calculating server side diff: %w", err)
 		}
