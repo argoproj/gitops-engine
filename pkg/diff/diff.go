@@ -204,7 +204,7 @@ func serverSideDiff(config, live *unstructured.Unstructured, opts ...Option) (*D
 
 // restoreIgnoredFieldsFromLive applies normalization to detect which fields get removed, then restores them using live values.
 // This function receives original, non-normalized config and live, so it can properly detect
-// which fields are removed by normalization and restore them.
+// which fields are removed by normalization and restore them. This is the same pattern as normalizeTargetResources in argo-cd.
 func restoreIgnoredFieldsFromLive(config, live *unstructured.Unstructured, normalizer Normalizer) *unstructured.Unstructured {
 	if config == nil || live == nil || normalizer == nil {
 		return config
