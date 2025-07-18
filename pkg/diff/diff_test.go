@@ -904,6 +904,11 @@ func TestServerSideDiff(t *testing.T) {
 		return opts
 	}
 
+	buildOptsWithNormalizer := func(predictedLive string, normalizer Normalizer) []Option {
+		opts := buildOpts(predictedLive)
+		return append(opts, WithNormalizer(normalizer))
+	}
+
 	t.Run("will ignore modifications done by mutation webhook by default", func(t *testing.T) {
 		// given
 		t.Parallel()
@@ -1061,6 +1066,61 @@ func TestServerSideDiff(t *testing.T) {
 		assert.False(t, predictedLabelExists)
 		assert.True(t, liveLabelExists)
 	})
+
+	t.Run("will respect ignoreDifferences when applyIgnoreDifferences option is used", func(t *testing.T) {
+		// given
+		t.Parallel()
+		liveState := StrToUnstructured(testdata.ServiceLiveYAMLSSD)
+		desiredState := StrToUnstructured(testdata.ServiceConfigYAMLSSD)
+
+		// Normalizer that ignores sessionAffinity (auto-assigned field that's commonly ignored)
+		normalizer := &testIgnoreDifferencesNormalizer{
+			fieldsToRemove: [][]string{
+				{"spec", "sessionAffinity"},
+			},
+		}
+
+		opts := buildOptsWithNormalizer(testdata.ServicePredictedLiveJSONSSD, normalizer)
+
+		// when
+		result, err := serverSideDiff(desiredState, liveState, opts...)
+
+		// then
+		require.NoError(t, err)
+		assert.NotNil(t, result)
+
+		// Should show diff for other fields but not the ignored sessionAffinity
+		assert.True(t, result.Modified, "Should show diff for non-ignored fields")
+
+		// Convert results to strings for verification
+		predictedLiveStr := string(result.PredictedLive)
+		normalizedLiveStr := string(result.NormalizedLive)
+
+		// Ports should appear in diff (not ignored)
+		assert.Contains(t, predictedLiveStr, "port", "Port differences should be visible")
+
+		// The ignored sessionAffinity should NOT appear in final result
+		assert.NotContains(t, predictedLiveStr, "sessionAffinity", "sessionAffinity should be removed by normalization")
+		assert.NotContains(t, normalizedLiveStr, "sessionAffinity", "sessionAffinity should be removed by normalization")
+
+		// Other fields should still be visible (not ignored)
+		assert.Contains(t, predictedLiveStr, "selector", "Other fields should remain visible")
+	})
+}
+
+// testIgnoreDifferencesNormalizer implements a simple normalizer that removes specified fields
+type testIgnoreDifferencesNormalizer struct {
+	fieldsToRemove [][]string
+}
+
+func (n *testIgnoreDifferencesNormalizer) Normalize(un *unstructured.Unstructured) error {
+	if un == nil {
+		return nil
+	}
+	for _, fieldPath := range n.fieldsToRemove {
+		unstructured.RemoveNestedField(un.Object, fieldPath...)
+	}
+	return nil
 }
 
 func createSecret(data map[string]string) *unstructured.Unstructured {

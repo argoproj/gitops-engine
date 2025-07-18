@@ -77,11 +77,11 @@ func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult,
 	o := applyOptions(opts)
 	if config != nil {
 		config = remarshal(config, o)
-		Normalize(config, opts...)
+		Normalize(config, append(opts, WithApplyIgnoreDifferences(false))...)
 	}
 	if live != nil {
 		live = remarshal(live, o)
-		Normalize(live, opts...)
+		Normalize(live, append(opts, WithApplyIgnoreDifferences(false))...)
 	}
 
 	if o.serverSideDiff {
@@ -161,15 +161,7 @@ func serverSideDiff(config, live *unstructured.Unstructured, opts ...Option) (*D
 	if o.serverSideDryRunner == nil {
 		return nil, errors.New("serverSideDryRunner is null")
 	}
-
-	// For server-side apply validation, restore ignored fields from live to config
-	// This ensures validation passes while still respecting ignoreDifferences in final comparison
-	configForApply := config
-	if config != nil && live != nil {
-		configForApply = restoreIgnoredFieldsFromLive(config, live, o.normalizer)
-	}
-
-	predictedLiveStr, err := o.serverSideDryRunner.Run(context.Background(), configForApply, o.manager)
+	predictedLiveStr, err := o.serverSideDryRunner.Run(context.Background(), config, o.manager)
 	if err != nil {
 		return nil, fmt.Errorf("error running server side apply in dryrun mode for resource %s/%s: %w", config.GetKind(), config.GetName(), err)
 	}
@@ -200,107 +192,6 @@ func serverSideDiff(config, live *unstructured.Unstructured, opts ...Option) (*D
 		return nil, fmt.Errorf("error marshaling live resource %s/%s: %w", config.GetKind(), config.GetName(), err)
 	}
 	return buildDiffResult(predictedLiveBytes, liveBytes), nil
-}
-
-// restoreIgnoredFieldsFromLive applies normalization to detect which fields get removed, then restores them using live values.
-// This function receives original, non-normalized config and live, so it can properly detect
-// which fields are removed by normalization and restore them. This is the same pattern as normalizeTargetResources in argo-cd.
-func restoreIgnoredFieldsFromLive(config, live *unstructured.Unstructured, normalizer Normalizer) *unstructured.Unstructured {
-	if config == nil || live == nil || normalizer == nil {
-		return config
-	}
-
-	// Apply normalization to config to see what fields get removed (same as normalizeTargetResources)
-	originalConfig := config.DeepCopy()
-	normalizedConfig := config.DeepCopy()
-	err := normalizer.Normalize(normalizedConfig)
-	if err != nil {
-		// If normalization fails, return original config
-		return originalConfig
-	}
-
-	// Calculate what fields were removed from live by normalization (same pattern as livePatch in normalizeTargetResources)
-	var lookupPatchMeta *strategicpatch.PatchMetaFromStruct
-	versionedObject, err := scheme.Scheme.New(originalConfig.GroupVersionKind())
-	if err == nil {
-		meta, err := strategicpatch.NewPatchMetaFromStruct(versionedObject)
-		if err == nil {
-			lookupPatchMeta = &meta
-		}
-	}
-
-	// Normalize live to see what fields get removed
-	liveCopy := live.DeepCopy()
-	err = normalizer.Normalize(liveCopy)
-	if err != nil {
-		return originalConfig
-	}
-
-	// Get what fields were removed from live by normalization
-	livePatch, err := getMergePatch(liveCopy, live, lookupPatchMeta)
-	if err != nil {
-		return originalConfig
-	}
-
-	// Apply the live values for the removed fields to the normalized config
-	restoredConfig, err := applyMergePatch(normalizedConfig, livePatch, versionedObject)
-	if err != nil {
-		return originalConfig
-	}
-
-	return restoredConfig
-}
-
-// getMergePatch calculates the patch between original and modified
-func getMergePatch(original, modified *unstructured.Unstructured, lookupPatchMeta *strategicpatch.PatchMetaFromStruct) ([]byte, error) {
-	originalJSON, err := original.MarshalJSON()
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal original object: %w", err)
-	}
-	modifiedJSON, err := modified.MarshalJSON()
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal modified object: %w", err)
-	}
-	if lookupPatchMeta != nil {
-		patch, err := strategicpatch.CreateThreeWayMergePatch(modifiedJSON, modifiedJSON, originalJSON, lookupPatchMeta, true)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create strategic merge patch: %w", err)
-		}
-		return patch, nil
-	}
-
-	patch, err := jsonpatch.CreateMergePatch(originalJSON, modifiedJSON)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create JSON merge patch: %w", err)
-	}
-	return patch, nil
-}
-
-// applyMergePatch applies the patch to the object
-func applyMergePatch(obj *unstructured.Unstructured, patch []byte, versionedObject any) (*unstructured.Unstructured, error) {
-	originalJSON, err := obj.MarshalJSON()
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal original object: %w", err)
-	}
-	var patchedJSON []byte
-	if versionedObject == nil {
-		patchedJSON, err = jsonpatch.MergePatch(originalJSON, patch)
-		if err != nil {
-			return nil, fmt.Errorf("failed to apply JSON merge patch: %w", err)
-		}
-	} else {
-		patchedJSON, err = strategicpatch.StrategicMergePatch(originalJSON, patch, versionedObject)
-		if err != nil {
-			return nil, fmt.Errorf("failed to apply strategic merge patch: %w", err)
-		}
-	}
-
-	patchedObj := &unstructured.Unstructured{}
-	_, _, err = unstructured.UnstructuredJSONScheme.Decode(patchedJSON, nil, patchedObj)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode patched object: %w", err)
-	}
-	return patchedObj, nil
 }
 
 // removeWebhookMutation will compare the predictedLive with live to identify changes done by mutation webhooks.
@@ -955,8 +846,9 @@ func Normalize(un *unstructured.Unstructured, opts ...Option) {
 	}
 
 	// Skip the normalizer (ignoreDifferences + knownTypes) for server-side diff
-	// The ignoreDifferences fields need to be restored before server-side diff is calculated.
-	if !o.serverSideDiff {
+	// In the case an ignoreDifferences field is required, it needs to be be present in the config
+	// before server-side diff is calculated and normalized before final comparison.
+	if o.applyIgnoreDifferences {
 		err := o.normalizer.Normalize(un)
 		if err != nil {
 			o.log.Error(err, fmt.Sprintf("Failed to normalize %s/%s/%s", un.GroupVersionKind(), un.GetNamespace(), un.GetName()))
