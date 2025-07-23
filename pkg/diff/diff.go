@@ -76,10 +76,10 @@ func GetNoopNormalizer() Normalizer {
 func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult, error) {
 	preDiffOpts := opts
 	o := applyOptions(opts)
-	// If server-side diff is enabled, we need to disable the ignore differences option
-	// when Normalizing the config and live objects.
+	// If server-side diff is enabled, we need to skip full normalization (including ignore differences)
+	// when pre-processing the config and live objects.
 	if o.serverSideDiff {
-		preDiffOpts = append(preDiffOpts, WithApplyIgnoreDifferences(false))
+		preDiffOpts = append(preDiffOpts, WithSkipFullNormalize(true))
 	}
 	if config != nil {
 		config = remarshal(config, o)
@@ -851,10 +851,10 @@ func Normalize(un *unstructured.Unstructured, opts ...Option) {
 		normalizeEndpoint(un, o)
 	}
 
-	// Skip the normalizer (ignoreDifferences + knownTypes) for server-side diff
-	// In the case an ignoreDifferences field is required, it needs to be be present in the config
-	// before server-side diff is calculated and normalized before final comparison.
-	if o.applyIgnoreDifferences {
+	// Skip full normalization for server-side diff (only apply basic normalization)
+	// For ignoreDifferences to work properly, it needs to be applied during the final
+	// comparison phase for server-side diff, not during input pre-processing.
+	if !o.skipFullNormalize {
 		err := o.normalizer.Normalize(un)
 		if err != nil {
 			o.log.Error(err, fmt.Sprintf("Failed to normalize %s/%s/%s", un.GroupVersionKind(), un.GetNamespace(), un.GetName()))

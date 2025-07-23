@@ -1067,7 +1067,7 @@ func TestServerSideDiff(t *testing.T) {
 		assert.True(t, liveLabelExists)
 	})
 
-	t.Run("will respect ignoreDifferences when applyIgnoreDifferences option is used", func(t *testing.T) {
+	t.Run("will respect ignoreDifferences when full normalization is not skipped", func(t *testing.T) {
 		// given
 		t.Parallel()
 		liveState := StrToUnstructured(testdata.ServiceLiveYAMLSSD)

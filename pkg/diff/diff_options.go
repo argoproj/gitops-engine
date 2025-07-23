@@ -15,25 +15,25 @@ type Option func(*options)
 // Holds diffing settings
 type options struct {
 	// If set to true then differences caused by aggregated roles in RBAC resources are ignored.
-	ignoreAggregatedRoles  bool
-	normalizer             Normalizer
-	applyIgnoreDifferences bool
-	log                    logr.Logger
-	structuredMergeDiff    bool
-	gvkParser              *managedfields.GvkParser
-	manager                string
-	serverSideDiff         bool
-	serverSideDryRunner    ServerSideDryRunner
-	ignoreMutationWebhook  bool
+	ignoreAggregatedRoles bool
+	normalizer            Normalizer
+	skipFullNormalize     bool
+	log                   logr.Logger
+	structuredMergeDiff   bool
+	gvkParser             *managedfields.GvkParser
+	manager               string
+	serverSideDiff        bool
+	serverSideDryRunner   ServerSideDryRunner
+	ignoreMutationWebhook bool
 }
 
 func applyOptions(opts []Option) options {
 	o := options{
-		ignoreAggregatedRoles:  false,
-		ignoreMutationWebhook:  true,
-		normalizer:             GetNoopNormalizer(),
-		applyIgnoreDifferences: true,
-		log:                    textlogger.NewLogger(textlogger.NewConfig()),
+		ignoreAggregatedRoles: false,
+		ignoreMutationWebhook: true,
+		normalizer:            GetNoopNormalizer(),
+		skipFullNormalize:     false,
+		log:                   textlogger.NewLogger(textlogger.NewConfig()),
 	}
 	for _, opt := range opts {
 		opt(&o)
@@ -84,9 +84,9 @@ func WithNormalizer(normalizer Normalizer) Option {
 	}
 }
 
-func WithApplyIgnoreDifferences(apply bool) Option {
+func WithSkipFullNormalize(skip bool) Option {
 	return func(o *options) {
-		o.applyIgnoreDifferences = apply
+		o.skipFullNormalize = skip
 	}
 }
 
