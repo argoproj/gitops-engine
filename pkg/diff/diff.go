@@ -74,14 +74,20 @@ func GetNoopNormalizer() Normalizer {
 // Diff performs a diff on two unstructured objects. If the live object happens to have a
 // "kubectl.kubernetes.io/last-applied-configuration", then perform a three way diff.
 func Diff(config, live *unstructured.Unstructured, opts ...Option) (*DiffResult, error) {
+	preDiffOpts := opts
 	o := applyOptions(opts)
+	// If server-side diff is enabled, we need to disable the ignore differences option
+	// when Normalizing the config and live objects.
+	if o.serverSideDiff {
+		preDiffOpts = append(preDiffOpts, WithApplyIgnoreDifferences(false))
+	}
 	if config != nil {
 		config = remarshal(config, o)
-		Normalize(config, append(opts, WithApplyIgnoreDifferences(false))...)
+		Normalize(config, preDiffOpts...)
 	}
 	if live != nil {
 		live = remarshal(live, o)
-		Normalize(live, append(opts, WithApplyIgnoreDifferences(false))...)
+		Normalize(live, preDiffOpts...)
 	}
 
 	if o.serverSideDiff {

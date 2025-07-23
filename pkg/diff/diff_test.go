@@ -1673,3 +1673,138 @@ func StrToUnstructured(yamlStr string) *unstructured.Unstructured {
 	}
 	return &unstructured.Unstructured{Object: obj}
 }
+
+func TestDiffWithIgnoreDifferences(t *testing.T) {
+	t.Run("TwoWayDiff will respect ignoreDifferences for comparison but not output normalization", func(t *testing.T) {
+		// given
+		t.Parallel()
+
+		// Create a simple service with sessionAffinity that should be ignored
+		liveService := StrToUnstructured(`
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+spec:
+  selector:
+    app: my-app
+  ports:
+  - port: 80
+  sessionAffinity: None
+  type: ClusterIP
+`)
+
+		desiredService := StrToUnstructured(`
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+spec:
+  selector:
+    app: my-app
+  ports:
+  - port: 80
+  sessionAffinity: ClientIP
+  type: ClusterIP
+`)
+
+		// Normalizer that ignores sessionAffinity
+		normalizer := &testIgnoreDifferencesNormalizer{
+			fieldsToRemove: [][]string{
+				{"spec", "sessionAffinity"},
+			},
+		}
+
+		opts := []Option{
+			WithNormalizer(normalizer),
+			WithLogr(textlogger.NewLogger(textlogger.NewConfig())),
+		}
+
+		// when
+		result, err := Diff(desiredService, liveService, opts...)
+		require.NoError(t, err)
+
+		// then
+		assert.NotNil(t, result)
+
+		// Since sessionAffinity is ignored in input normalization, there should be no modification
+		assert.False(t, result.Modified, "Should not show diff for ignored fields")
+
+		predictedLiveStr := string(result.PredictedLive)
+		normalizedLiveStr := string(result.NormalizedLive)
+
+		// NOTE: Unlike server-side diff, TwoWayDiff/ThreeWayDiff don't normalize outputs
+		// So sessionAffinity WILL still appear in the output bytes, but Modified should be false
+		// because input normalization removed the differences during comparison
+		assert.Contains(t, predictedLiveStr, "sessionAffinity", "sessionAffinity should still appear in output (no output normalization)")
+		assert.Contains(t, normalizedLiveStr, "sessionAffinity", "sessionAffinity should still appear in output (no output normalization)")
+	})
+
+	t.Run("ThreeWayDiff will respect ignoreDifferences for comparison but not output normalization", func(t *testing.T) {
+		// given
+		t.Parallel()
+
+		// Create config and live with sessionAffinity differences that should be ignored
+		configService := StrToUnstructured(`
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+spec:
+  selector:
+    app: my-app
+  ports:
+  - port: 80
+  sessionAffinity: ClientIP
+  type: ClusterIP
+`)
+
+		liveService := StrToUnstructured(`
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"v1","kind":"Service","metadata":{"name":"my-service"},"spec":{"selector":{"app":"my-app"},"ports":[{"port":80}],"sessionAffinity":"None","type":"ClusterIP"}}
+spec:
+  selector:
+    app: my-app
+  ports:
+  - port: 80
+  sessionAffinity: None
+  type: ClusterIP
+`)
+
+		// Normalizer that ignores sessionAffinity
+		normalizer := &testIgnoreDifferencesNormalizer{
+			fieldsToRemove: [][]string{
+				{"spec", "sessionAffinity"},
+			},
+		}
+
+		opts := []Option{
+			WithNormalizer(normalizer),
+			WithLogr(textlogger.NewLogger(textlogger.NewConfig())),
+		}
+
+		// when
+		result, err := Diff(configService, liveService, opts...)
+		require.NoError(t, err)
+
+		// then
+		assert.NotNil(t, result)
+
+		// Since sessionAffinity is ignored in input normalization, there should be no modification
+		assert.False(t, result.Modified, "Should not show diff for ignored fields")
+
+		predictedLiveStr := string(result.PredictedLive)
+		normalizedLiveStr := string(result.NormalizedLive)
+
+		// NOTE: Unlike server-side diff, TwoWayDiff/ThreeWayDiff don't normalize outputs
+		// So sessionAffinity WILL still appear in the output bytes, but Modified should be false
+		// because input normalization removed the differences during comparison
+		assert.Contains(t, predictedLiveStr, "sessionAffinity", "sessionAffinity should still appear in output (no output normalization)")
+		assert.Contains(t, normalizedLiveStr, "sessionAffinity", "sessionAffinity should still appear in output (no output normalization)")
+	})
+}
