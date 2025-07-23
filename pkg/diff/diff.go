@@ -851,9 +851,9 @@ func Normalize(un *unstructured.Unstructured, opts ...Option) {
 		normalizeEndpoint(un, o)
 	}
 
-	// Skip full normalization for server-side diff (only apply basic normalization)
-	// For ignoreDifferences to work properly, it needs to be applied during the final
-	// comparison phase for server-side diff, not during input pre-processing.
+	// Skip the full normalization (ignoreDifferences + knownTypes) for server-side diff
+	// In the case an ignoreDifferences field is required, it needs to be present in the config
+	// before server-side diff is calculated and normalized before final comparison.
 	if !o.skipFullNormalize {
 		err := o.normalizer.Normalize(un)
 		if err != nil {
