@@ -65,6 +65,14 @@ The following policies define when the hook will be deleted.
   - HookFailed - the hook resource is deleted after the hook failed.
   - BeforeHookCreation - any existing hook resource is deleted before the new one is created
 
+**Pods with restartPolicy Never or OnFailure**
+
+During synchronization, the application may show the resource health as *Progressing* when it deploys a Pod that has the `restartPolicy` set to `Never` or `OnFailure` (see Kubernetes docs for restart policy). Generally, these resources behave like a Job and are expected to complete. This is intended behavior, since Jobs are commonly used for sync hooks and must finish before an application is considered *Healthy*.
+
+A workaround is to use the annotation: argocd.argoproj.io/ignore-restart-policy: "true".
+
+When this annotation is set on the Pod resource, the controller will ignore the `restartPolicy` and consider the Pod *Running* as a valid healthy state.
+
 # Sync Waves
 
 The waves allow to group sync execution of syncing process into batches when each batch is executed sequentially one after

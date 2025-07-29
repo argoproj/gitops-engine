@@ -120,6 +120,8 @@ func getCorev1PodHealth(pod *corev1.Pod) (*HealthStatus, error) {
 			}, nil
 		}
 		policy := pod.Spec.RestartPolicy
+		// If the pod has the AnnotationIgnoreRestartPolicy annotation or its restart policy is Always,
+		// then treat it as a long-running pod and check its health status.
 		if _, ok := pod.Annotations[common.AnnotationIgnoreRestartPolicy]; ok || policy == corev1.RestartPolicyAlways {
 			return getHealthStatus(pod)
 		}
