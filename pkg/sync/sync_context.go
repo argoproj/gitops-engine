@@ -1425,6 +1425,11 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 			ss.Go(func(state runState) runState {
 				sc.log.WithValues("dryRun", dryRun, "task", t).V(1).Info("Deleting")
 				if !dryRun {
+					// the hook might still have a finalizer, but we explicitly want to recreate it
+					if err := sc.removeHookFinalizer(t); err != nil {
+						state = failed
+						sc.setResourceResult(t, "", common.OperationError, fmt.Sprintf("failed to remove hook finalizer: %v", err))
+					}
 					err := sc.deleteResource(t)
 					if err != nil {
 						// it is possible to get a race condition here, such that the resource does not exist when
