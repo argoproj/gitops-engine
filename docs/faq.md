@@ -7,8 +7,8 @@
 **A**: In November 2019 the teams behind Argo CD and Flux announced that they were going to join efforts. Some of the announcement blog posts explain what the thinking of the time was:
 
 - Jay Pipes on the [AWS blog](https://aws.amazon.com/de/blogs/containers/help-us-write-a-new-chapter-for-gitops-kubernetes-and-open-source-collaboration/)
-- Pratik Wadher on the [Intuit blog](https://www.intuit.com/blog/technology/introducing-argo-flux/)
-- Tamao Nakahara on the [Weaveworks blog](https://www.weave.works/blog/argo-flux-join-forces)
+- Pratik Wadher on the [Intuit blog](https://web.archive.org/web/20191115013641/https://www.intuit.com/blog/technology/introducing-argo-flux/)
+- Tamao Nakahara on the [Weaveworks blog](https://web.archive.org/web/20191114211636/https://www.weave.works/blog/argo-flux-join-forces)
 
 In the course of the next months, the two engineering teams [met on a regular basis](https://docs.google.com/document/d/17AEZgv6yVuD4HS7_oNPiMKmS7Q6vjkhk6jH0YCELpRk/edit) and scoped out the future of the project. Two options were on the table:
 
@@ -17,7 +17,7 @@ In the course of the next months, the two engineering teams [met on a regular ba
 
 The latter was deemed to be the most practical solution.
 
-March 2020 the Flux team made a [proof of concept](https://github.com/fluxcd/flux/pull/2886) available, which rebased the Flux on top of the GitOps Engine, but while looking at the breaking changes this was going to introduce the Flux team decided that it was a time for a [more ground-breaking approach](https://www.weave.works/blog/gitops-with-flux-v2) on how to do GitOps. After some experimentation, the GitOps Toolkit was put out as an RFC in June 2020.
+March 2020 the Flux team made a [proof of concept](https://github.com/fluxcd/flux/pull/2886) available, which rebased the Flux on top of the GitOps Engine, but while looking at the breaking changes this was going to introduce the Flux team decided that it was a time for a [more ground-breaking approach](https://web.archive.org/web/20200924080618/https://www.weave.works/blog/gitops-with-flux-v2) on how to do GitOps. After some experimentation, the GitOps Toolkit was put out as an RFC in June 2020.
 
 A [number of other projects](https://github.com/search?q=argoproj%2Fgitops-engine&type=Code) already started looking at integrating the GitOps Engine.
 
