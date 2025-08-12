@@ -1418,6 +1418,31 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 			createTasks = append(createTasks, task)
 		}
 	}
+
+	// remove finalizers from previous sync on existing hooks to make sure the operation is idempotent
+	{
+		ss := newStateSync(state)
+		existingHooks := tasks.Filter(func(t *syncTask) bool { return t.isHook() && t.pending() && t.liveObj != nil })
+		for _, task := range existingHooks {
+			t := task
+			ss.Go(func(state runState) runState {
+				logCtx := sc.log.WithValues("dryRun", dryRun, "task", t)
+				logCtx.V(1).Info("Removing finalizers")
+				if !dryRun {
+					if err := sc.removeHookFinalizer(t); err != nil {
+						state = failed
+						sc.setResourceResult(t, "", common.OperationError, fmt.Sprintf("failed to remove hook finalizer: %v", err))
+					}
+				}
+				return state
+			})
+		}
+		state = ss.Wait()
+	}
+	if state != successful {
+		return state
+	}
+
 	// prune first
 	{
 		if !sc.pruneConfirmed {
@@ -1451,7 +1476,6 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 		}
 		state = ss.Wait()
 	}
-
 	if state != successful {
 		return state
 	}
@@ -1465,11 +1489,6 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 			ss.Go(func(state runState) runState {
 				sc.log.WithValues("dryRun", dryRun, "task", t).V(1).Info("Deleting")
 				if !dryRun {
-					// the hook might still have a finalizer, but we explicitly want to recreate it
-					if err := sc.removeHookFinalizer(t); err != nil {
-						state = failed
-						sc.setResourceResult(t, "", common.OperationError, fmt.Sprintf("failed to remove hook finalizer: %v", err))
-					}
 					err := sc.deleteResource(t)
 					if err != nil {
 						// it is possible to get a race condition here, such that the resource does not exist when
@@ -1490,7 +1509,6 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 		}
 		state = ss.Wait()
 	}
-
 	if state != successful {
 		return state
 	}
