@@ -41,28 +41,12 @@ import (
 var standardVerbs = metav1.Verbs{"create", "delete", "deletecollection", "get", "list", "patch", "update", "watch"}
 
 func newTestSyncCtx(getResourceFunc *func(ctx context.Context, config *rest.Config, gvk schema.GroupVersionKind, name string, namespace string) (*unstructured.Unstructured, error), opts ...SyncOpt) *syncContext {
-	fakeDisco := &fakedisco.FakeDiscovery{Fake: &testcore.Fake{}}
-	fakeDisco.Resources = append(make([]*metav1.APIResourceList, 0),
-		&metav1.APIResourceList{
-			GroupVersion: "v1",
-			APIResources: []metav1.APIResource{
-				{Kind: "Pod", Group: "", Version: "v1", Namespaced: true, Verbs: standardVerbs},
-				{Kind: "Service", Group: "", Version: "v1", Namespaced: true, Verbs: standardVerbs},
-				{Kind: "Namespace", Group: "", Version: "v1", Namespaced: false, Verbs: standardVerbs},
-			},
-		},
-		&metav1.APIResourceList{
-			GroupVersion: "apps/v1",
-			APIResources: []metav1.APIResource{
-				{Kind: "Deployment", Group: "apps", Version: "v1", Namespaced: true, Verbs: standardVerbs},
-			},
-		})
 	sc := syncContext{
 		config:    &rest.Config{},
 		rawConfig: &rest.Config{},
 		namespace: testingutils.FakeArgoCDNamespace,
 		revision:  "FooBarBaz",
-		disco:     fakeDisco,
+		disco:     &fakedisco.FakeDiscovery{Fake: &testcore.Fake{Resources: testingutils.StaticAPIResources}},
 		log:       textlogger.NewLogger(textlogger.NewConfig()).WithValues("application", "fake-app"),
 		resources: map[kube.ResourceKey]reconciledResource{},
 		syncRes:   map[string]synccommon.ResourceSyncResult{},
@@ -1285,22 +1269,42 @@ func TestSyncFailureHookWithFailedSync(t *testing.T) {
 }
 
 func TestBeforeHookCreation(t *testing.T) {
+	finalizerRemoved := false
 	syncCtx := newTestSyncCtx(nil)
-	hook := testingutils.Annotate(testingutils.Annotate(testingutils.NewPod(), synccommon.AnnotationKeyHook, "Sync"), synccommon.AnnotationKeyHookDeletePolicy, "BeforeHookCreation")
-	hook.SetNamespace(testingutils.FakeArgoCDNamespace)
+	hookObj := testingutils.Annotate(testingutils.Annotate(testingutils.NewPod(), synccommon.AnnotationKeyHook, "Sync"), synccommon.AnnotationKeyHookDeletePolicy, "BeforeHookCreation")
+	hookObj.SetFinalizers([]string{hook.HookFinalizer})
+	hookObj.SetNamespace(testingutils.FakeArgoCDNamespace)
 	syncCtx.resources = groupResources(ReconciliationResult{
-		Live:   []*unstructured.Unstructured{hook},
+		Live:   []*unstructured.Unstructured{hookObj},
 		Target: []*unstructured.Unstructured{nil},
 	})
-	syncCtx.hooks = []*unstructured.Unstructured{hook}
-	syncCtx.dynamicIf = fake.NewSimpleDynamicClient(runtime.NewScheme())
+	syncCtx.hooks = []*unstructured.Unstructured{hookObj}
+	client := fake.NewSimpleDynamicClient(runtime.NewScheme(), hookObj)
+	client.PrependReactor("update", "pods", func(_ testcore.Action) (bool, runtime.Object, error) {
+		finalizerRemoved = true
+		return false, nil, nil
+	})
+	syncCtx.dynamicIf = client
 
+	// First sync will delete the existing hook
 	syncCtx.Sync()
-
-	_, _, resources := syncCtx.GetState()
+	phase, message, resources := syncCtx.GetState()
+	assert.Equal(t, synccommon.OperationRunning, phase)
+	assert.Equal(t, "waiting for deletion of hook /Pod/my-pod", message)
 	assert.Len(t, resources, 1)
-	assert.Empty(t, resources[0].Message)
-	assert.Equal(t, "waiting for completion of hook /Pod/my-pod", syncCtx.message)
+	assert.Equal(t, synccommon.OperationTerminating, resources[0].HookPhase)
+	assert.True(t, finalizerRemoved)
+
+	// Make sure the sync is started, so dry-run is not applied twice
+	require.True(t, syncCtx.started())
+
+	// Second sync will create the hook
+	syncCtx.Sync()
+	phase, message, resources = syncCtx.GetState()
+	assert.Equal(t, synccommon.OperationRunning, phase)
+	assert.Len(t, resources, 1)
+	assert.Equal(t, synccommon.OperationRunning, resources[0].HookPhase)
+	assert.Equal(t, "waiting for completion of hook /Pod/my-pod", message)
 }
 
 func TestRunSyncFailHooksFailed(t *testing.T) {
@@ -1702,7 +1706,7 @@ func TestSyncWaveHookFail(t *testing.T) {
 	syncCtx.Sync()
 	assert.True(t, called)
 	phase, msg, results := syncCtx.GetState()
-	assert.Equal(t, synccommon.OperationFailed, phase)
+	assert.Equal(t, synccommon.OperationError, phase)
 	assert.Equal(t, "SyncWaveHook failed: intentional error", msg)
 	assert.Equal(t, synccommon.OperationRunning, results[0].HookPhase)
 }
