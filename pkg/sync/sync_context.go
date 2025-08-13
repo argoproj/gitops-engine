@@ -539,18 +539,16 @@ func (sc *syncContext) Sync() {
 
 	syncFailedTasks := tasks.Filter(func(t *syncTask) bool { return t.syncStatus == common.ResultCodeSyncFailed })
 
-	terminatingTasks := tasks.Filter(func(t *syncTask) bool { return t.operationState == common.OperationTerminating })
-
 	// if there are any completed but unsuccessful tasks, sync is a failure.
 	// we already know tasks do not contain running tasks, but it may contain terminating tasks waiting for pruning/cleanup
-	if len(terminatingTasks) == 0 && tasks.Any(func(t *syncTask) bool { return t.completed() && !t.successful() }) {
+	if tasks.Any(func(t *syncTask) bool { return t.completed() && !t.successful() }) {
 		sc.deleteHooks(hooksPendingDeletionFailed)
 		sc.setOperationFailed(syncFailTasks, syncFailedTasks, "one or more synchronization tasks completed unsuccessfully")
 		return
 	}
 
 	sc.log.WithValues("tasks", tasks).V(1).Info("Filtering out non-pending tasks")
-	// remove tasks that are completed, we should only have pending and terminating tasks left
+	// remove tasks that are completed, we should only have pending tasks left
 	tasks = tasks.Filter(func(t *syncTask) bool { return !t.completed() })
 
 	if sc.applyOutOfSyncOnly {
@@ -670,11 +668,11 @@ func (sc *syncContext) getNamespaceCreationTask(tasks syncTasks) *syncTask {
 func (sc *syncContext) terminateHooksPreemptively(tasks syncTasks) bool {
 	terminateSuccessful := true
 	for _, task := range tasks {
-		if !task.isHook() {
+		if !task.isHook() || !task.running() {
 			continue
 		}
 
-		if task.running() && task.liveObj == nil {
+		if task.liveObj == nil {
 			// if we terminate preemtively after the task was run, it will not contain the live object yet
 			liveObj, err := sc.getResource(task)
 			if err != nil && !apierrors.IsNotFound(err) {
@@ -686,14 +684,13 @@ func (sc *syncContext) terminateHooksPreemptively(tasks syncTasks) bool {
 		}
 
 		if task.liveObj == nil {
-			// if the live object does not exist, the resource has been deleted already
-			sc.setResourceResult(task, "", common.OperationSucceeded, "Terminated")
+			sc.setResourceResult(task, task.syncStatus, common.OperationSucceeded, "Terminated")
 			continue
 		}
 
 		phase, msg, err := sc.getOperationPhase(task.liveObj)
 		if err != nil {
-			sc.setResourceResult(task, "", common.OperationError, fmt.Sprintf("Failed to get hook health: %v", err))
+			sc.setResourceResult(task, task.syncStatus, common.OperationError, fmt.Sprintf("Failed to get hook health: %v", err))
 			phase = common.OperationRunning
 		}
 
@@ -706,16 +703,16 @@ func (sc *syncContext) terminateHooksPreemptively(tasks syncTasks) bool {
 		if phase.Running() || task.deleteOnPhaseFailed() {
 			err := sc.deleteResource(task)
 			if err != nil && !apierrors.IsNotFound(err) {
-				sc.setResourceResult(task, "", common.OperationFailed, fmt.Sprintf("Failed to delete: %v", err))
+				sc.setResourceResult(task, task.syncStatus, common.OperationFailed, fmt.Sprintf("Failed to delete: %v", err))
 				terminateSuccessful = false
 				continue
 			}
 		}
 
 		if phase.Completed() {
-			sc.setResourceResult(task, "", phase, msg)
+			sc.setResourceResult(task, task.syncStatus, phase, msg)
 		} else {
-			sc.setResourceResult(task, "", common.OperationSucceeded, "Terminated")
+			sc.setResourceResult(task, task.syncStatus, common.OperationFailed, "Terminated")
 		}
 	}
 	return terminateSuccessful
@@ -1446,14 +1443,20 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 	// prune first
 	{
 		if !sc.pruneConfirmed {
+			var resources []string
 			for _, task := range pruneTasks {
 				if resourceutil.HasAnnotationOption(task.liveObj, common.AnnotationSyncOptions, common.SyncOptionPruneRequireConfirm) {
-					state = pending
-					sc.setResourceResult(task, "", common.OperationTerminating, "waiting for prune confirmation")
+					resources = append(resources, fmt.Sprintf("%s/%s/%s", task.obj().GetAPIVersion(), task.obj().GetKind(), task.name()))
 				}
 			}
-			if state == pending {
-				return state
+			if len(resources) > 0 {
+				sc.log.WithValues("resources", resources).Info("Prune requires confirmation")
+				andMessage := ""
+				if len(resources) > 1 {
+					andMessage = fmt.Sprintf(" and %d more resources", len(resources)-1)
+				}
+				sc.message = fmt.Sprintf("Waiting for pruning confirmation of %s%s", resources[0], andMessage)
+				return pending
 			}
 		}
 
@@ -1500,7 +1503,6 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 					} else {
 						// if there is anything that needs deleting, we are at best now in pending and
 						// want to return and wait for sync to be invoked again
-						sc.setResourceResult(t, "", common.OperationTerminating, "waiting for deletion")
 						state = pending
 					}
 				}
