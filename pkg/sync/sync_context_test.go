@@ -1814,19 +1814,19 @@ func TestSyncContext_GetDeleteOptions_WithPrunePropagationPolicy(t *testing.T) {
 	assert.Equal(t, metav1.DeletePropagationBackground, *opts.PropagationPolicy)
 }
 
-func TestSetOperationFailed(t *testing.T) {
+func TestExecuteSyncFailPhase(t *testing.T) {
 	sc := syncContext{}
 	sc.log = textlogger.NewLogger(textlogger.NewConfig()).WithValues("application", "fake-app")
 
 	tasks := make([]*syncTask, 0)
 	tasks = append(tasks, &syncTask{message: "namespace not found"})
 
-	sc.setOperationFailed(nil, tasks, "one or more objects failed to apply")
+	sc.executeSyncFailPhase(nil, tasks, "one or more objects failed to apply")
 
 	assert.Equal(t, "one or more objects failed to apply, reason: namespace not found", sc.message)
 }
 
-func TestSetOperationFailedDuplicatedMessages(t *testing.T) {
+func TestExecuteSyncFailPhaseDuplicatedMessages(t *testing.T) {
 	sc := syncContext{}
 	sc.log = textlogger.NewLogger(textlogger.NewConfig()).WithValues("application", "fake-app")
 
@@ -1834,16 +1834,16 @@ func TestSetOperationFailedDuplicatedMessages(t *testing.T) {
 	tasks = append(tasks, &syncTask{message: "namespace not found"})
 	tasks = append(tasks, &syncTask{message: "namespace not found"})
 
-	sc.setOperationFailed(nil, tasks, "one or more objects failed to apply")
+	sc.executeSyncFailPhase(nil, tasks, "one or more objects failed to apply")
 
 	assert.Equal(t, "one or more objects failed to apply, reason: namespace not found", sc.message)
 }
 
-func TestSetOperationFailedNoTasks(t *testing.T) {
+func TestExecuteSyncFailPhaseNoTasks(t *testing.T) {
 	sc := syncContext{}
 	sc.log = textlogger.NewLogger(textlogger.NewConfig()).WithValues("application", "fake-app")
 
-	sc.setOperationFailed(nil, nil, "one or more objects failed to apply")
+	sc.executeSyncFailPhase(nil, nil, "one or more objects failed to apply")
 
 	assert.Equal(t, "one or more objects failed to apply", sc.message)
 }
