@@ -22,7 +22,6 @@ linters:
         - badRegexp
         - builtinShadow
         - commentedOutCode
-        - emptyStringTest
         - exitAfterDefer
         - hugeParam
         - importShadow
