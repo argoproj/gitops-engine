@@ -28,7 +28,6 @@ linters:
         - paramTypeCombine
         - rangeValCopy
         - typeDefFirst
-        - typeSwitchVar
         - unnamedResult
         - whyNoLint
       enable-all: true
