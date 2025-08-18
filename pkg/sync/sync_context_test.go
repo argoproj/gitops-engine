@@ -1827,8 +1827,11 @@ func TestSetOperationFailedDuplicatedMessages(t *testing.T) {
 	sc.log = textlogger.NewLogger(textlogger.NewConfig()).WithValues("application", "fake-app")
 
 	tasks := make([]*syncTask, 0)
-	tasks = append(tasks, &syncTask{message: "namespace not found"})
-	tasks = append(tasks, &syncTask{message: "namespace not found"})
+	tasks = append(
+		tasks,
+		&syncTask{message: "namespace not found"},
+		&syncTask{message: "namespace not found"},
+	)
 
 	sc.setOperationFailed(nil, tasks, "one or more objects failed to apply")
 
