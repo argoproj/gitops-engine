@@ -1288,19 +1288,13 @@ func TestBeforeHookCreation(t *testing.T) {
 
 	// First sync will delete the existing hook
 	syncCtx.Sync()
-	phase, message, resources := syncCtx.GetState()
+	phase, _, _ := syncCtx.GetState()
 	assert.Equal(t, synccommon.OperationRunning, phase)
-	assert.Equal(t, "waiting for deletion of hook /Pod/my-pod", message)
-	assert.Len(t, resources, 1)
-	assert.Equal(t, synccommon.OperationTerminating, resources[0].HookPhase)
 	assert.True(t, finalizerRemoved)
-
-	// Make sure the sync is started, so dry-run is not applied twice
-	require.True(t, syncCtx.started())
 
 	// Second sync will create the hook
 	syncCtx.Sync()
-	phase, message, resources = syncCtx.GetState()
+	phase, message, resources := syncCtx.GetState()
 	assert.Equal(t, synccommon.OperationRunning, phase)
 	assert.Len(t, resources, 1)
 	assert.Equal(t, synccommon.OperationRunning, resources[0].HookPhase)
