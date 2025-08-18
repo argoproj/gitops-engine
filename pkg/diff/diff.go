@@ -473,7 +473,7 @@ func normalizeTypedValue(tv *typed.TypedValue) ([]byte, error) {
 
 func buildDiffResult(predictedBytes []byte, liveBytes []byte) *DiffResult {
 	return &DiffResult{
-		Modified:       string(liveBytes) != string(predictedBytes),
+		Modified:       !bytes.Equal(liveBytes, predictedBytes),
 		NormalizedLive: liveBytes,
 		PredictedLive:  predictedBytes,
 	}
@@ -1106,7 +1106,7 @@ func hide(target, live, liveLastAppliedAnnotation *unstructured.Unstructured, ke
 			replacement, ok := valToReplacement[val]
 			if !ok {
 				replacement = nextReplacement
-				nextReplacement = nextReplacement + "++++"
+				nextReplacement += "++++"
 				valToReplacement[val] = replacement
 			}
 			data[k] = replacement
