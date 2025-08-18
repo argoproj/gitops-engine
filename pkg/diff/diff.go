@@ -1106,7 +1106,7 @@ func hide(target, live, liveLastAppliedAnnotation *unstructured.Unstructured, ke
 			replacement, ok := valToReplacement[val]
 			if !ok {
 				replacement = nextReplacement
-				nextReplacement = nextReplacement + "++++"
+				nextReplacement += "++++"
 				valToReplacement[val] = replacement
 			}
 			data[k] = replacement

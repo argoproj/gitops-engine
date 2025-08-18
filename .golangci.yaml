@@ -18,7 +18,6 @@ linters:
     gocritic:
       disabled-checks:
         - appendAssign
-        - assignOp
         - badRegexp
         - builtinShadow
         - commentedOutCode

@@ -939,7 +939,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 			}
 		}
 	}
-	syncPhaseLastWave = syncPhaseLastWave + 1
+	syncPhaseLastWave++
 
 	for _, task := range tasks {
 		if task.isPrune() &&
