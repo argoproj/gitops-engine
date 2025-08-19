@@ -1504,7 +1504,8 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 		for _, task := range hooksPendingDeletion {
 			t := task
 			ss.Go(func(state runState) runState {
-				sc.log.WithValues("dryRun", dryRun, "task", t).V(1).Info("Deleting")
+				log := sc.log.WithValues("dryRun", dryRun, "task", t).V(1)
+				log.Info("Deleting")
 				if !dryRun {
 					err := sc.deleteResource(t)
 					if err != nil {
@@ -1514,6 +1515,7 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 							state = failed
 							sc.setResourceResult(t, t.syncStatus, common.OperationError, fmt.Sprintf("failed to delete resource: %v", err))
 						} else {
+							log.Info("Resource not found, treating as no-op and removing liveObj")
 							t.liveObj = nil
 						}
 					} else {
