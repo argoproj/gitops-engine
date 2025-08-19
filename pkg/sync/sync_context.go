@@ -548,8 +548,8 @@ func (sc *syncContext) Sync() {
 	}
 
 	sc.log.WithValues("tasks", tasks).V(1).Info("Filtering out non-pending tasks")
-	// remove tasks that are completed, we should only have pending tasks left
-	tasks = tasks.Filter(func(t *syncTask) bool { return !t.completed() })
+	// remove tasks that are completed, we can assume that there are no running tasks
+	tasks = tasks.Filter(func(t *syncTask) bool { return t.pending() })
 
 	if sc.applyOutOfSyncOnly {
 		tasks = sc.filterOutOfSyncTasks(tasks)
