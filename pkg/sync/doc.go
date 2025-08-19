@@ -4,6 +4,7 @@ Package implements Kubernetes resources synchronization and provides the followi
   - resource pruning
   - resource hooks
   - sync waves
+  - sync waves binary tree ordering
   - sync options
 
 # Basic Syncing
@@ -74,6 +75,31 @@ that runs before all other resources. The `argocd.argoproj.io/sync-wave` annotat
 	metadata:
 	  annotations:
 	    argocd.argoproj.io/sync-wave: "5"
+
+# Sync Waves Binary Tree Ordering
+
+The wave ordering using a binary tree feature allows to run parallel waves of synchronisation where the sync-wave values
+correspond to a complete binary tree with root's label equal to 1. A sync-wave value X would be considered less than Y
+when using binary tree ordering if and only if there exists integers N and M such that :
+Y = X * 2**N + M where 0 <= M < N.
+
+The `argocd.argoproj.io/use-binary-tree-wave-ordering` annotation define the type of wave's ordering used for a resource's wave:
+
+	metadata:
+	  annotations:
+	    argocd.argoproj.io/sync-wave: "5"
+	    argocd.argoproj.io/use-binary-tree-wave-ordering: "true"
+
+example of waves ordering using binary tree:
+
+	1  ----->  2  ----->  4
+	   \          \---->  5
+	    \--->  3  ----->  6
+	              \---->  7
+
+Note that a resource using a binary tree ordering for sync waves will always be synced after all resources using a normal ordering.
+Note also that all resources using a binary tree ordering and having a sync wave value inferior to 1 will behave like resources using
+a normal wave ordering.
 
 # Sync Options
 
