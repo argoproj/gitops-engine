@@ -1509,10 +1509,12 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 					err := sc.deleteResource(t)
 					if err != nil {
 						// it is possible to get a race condition here, such that the resource does not exist when
-						// delete is requested, we treat this as a nop
+						// delete is requested, we treat this as a nop and remove the liveObj
 						if !apierrors.IsNotFound(err) {
 							state = failed
 							sc.setResourceResult(t, t.syncStatus, common.OperationError, fmt.Sprintf("failed to delete resource: %v", err))
+						} else {
+							t.liveObj = nil
 						}
 					} else {
 						// if there is anything that needs deleting, we are at best now in pending and
