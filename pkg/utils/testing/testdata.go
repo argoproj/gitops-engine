@@ -2,6 +2,9 @@ package testing
 
 import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
+	"github.com/argoproj/gitops-engine/pkg/sync/hook"
 )
 
 const (
@@ -19,6 +22,16 @@ func Annotate(obj *unstructured.Unstructured, key, val string) *unstructured.Uns
 	}
 	annotations[key] = val
 	obj.SetAnnotations(annotations)
+	return obj
+}
+
+func NewHook(name string, hookType synccommon.HookType, deletePolicy synccommon.HookDeletePolicy) *unstructured.Unstructured {
+	obj := NewPod()
+	obj.SetName(name)
+	obj.SetNamespace(FakeArgoCDNamespace)
+	Annotate(obj, synccommon.AnnotationKeyHook, string(hookType))
+	Annotate(obj, synccommon.AnnotationKeyHookDeletePolicy, string(deletePolicy))
+	obj.SetFinalizers([]string{hook.HookFinalizer})
 	return obj
 }
 

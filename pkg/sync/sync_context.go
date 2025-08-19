@@ -631,7 +631,7 @@ func (sc *syncContext) Sync() {
 func (sc *syncContext) Terminate() {
 	sc.log.V(1).Info("terminating")
 	tasks, _ := sc.getSyncTasks()
-	terminateSuccessful := sc.terminateHooksPreemptively(tasks.Filter(func(task *syncTask) bool { return task.isHook() && task.liveObj != nil }))
+	terminateSuccessful := sc.terminateHooksPreemptively(tasks.Filter(func(task *syncTask) bool { return task.isHook() }))
 	if terminateSuccessful {
 		sc.setOperationPhase(common.OperationFailed, "Operation terminated")
 	} else {
