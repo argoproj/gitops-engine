@@ -1,4 +1,4 @@
-package kubetest
+package testing
 
 import (
 	"encoding/json"

@@ -12,8 +12,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"k8s.io/klog/v2/textlogger"
 
-	testingutils "github.com/argoproj/gitops-engine/pkg/utils/testing"
 	"github.com/argoproj/gitops-engine/pkg/utils/tracing"
+
+	testingutils "github.com/argoproj/gitops-engine/pkg/utils/testing"
 )
 
 var _ Kubectl = &KubectlCmd{}

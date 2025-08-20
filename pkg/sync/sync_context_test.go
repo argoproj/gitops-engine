@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -833,11 +832,6 @@ func TestSyncOptionValidate(t *testing.T) {
 	}
 }
 
-func withReplaceAnnotation(un *unstructured.Unstructured) *unstructured.Unstructured {
-	un.SetAnnotations(map[string]string{synccommon.AnnotationSyncOptions: synccommon.SyncOptionReplace})
-	return un
-}
-
 func TestSync_Replace(t *testing.T) {
 	testCases := []struct {
 		name        string
@@ -903,21 +897,6 @@ func TestSync_HookWithReplaceAndBeforeHookCreation_AlreadyDeleted(t *testing.T) 
 	resourceOps, _ := syncCtx.resourceOps.(*kubetest.MockResourceOps)
 	assert.Equal(t, "create", resourceOps.GetLastResourceCommand(kube.GetResourceKey(target)))
 	assert.True(t, deleted)
-}
-
-func withServerSideApplyAnnotation(un *unstructured.Unstructured) *unstructured.Unstructured {
-	un.SetAnnotations(map[string]string{synccommon.AnnotationSyncOptions: synccommon.SyncOptionServerSideApply})
-	return un
-}
-
-func withDisableServerSideApplyAnnotation(un *unstructured.Unstructured) *unstructured.Unstructured {
-	un.SetAnnotations(map[string]string{synccommon.AnnotationSyncOptions: synccommon.SyncOptionDisableServerSideApply})
-	return un
-}
-
-func withReplaceAndServerSideApplyAnnotations(un *unstructured.Unstructured) *unstructured.Unstructured {
-	un.SetAnnotations(map[string]string{synccommon.AnnotationSyncOptions: "Replace=true,ServerSideApply=true"})
-	return un
 }
 
 func TestSync_ServerSideApply(t *testing.T) {
@@ -990,16 +969,6 @@ func TestSyncContext_ServerSideApplyWithDryRun(t *testing.T) {
 			assert.Equal(t, tc.expectedSSA, serverSideApply)
 		})
 	}
-}
-
-func withForceAnnotation(un *unstructured.Unstructured) *unstructured.Unstructured {
-	un.SetAnnotations(map[string]string{synccommon.AnnotationSyncOptions: synccommon.SyncOptionForce})
-	return un
-}
-
-func withForceAndReplaceAnnotations(un *unstructured.Unstructured) *unstructured.Unstructured {
-	un.SetAnnotations(map[string]string{synccommon.AnnotationSyncOptions: "Force=true,Replace=true"})
-	return un
 }
 
 func TestSync_Force(t *testing.T) {
@@ -1300,21 +1269,10 @@ func TestNamespaceAutoCreationForNonExistingNs(t *testing.T) {
 	})
 }
 
-func createNamespaceTask(namespace string) (*syncTask, error) {
-	nsSpec := &corev1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: kube.NamespaceKind}, ObjectMeta: metav1.ObjectMeta{Name: namespace}}
-	unstructuredObj, err := kube.ToUnstructured(nsSpec)
-
-	task := &syncTask{phase: synccommon.SyncPhasePreSync, targetObj: unstructuredObj}
-	if err != nil {
-		return task, fmt.Errorf("failed to convert namespace spec to unstructured: %w", err)
-	}
-	return task, nil
-}
-
 func TestSync_SuccessfulSyncWithSyncFailHook(t *testing.T) {
-	hook := testingutils.NewHook("hook-1", synccommon.HookTypeSync, synccommon.HookDeletePolicyBeforeHookCreation)
+	hook := newHook("hook-1", synccommon.HookTypeSync, synccommon.HookDeletePolicyBeforeHookCreation)
 	pod := testingutils.NewPod()
-	syncFailHook := testingutils.NewHook("sync-fail-hook", synccommon.HookTypeSyncFail, synccommon.HookDeletePolicyHookSucceeded)
+	syncFailHook := newHook("sync-fail-hook", synccommon.HookTypeSyncFail, synccommon.HookDeletePolicyHookSucceeded)
 
 	syncCtx := newTestSyncCtx(nil,
 		WithHealthOverride(resourceNameHealthOverride(map[string]health.HealthStatusCode{
@@ -1350,9 +1308,9 @@ func TestSync_SuccessfulSyncWithSyncFailHook(t *testing.T) {
 }
 
 func TestSync_FailedSyncWithSyncFailHook_HookFailed(t *testing.T) {
-	hook := testingutils.NewHook("hook-1", synccommon.HookTypeSync, synccommon.HookDeletePolicyBeforeHookCreation)
+	hook := newHook("hook-1", synccommon.HookTypeSync, synccommon.HookDeletePolicyBeforeHookCreation)
 	pod := testingutils.NewPod()
-	syncFailHook := testingutils.NewHook("sync-fail-hook", synccommon.HookTypeSyncFail, synccommon.HookDeletePolicyHookSucceeded)
+	syncFailHook := newHook("sync-fail-hook", synccommon.HookTypeSyncFail, synccommon.HookDeletePolicyHookSucceeded)
 
 	syncCtx := newTestSyncCtx(nil,
 		WithHealthOverride(resourceNameHealthOverride(map[string]health.HealthStatusCode{
@@ -1405,8 +1363,8 @@ func TestSync_FailedSyncWithSyncFailHook_ApplyFailed(t *testing.T) {
 	// Tests that other SyncFail Hooks run even if one of them fail.
 	pod := testingutils.NewPod()
 	pod.SetNamespace(testingutils.FakeArgoCDNamespace)
-	successfulSyncFailHook := testingutils.NewHook("successful-sync-fail-hook", synccommon.HookTypeSyncFail, synccommon.HookDeletePolicyBeforeHookCreation)
-	failedSyncFailHook := testingutils.NewHook("failed-sync-fail-hook", synccommon.HookTypeSyncFail, synccommon.HookDeletePolicyBeforeHookCreation)
+	successfulSyncFailHook := newHook("successful-sync-fail-hook", synccommon.HookTypeSyncFail, synccommon.HookDeletePolicyBeforeHookCreation)
+	failedSyncFailHook := newHook("failed-sync-fail-hook", synccommon.HookTypeSyncFail, synccommon.HookDeletePolicyBeforeHookCreation)
 
 	syncCtx := newTestSyncCtx(nil, WithHealthOverride(resourceNameHealthOverride{
 		successfulSyncFailHook.GetName(): health.HealthStatusHealthy,
@@ -1434,17 +1392,17 @@ func TestSync_FailedSyncWithSyncFailHook_ApplyFailed(t *testing.T) {
 	assert.Equal(t, synccommon.OperationRunning, phase)
 	assert.Equal(t, "waiting for completion of hook /Pod/failed-sync-fail-hook and 1 more hooks", message)
 	assert.Len(t, resources, 3)
-	podResult := testingutils.GetResourceResult(resources, kube.GetResourceKey(pod))
+	podResult := getResourceResult(resources, kube.GetResourceKey(pod))
 	require.NotNil(t, podResult, "%s not found", kube.GetResourceKey(pod))
 	assert.Equal(t, synccommon.OperationFailed, podResult.HookPhase)
 	assert.Equal(t, synccommon.ResultCodeSyncFailed, podResult.Status)
 
-	failedSyncFailHookResult := testingutils.GetResourceResult(resources, kube.GetResourceKey(failedSyncFailHook))
+	failedSyncFailHookResult := getResourceResult(resources, kube.GetResourceKey(failedSyncFailHook))
 	require.NotNil(t, failedSyncFailHookResult, "%s not found", kube.GetResourceKey(failedSyncFailHook))
 	assert.Equal(t, synccommon.OperationFailed, failedSyncFailHookResult.HookPhase)
 	assert.Equal(t, synccommon.ResultCodeSyncFailed, failedSyncFailHookResult.Status)
 
-	successfulSyncFailHookResult := testingutils.GetResourceResult(resources, kube.GetResourceKey(successfulSyncFailHook))
+	successfulSyncFailHookResult := getResourceResult(resources, kube.GetResourceKey(successfulSyncFailHook))
 	require.NotNil(t, successfulSyncFailHookResult, "%s not found", kube.GetResourceKey(successfulSyncFailHook))
 	assert.Equal(t, synccommon.OperationRunning, successfulSyncFailHookResult.HookPhase)
 	assert.Equal(t, synccommon.ResultCodeSynced, successfulSyncFailHookResult.Status)
@@ -1462,7 +1420,7 @@ func TestSync_FailedSyncWithSyncFailHook_ApplyFailed(t *testing.T) {
 	assert.Equal(t, "one or more synchronization tasks completed unsuccessfully, reason: fake pod failure\none or more SyncFail hooks failed, reason: fake hook failure", message)
 	assert.Len(t, resources, 3)
 
-	successfulSyncFailHookResult = testingutils.GetResourceResult(resources, kube.GetResourceKey(successfulSyncFailHook))
+	successfulSyncFailHookResult = getResourceResult(resources, kube.GetResourceKey(successfulSyncFailHook))
 	require.NotNil(t, successfulSyncFailHookResult, "%s not found", kube.GetResourceKey(successfulSyncFailHook))
 	assert.Equal(t, synccommon.OperationSucceeded, successfulSyncFailHookResult.HookPhase)
 	assert.Equal(t, synccommon.ResultCodeSynced, successfulSyncFailHookResult.Status)
@@ -1501,19 +1459,10 @@ func TestBeforeHookCreation(t *testing.T) {
 	assert.Equal(t, "waiting for completion of hook /Pod/my-pod", message)
 }
 
-type resourceNameHealthOverride map[string]health.HealthStatusCode
-
-func (r resourceNameHealthOverride) GetResourceHealth(obj *unstructured.Unstructured) (*health.HealthStatus, error) {
-	if status, ok := r[obj.GetName()]; ok {
-		return &health.HealthStatus{Status: status, Message: "test"}, nil
-	}
-	return nil, nil
-}
-
 func TestSync_ExistingHooksWithFinalizer(t *testing.T) {
-	hook1 := testingutils.NewHook("existing-hook-1", synccommon.HookTypePreSync, synccommon.HookDeletePolicyBeforeHookCreation)
-	hook2 := testingutils.NewHook("existing-hook-2", synccommon.HookTypePreSync, synccommon.HookDeletePolicyHookFailed)
-	hook3 := testingutils.NewHook("existing-hook-3", synccommon.HookTypePreSync, synccommon.HookDeletePolicyHookSucceeded)
+	hook1 := newHook("existing-hook-1", synccommon.HookTypePreSync, synccommon.HookDeletePolicyBeforeHookCreation)
+	hook2 := newHook("existing-hook-2", synccommon.HookTypePreSync, synccommon.HookDeletePolicyHookFailed)
+	hook3 := newHook("existing-hook-3", synccommon.HookTypePreSync, synccommon.HookDeletePolicyHookSucceeded)
 
 	syncCtx := newTestSyncCtx(nil)
 	fakeDynamicClient := fake.NewSimpleDynamicClient(runtime.NewScheme(), hook1, hook2, hook3)
@@ -1550,9 +1499,9 @@ func TestSync_ExistingHooksWithFinalizer(t *testing.T) {
 }
 
 func TestSync_HooksNotDeletedIfPhaseNotCompleted(t *testing.T) {
-	hook1 := testingutils.NewHook("hook-1", synccommon.HookTypePreSync, synccommon.HookDeletePolicyBeforeHookCreation)
-	hook2 := testingutils.NewHook("hook-2", synccommon.HookTypePreSync, synccommon.HookDeletePolicyHookFailed)
-	hook3 := testingutils.NewHook("hook-3", synccommon.HookTypePreSync, synccommon.HookDeletePolicyHookSucceeded)
+	hook1 := newHook("hook-1", synccommon.HookTypePreSync, synccommon.HookDeletePolicyBeforeHookCreation)
+	hook2 := newHook("hook-2", synccommon.HookTypePreSync, synccommon.HookDeletePolicyHookFailed)
+	hook3 := newHook("hook-3", synccommon.HookTypePreSync, synccommon.HookDeletePolicyHookSucceeded)
 
 	syncCtx := newTestSyncCtx(nil,
 		WithHealthOverride(resourceNameHealthOverride(map[string]health.HealthStatusCode{
@@ -1610,9 +1559,9 @@ func TestSync_HooksNotDeletedIfPhaseNotCompleted(t *testing.T) {
 }
 
 func TestSync_HooksDeletedAfterSyncSucceeded(t *testing.T) {
-	hook1 := testingutils.NewHook("hook-1", synccommon.HookTypePreSync, synccommon.HookDeletePolicyBeforeHookCreation)
-	hook2 := testingutils.NewHook("hook-2", synccommon.HookTypePreSync, synccommon.HookDeletePolicyHookFailed)
-	hook3 := testingutils.NewHook("hook-3", synccommon.HookTypePreSync, synccommon.HookDeletePolicyHookSucceeded)
+	hook1 := newHook("hook-1", synccommon.HookTypePreSync, synccommon.HookDeletePolicyBeforeHookCreation)
+	hook2 := newHook("hook-2", synccommon.HookTypePreSync, synccommon.HookDeletePolicyHookFailed)
+	hook3 := newHook("hook-3", synccommon.HookTypePreSync, synccommon.HookDeletePolicyHookSucceeded)
 
 	syncCtx := newTestSyncCtx(nil,
 		WithHealthOverride(resourceNameHealthOverride(map[string]health.HealthStatusCode{
@@ -1674,9 +1623,9 @@ func TestSync_HooksDeletedAfterSyncSucceeded(t *testing.T) {
 }
 
 func TestSync_HooksDeletedAfterSyncFailed(t *testing.T) {
-	hook1 := testingutils.NewHook("hook-1", synccommon.HookTypePreSync, synccommon.HookDeletePolicyBeforeHookCreation)
-	hook2 := testingutils.NewHook("hook-2", synccommon.HookTypePreSync, synccommon.HookDeletePolicyHookFailed)
-	hook3 := testingutils.NewHook("hook-3", synccommon.HookTypePreSync, synccommon.HookDeletePolicyHookSucceeded)
+	hook1 := newHook("hook-1", synccommon.HookTypePreSync, synccommon.HookDeletePolicyBeforeHookCreation)
+	hook2 := newHook("hook-2", synccommon.HookTypePreSync, synccommon.HookDeletePolicyHookFailed)
+	hook3 := newHook("hook-3", synccommon.HookTypePreSync, synccommon.HookDeletePolicyHookSucceeded)
 
 	syncCtx := newTestSyncCtx(nil,
 		WithHealthOverride(resourceNameHealthOverride(map[string]health.HealthStatusCode{
@@ -1803,9 +1752,9 @@ func Test_setRunningPhase_runningHooks(t *testing.T) {
 	var sc syncContext
 	sc.log = textlogger.NewLogger(textlogger.NewConfig()).WithValues("application", "fake-app")
 
-	sc.setRunningPhase([]*syncTask{{targetObj: newHook(synccommon.HookTypeSyncFail)}}, false)
+	sc.setRunningPhase([]*syncTask{{targetObj: newHook("my-hook", synccommon.HookTypeSyncFail, synccommon.HookDeletePolicyBeforeHookCreation)}}, false)
 
-	assert.Equal(t, "waiting for completion of hook /Pod/my-pod", sc.message)
+	assert.Equal(t, "waiting for completion of hook /Pod/my-hook", sc.message)
 }
 
 func Test_setRunningPhase_pendingDeletion(t *testing.T) {
@@ -1894,8 +1843,8 @@ func TestSync_SyncWaveHookError(t *testing.T) {
 	pod1.SetNamespace(testingutils.FakeArgoCDNamespace)
 	pod1.SetName("pod-1")
 
-	syncHook := testingutils.NewHook("sync-hook", synccommon.HookTypeSync, synccommon.HookDeletePolicyBeforeHookCreation)
-	syncFailHook := testingutils.NewHook("sync-fail-hook", synccommon.HookTypeSyncFail, synccommon.HookDeletePolicyBeforeHookCreation)
+	syncHook := newHook("sync-hook", synccommon.HookTypeSync, synccommon.HookDeletePolicyBeforeHookCreation)
+	syncFailHook := newHook("sync-fail-hook", synccommon.HookTypeSyncFail, synccommon.HookDeletePolicyBeforeHookCreation)
 
 	syncCtx.dynamicIf = fake.NewSimpleDynamicClient(runtime.NewScheme())
 	syncCtx.resources = groupResources(ReconciliationResult{
@@ -1916,11 +1865,11 @@ func TestSync_SyncWaveHookError(t *testing.T) {
 	assert.Equal(t, "SyncWaveHook failed: intentional error", msg)
 	require.Len(t, results, 2)
 
-	podResult := testingutils.GetResourceResult(results, kube.GetResourceKey(pod1))
+	podResult := getResourceResult(results, kube.GetResourceKey(pod1))
 	require.NotNil(t, podResult, "%s not found", kube.GetResourceKey(pod1))
 	assert.Equal(t, synccommon.OperationRunning, podResult.HookPhase)
 
-	hookResult := testingutils.GetResourceResult(results, kube.GetResourceKey(syncHook))
+	hookResult := getResourceResult(results, kube.GetResourceKey(syncHook))
 	require.NotNil(t, hookResult, "%s not found", kube.GetResourceKey(syncHook))
 	assert.Equal(t, "Terminated", hookResult.Message)
 }
@@ -2542,9 +2491,9 @@ func TestTerminate(t *testing.T) {
 }
 
 func TestTerminate_Hooks_Running(t *testing.T) {
-	hook1 := testingutils.NewHook("hook-1", synccommon.HookTypeSync, synccommon.HookDeletePolicyBeforeHookCreation)
-	hook2 := testingutils.NewHook("hook-2", synccommon.HookTypeSync, synccommon.HookDeletePolicyHookFailed)
-	hook3 := testingutils.NewHook("hook-3", synccommon.HookTypeSync, synccommon.HookDeletePolicyHookSucceeded)
+	hook1 := newHook("hook-1", synccommon.HookTypeSync, synccommon.HookDeletePolicyBeforeHookCreation)
+	hook2 := newHook("hook-2", synccommon.HookTypeSync, synccommon.HookDeletePolicyHookFailed)
+	hook3 := newHook("hook-3", synccommon.HookTypeSync, synccommon.HookDeletePolicyHookSucceeded)
 
 	obj := testingutils.NewPod()
 	obj.SetNamespace(testingutils.FakeArgoCDNamespace)
@@ -2620,9 +2569,9 @@ func TestTerminate_Hooks_Running(t *testing.T) {
 }
 
 func TestTerminate_Hooks_Running_Healthy(t *testing.T) {
-	hook1 := testingutils.NewHook("hook-1", synccommon.HookTypeSync, synccommon.HookDeletePolicyBeforeHookCreation)
-	hook2 := testingutils.NewHook("hook-2", synccommon.HookTypeSync, synccommon.HookDeletePolicyHookFailed)
-	hook3 := testingutils.NewHook("hook-3", synccommon.HookTypeSync, synccommon.HookDeletePolicyHookSucceeded)
+	hook1 := newHook("hook-1", synccommon.HookTypeSync, synccommon.HookDeletePolicyBeforeHookCreation)
+	hook2 := newHook("hook-2", synccommon.HookTypeSync, synccommon.HookDeletePolicyHookFailed)
+	hook3 := newHook("hook-3", synccommon.HookTypeSync, synccommon.HookDeletePolicyHookSucceeded)
 
 	obj := testingutils.NewPod()
 	obj.SetNamespace(testingutils.FakeArgoCDNamespace)
@@ -2702,9 +2651,9 @@ func TestTerminate_Hooks_Running_Healthy(t *testing.T) {
 }
 
 func TestTerminate_Hooks_Completed(t *testing.T) {
-	hook1 := testingutils.NewHook("hook-1", synccommon.HookTypeSync, synccommon.HookDeletePolicyBeforeHookCreation)
-	hook2 := testingutils.NewHook("hook-2", synccommon.HookTypeSync, synccommon.HookDeletePolicyHookFailed)
-	hook3 := testingutils.NewHook("hook-3", synccommon.HookTypeSync, synccommon.HookDeletePolicyHookSucceeded)
+	hook1 := newHook("hook-1", synccommon.HookTypeSync, synccommon.HookDeletePolicyBeforeHookCreation)
+	hook2 := newHook("hook-2", synccommon.HookTypeSync, synccommon.HookDeletePolicyHookFailed)
+	hook3 := newHook("hook-3", synccommon.HookTypeSync, synccommon.HookDeletePolicyHookSucceeded)
 
 	obj := testingutils.NewPod()
 	obj.SetNamespace(testingutils.FakeArgoCDNamespace)
@@ -2783,7 +2732,7 @@ func TestTerminate_Hooks_Completed(t *testing.T) {
 }
 
 func TestTerminate_Hooks_Error(t *testing.T) {
-	hook1 := testingutils.NewHook("hook-1", synccommon.HookTypeSync, synccommon.HookDeletePolicyBeforeHookCreation)
+	hook1 := newHook("hook-1", synccommon.HookTypeSync, synccommon.HookDeletePolicyBeforeHookCreation)
 
 	obj := testingutils.NewPod()
 	obj.SetNamespace(testingutils.FakeArgoCDNamespace)
@@ -2815,7 +2764,7 @@ func TestTerminate_Hooks_Error(t *testing.T) {
 	fakeDynamicClient := fake.NewSimpleDynamicClient(runtime.NewScheme(), hook1)
 	syncCtx.dynamicIf = fakeDynamicClient
 	fakeDynamicClient.PrependReactor("update", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
-		return true, nil, apierrors.NewInternalError(fmt.Errorf("update failed"))
+		return true, nil, apierrors.NewInternalError(errors.New("update failed"))
 	})
 
 	syncCtx.Terminate()

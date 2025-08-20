@@ -428,7 +428,6 @@ func (sc *syncContext) setRunningPhase(tasks syncTasks, isPendingDeletion bool) 
 		message = fmt.Sprintf("%s and %d more %s", message, moreTasks, andMore)
 	}
 	sc.setOperationPhase(common.OperationRunning, message)
-
 }
 
 // sync has performs the actual apply or hook based sync
