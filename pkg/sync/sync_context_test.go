@@ -1403,13 +1403,13 @@ func TestSync_ExistingHooksWithFinalizer(t *testing.T) {
 	fakeDynamicClient.PrependReactor("update", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
 		// Removing the finalizers
 		updatedCount++
-		return true, nil, nil
+		return false, nil, nil
 	})
 	deletedCount := 0
 	fakeDynamicClient.PrependReactor("delete", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
 		// because of HookDeletePolicyBeforeHookCreation
 		deletedCount++
-		return true, nil, nil
+		return false, nil, nil
 	})
 	syncCtx.resources = groupResources(ReconciliationResult{
 		Live:   []*unstructured.Unstructured{hook1, hook2, hook3},
@@ -1418,10 +1418,16 @@ func TestSync_ExistingHooksWithFinalizer(t *testing.T) {
 	syncCtx.hooks = []*unstructured.Unstructured{hook1, hook2, hook3}
 
 	syncCtx.Sync()
+	phase, message, _ := syncCtx.GetState()
 
-	assert.Equal(t, synccommon.OperationRunning, syncCtx.phase)
+	assert.Equal(t, synccommon.OperationRunning, phase)
+	assert.Equal(t, "waiting for deletion of hook /Pod/existing-hook-1 and 2 more hooks", message)
 	assert.Equal(t, 3, updatedCount)
 	assert.Equal(t, 1, deletedCount)
+
+	_, err := syncCtx.getResource(&syncTask{liveObj: hook1})
+	require.Error(t, err, "Expected resource to be deleted")
+	assert.True(t, apierrors.IsNotFound(err))
 }
 
 func TestSync_HooksNotDeletedIfPhaseNotCompleted(t *testing.T) {
@@ -1462,12 +1468,12 @@ func TestSync_HooksNotDeletedIfPhaseNotCompleted(t *testing.T) {
 	fakeDynamicClient.PrependReactor("update", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
 		// Removing the finalizers
 		updatedCount++
-		return true, nil, nil
+		return false, nil, nil
 	})
 	deletedCount := 0
 	fakeDynamicClient.PrependReactor("delete", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
 		deletedCount++
-		return true, nil, nil
+		return false, nil, nil
 	})
 	syncCtx.resources = groupResources(ReconciliationResult{
 		Live:   []*unstructured.Unstructured{hook1, hook2, hook3},
@@ -1476,8 +1482,10 @@ func TestSync_HooksNotDeletedIfPhaseNotCompleted(t *testing.T) {
 	syncCtx.hooks = []*unstructured.Unstructured{hook1, hook2, hook3}
 
 	syncCtx.Sync()
+	phase, message, _ := syncCtx.GetState()
 
-	assert.Equal(t, synccommon.OperationRunning, syncCtx.phase)
+	assert.Equal(t, synccommon.OperationRunning, phase)
+	assert.Equal(t, "waiting for completion of hook /Pod/hook-1", message)
 	assert.Equal(t, 0, updatedCount)
 	assert.Equal(t, 0, deletedCount)
 }
@@ -1520,12 +1528,12 @@ func TestSync_HooksDeletedAfterSyncSucceeded(t *testing.T) {
 	fakeDynamicClient.PrependReactor("update", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
 		// Removing the finalizers
 		updatedCount++
-		return true, nil, nil
+		return false, nil, nil
 	})
 	deletedCount := 0
 	fakeDynamicClient.PrependReactor("delete", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
 		deletedCount++
-		return true, nil, nil
+		return false, nil, nil
 	})
 	syncCtx.resources = groupResources(ReconciliationResult{
 		Live:   []*unstructured.Unstructured{hook1, hook2, hook3},
@@ -1534,10 +1542,16 @@ func TestSync_HooksDeletedAfterSyncSucceeded(t *testing.T) {
 	syncCtx.hooks = []*unstructured.Unstructured{hook1, hook2, hook3}
 
 	syncCtx.Sync()
+	phase, message, _ := syncCtx.GetState()
 
-	assert.Equal(t, synccommon.OperationSucceeded, syncCtx.phase)
+	assert.Equal(t, synccommon.OperationSucceeded, phase)
+	assert.Equal(t, "successfully synced (no more tasks)", message)
 	assert.Equal(t, 3, updatedCount)
 	assert.Equal(t, 1, deletedCount)
+
+	_, err := syncCtx.getResource(&syncTask{liveObj: hook3})
+	require.Error(t, err, "Expected resource to be deleted")
+	assert.True(t, apierrors.IsNotFound(err))
 }
 
 func TestSync_HooksDeletedAfterSyncFailed(t *testing.T) {
@@ -1578,13 +1592,14 @@ func TestSync_HooksDeletedAfterSyncFailed(t *testing.T) {
 	fakeDynamicClient.PrependReactor("update", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
 		// Removing the finalizers
 		updatedCount++
-		return true, nil, nil
+		return false, nil, nil
 	})
 	deletedCount := 0
-	fakeDynamicClient.PrependReactor("delete", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
+	fakeDynamicClient.PrependReactor("delete", "*", func(action testcore.Action) (handled bool, ret runtime.Object, err error) {
 		deletedCount++
-		return true, nil, nil
+		return false, nil, nil
 	})
+
 	syncCtx.resources = groupResources(ReconciliationResult{
 		Live:   []*unstructured.Unstructured{hook1, hook2, hook3},
 		Target: []*unstructured.Unstructured{nil, nil, nil},
@@ -1592,10 +1607,16 @@ func TestSync_HooksDeletedAfterSyncFailed(t *testing.T) {
 	syncCtx.hooks = []*unstructured.Unstructured{hook1, hook2, hook3}
 
 	syncCtx.Sync()
+	phase, message, _ := syncCtx.GetState()
 
-	assert.Equal(t, synccommon.OperationFailed, syncCtx.phase)
+	assert.Equal(t, synccommon.OperationFailed, phase)
+	assert.Equal(t, "one or more synchronization tasks completed unsuccessfully", message)
 	assert.Equal(t, 3, updatedCount)
 	assert.Equal(t, 1, deletedCount)
+
+	_, err := syncCtx.getResource(&syncTask{liveObj: hook2})
+	require.Error(t, err, "Expected resource to be deleted")
+	assert.True(t, apierrors.IsNotFound(err))
 }
 
 func Test_syncContext_liveObj(t *testing.T) {
@@ -2448,12 +2469,12 @@ func TestTerminate_Hooks_Running(t *testing.T) {
 	fakeDynamicClient.PrependReactor("update", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
 		// Removing the finalizers
 		updatedCount++
-		return true, nil, nil
+		return false, nil, nil
 	})
 	deletedCount := 0
 	fakeDynamicClient.PrependReactor("delete", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
 		deletedCount++
-		return true, nil, nil
+		return false, nil, nil
 	})
 
 	syncCtx.Terminate()
@@ -2526,12 +2547,12 @@ func TestTerminate_Hooks_Running_Healthy(t *testing.T) {
 	fakeDynamicClient.PrependReactor("update", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
 		// Removing the finalizers
 		updatedCount++
-		return true, nil, nil
+		return false, nil, nil
 	})
 	deletedCount := 0
 	fakeDynamicClient.PrependReactor("delete", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
 		deletedCount++
-		return true, nil, nil
+		return false, nil, nil
 	})
 
 	syncCtx.Terminate()
@@ -2550,6 +2571,10 @@ func TestTerminate_Hooks_Running_Healthy(t *testing.T) {
 	assert.Equal(t, "test", results[2].Message)
 	assert.Equal(t, 3, updatedCount)
 	assert.Equal(t, 1, deletedCount)
+
+	_, err := syncCtx.getResource(&syncTask{liveObj: hook2})
+	require.Error(t, err, "Expected resource to be deleted")
+	assert.True(t, apierrors.IsNotFound(err))
 }
 
 func TestTerminate_Hooks_Completed(t *testing.T) {
@@ -2607,12 +2632,12 @@ func TestTerminate_Hooks_Completed(t *testing.T) {
 	fakeDynamicClient.PrependReactor("update", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
 		// Removing the finalizers
 		updatedCount++
-		return true, nil, nil
+		return false, nil, nil
 	})
 	deletedCount := 0
 	fakeDynamicClient.PrependReactor("delete", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
 		deletedCount++
-		return true, nil, nil
+		return false, nil, nil
 	})
 
 	syncCtx.Terminate()
