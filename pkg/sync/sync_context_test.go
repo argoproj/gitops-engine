@@ -1402,42 +1402,6 @@ func TestSync_FailedSyncWithSyncFailHook_HookFailed(t *testing.T) {
 }
 
 func TestSync_FailedSyncWithSyncFailHook_ApplyFailed(t *testing.T) {
-}
-
-func TestBeforeHookCreation(t *testing.T) {
-	finalizerRemoved := false
-	syncCtx := newTestSyncCtx(nil)
-	hookObj := testingutils.Annotate(testingutils.Annotate(testingutils.NewPod(), synccommon.AnnotationKeyHook, "Sync"), synccommon.AnnotationKeyHookDeletePolicy, "BeforeHookCreation")
-	hookObj.SetFinalizers([]string{hook.HookFinalizer})
-	hookObj.SetNamespace(testingutils.FakeArgoCDNamespace)
-	syncCtx.resources = groupResources(ReconciliationResult{
-		Live:   []*unstructured.Unstructured{hookObj},
-		Target: []*unstructured.Unstructured{nil},
-	})
-	syncCtx.hooks = []*unstructured.Unstructured{hookObj}
-	client := fake.NewSimpleDynamicClient(runtime.NewScheme(), hookObj)
-	client.PrependReactor("update", "pods", func(_ testcore.Action) (bool, runtime.Object, error) {
-		finalizerRemoved = true
-		return false, nil, nil
-	})
-	syncCtx.dynamicIf = client
-
-	// First sync will delete the existing hook
-	syncCtx.Sync()
-	phase, _, _ := syncCtx.GetState()
-	assert.Equal(t, synccommon.OperationRunning, phase)
-	assert.True(t, finalizerRemoved)
-
-	// Second sync will create the hook
-	syncCtx.Sync()
-	phase, message, resources := syncCtx.GetState()
-	assert.Equal(t, synccommon.OperationRunning, phase)
-	assert.Len(t, resources, 1)
-	assert.Equal(t, synccommon.OperationRunning, resources[0].HookPhase)
-	assert.Equal(t, "waiting for completion of hook /Pod/my-pod", message)
-}
-
-func TestRunSyncFailHooksFailed(t *testing.T) {
 	// Tests that other SyncFail Hooks run even if one of them fail.
 	pod := testingutils.NewPod()
 	pod.SetNamespace(testingutils.FakeArgoCDNamespace)
@@ -1502,6 +1466,39 @@ func TestRunSyncFailHooksFailed(t *testing.T) {
 	require.NotNil(t, successfulSyncFailHookResult, "%s not found", kube.GetResourceKey(successfulSyncFailHook))
 	assert.Equal(t, synccommon.OperationSucceeded, successfulSyncFailHookResult.HookPhase)
 	assert.Equal(t, synccommon.ResultCodeSynced, successfulSyncFailHookResult.Status)
+}
+
+func TestBeforeHookCreation(t *testing.T) {
+	finalizerRemoved := false
+	syncCtx := newTestSyncCtx(nil)
+	hookObj := testingutils.Annotate(testingutils.Annotate(testingutils.NewPod(), synccommon.AnnotationKeyHook, "Sync"), synccommon.AnnotationKeyHookDeletePolicy, "BeforeHookCreation")
+	hookObj.SetFinalizers([]string{hook.HookFinalizer})
+	hookObj.SetNamespace(testingutils.FakeArgoCDNamespace)
+	syncCtx.resources = groupResources(ReconciliationResult{
+		Live:   []*unstructured.Unstructured{hookObj},
+		Target: []*unstructured.Unstructured{nil},
+	})
+	syncCtx.hooks = []*unstructured.Unstructured{hookObj}
+	client := fake.NewSimpleDynamicClient(runtime.NewScheme(), hookObj)
+	client.PrependReactor("update", "pods", func(_ testcore.Action) (bool, runtime.Object, error) {
+		finalizerRemoved = true
+		return false, nil, nil
+	})
+	syncCtx.dynamicIf = client
+
+	// First sync will delete the existing hook
+	syncCtx.Sync()
+	phase, _, _ := syncCtx.GetState()
+	assert.Equal(t, synccommon.OperationRunning, phase)
+	assert.True(t, finalizerRemoved)
+
+	// Second sync will create the hook
+	syncCtx.Sync()
+	phase, message, resources := syncCtx.GetState()
+	assert.Equal(t, synccommon.OperationRunning, phase)
+	assert.Len(t, resources, 1)
+	assert.Equal(t, synccommon.OperationRunning, resources[0].HookPhase)
+	assert.Equal(t, "waiting for completion of hook /Pod/my-pod", message)
 }
 
 type resourceNameHealthOverride map[string]health.HealthStatusCode
