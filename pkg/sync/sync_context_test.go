@@ -1130,6 +1130,7 @@ func TestDeDupingTasks(t *testing.T) {
 func TestObjectsGetANamespace(t *testing.T) {
 	syncCtx := newTestSyncCtx(nil)
 	pod := testingutils.NewPod()
+	pod.SetNamespace("")
 	syncCtx.resources = groupResources(ReconciliationResult{
 		Live:   []*unstructured.Unstructured{nil},
 		Target: []*unstructured.Unstructured{pod},
@@ -1817,7 +1818,7 @@ func Test_setRunningPhase_pendingDeletion(t *testing.T) {
 	assert.Equal(t, "waiting for deletion of /Pod/my-pod and 2 more resources", sc.message)
 }
 
-func TestSyncWaveHook(t *testing.T) {
+func TestSync_SyncWaveHook(t *testing.T) {
 	syncCtx := newTestSyncCtx(nil, WithOperationSettings(false, false, false, false))
 	pod1 := testingutils.NewPod()
 	pod1.SetName("pod-1")
@@ -1891,17 +1892,18 @@ func TestSyncWaveHook(t *testing.T) {
 func TestSync_SyncWaveHookError(t *testing.T) {
 	syncCtx := newTestSyncCtx(nil, WithOperationSettings(false, false, false, false))
 	pod1 := testingutils.NewPod()
+	pod1.SetNamespace(testingutils.FakeArgoCDNamespace)
 	pod1.SetName("pod-1")
+
+	syncHook := testingutils.NewHook("sync-hook", synccommon.HookTypeSync, synccommon.HookDeletePolicyBeforeHookCreation)
+	syncFailHook := testingutils.NewHook("sync-fail-hook", synccommon.HookTypeSyncFail, synccommon.HookDeletePolicyBeforeHookCreation)
 
 	syncCtx.dynamicIf = fake.NewSimpleDynamicClient(runtime.NewScheme())
 	syncCtx.resources = groupResources(ReconciliationResult{
 		Live:   []*unstructured.Unstructured{nil},
 		Target: []*unstructured.Unstructured{pod1},
 	})
-	syncCtx.hooks = []*unstructured.Unstructured{
-		newHook(synccommon.HookTypeSync),
-		newHook(synccommon.HookTypeSyncFail),
-	}
+	syncCtx.hooks = []*unstructured.Unstructured{syncHook, syncFailHook}
 
 	called := false
 	syncCtx.syncWaveHook = func(_ synccommon.SyncPhase, _ int, _ bool) error {
@@ -1914,10 +1916,14 @@ func TestSync_SyncWaveHookError(t *testing.T) {
 	assert.Equal(t, synccommon.OperationError, phase)
 	assert.Equal(t, "SyncWaveHook failed: intentional error", msg)
 	require.Len(t, results, 2)
-	assert.Equal(t, kube.ResourceKey{Group: "", Kind: "Pod", Namespace: "fake-argocd-ns", Name: "my-pod"}, results[0].ResourceKey)
-	assert.Equal(t, "Terminated", results[0].Message)
-	assert.Equal(t, kube.ResourceKey{Group: "", Kind: "Pod", Namespace: "fake-argocd-ns", Name: "pod-1"}, results[1].ResourceKey)
-	assert.Equal(t, synccommon.OperationRunning, results[1].HookPhase)
+
+	podResult := testingutils.GetResourceResult(results, kube.GetResourceKey(pod1))
+	require.NotNil(t, podResult, "%s not found", kube.GetResourceKey(pod1))
+	assert.Equal(t, synccommon.OperationRunning, podResult.HookPhase)
+
+	hookResult := testingutils.GetResourceResult(results, kube.GetResourceKey(syncHook))
+	require.NotNil(t, hookResult, "%s not found", kube.GetResourceKey(syncHook))
+	assert.Equal(t, "Terminated", hookResult.Message)
 }
 
 func TestPruneLast(t *testing.T) {
@@ -2331,15 +2337,15 @@ func TestWaitForCleanUpBeforeNextWave(t *testing.T) {
 
 	var phase synccommon.OperationPhase
 	var msg string
-	var result []synccommon.ResourceSyncResult
+	var results []synccommon.ResourceSyncResult
 
 	// 1st sync should prune only pod3
 	syncCtx.Sync()
-	phase, _, result = syncCtx.GetState()
+	phase, _, results = syncCtx.GetState()
 	assert.Equal(t, synccommon.OperationRunning, phase)
-	assert.Len(t, result, 1)
-	assert.Equal(t, "pod-3", result[0].ResourceKey.Name)
-	assert.Equal(t, synccommon.ResultCodePruned, result[0].Status)
+	assert.Len(t, results, 1)
+	assert.Equal(t, "pod-3", results[0].ResourceKey.Name)
+	assert.Equal(t, synccommon.ResultCodePruned, results[0].Status)
 
 	// simulate successful delete of pod3
 	syncCtx.resources = groupResources(ReconciliationResult{
@@ -2349,11 +2355,11 @@ func TestWaitForCleanUpBeforeNextWave(t *testing.T) {
 
 	// next sync should prune only pod2
 	syncCtx.Sync()
-	phase, _, result = syncCtx.GetState()
+	phase, _, results = syncCtx.GetState()
 	assert.Equal(t, synccommon.OperationRunning, phase)
-	assert.Len(t, result, 2)
-	assert.Equal(t, "pod-2", result[1].ResourceKey.Name)
-	assert.Equal(t, synccommon.ResultCodePruned, result[1].Status)
+	assert.Len(t, results, 2)
+	assert.Equal(t, "pod-2", results[1].ResourceKey.Name)
+	assert.Equal(t, synccommon.ResultCodePruned, results[1].Status)
 
 	// add delete timestamp on pod2 to simulate pending delete
 	pod2.SetDeletionTimestamp(&metav1.Time{Time: time.Now()})
@@ -2361,10 +2367,10 @@ func TestWaitForCleanUpBeforeNextWave(t *testing.T) {
 	// next sync should wait for deletion of pod2 from cluster,
 	// it should not move to next wave and prune pod1
 	syncCtx.Sync()
-	phase, msg, result = syncCtx.GetState()
+	phase, msg, results = syncCtx.GetState()
 	assert.Equal(t, synccommon.OperationRunning, phase)
 	assert.Equal(t, "waiting for deletion of /Pod/pod-2", msg)
-	assert.Len(t, result, 2)
+	assert.Len(t, results, 2)
 
 	// simulate successful delete of pod2
 	syncCtx.resources = groupResources(ReconciliationResult{
@@ -2375,15 +2381,15 @@ func TestWaitForCleanUpBeforeNextWave(t *testing.T) {
 	// next sync should proceed with next wave
 	// i.e deletion of pod1
 	syncCtx.Sync()
-	phase, _, result = syncCtx.GetState()
+	phase, _, results = syncCtx.GetState()
 	assert.Equal(t, synccommon.OperationSucceeded, phase)
-	assert.Len(t, result, 3)
-	assert.Equal(t, "pod-3", result[0].ResourceKey.Name)
-	assert.Equal(t, "pod-2", result[1].ResourceKey.Name)
-	assert.Equal(t, "pod-1", result[2].ResourceKey.Name)
-	assert.Equal(t, synccommon.ResultCodePruned, result[0].Status)
-	assert.Equal(t, synccommon.ResultCodePruned, result[1].Status)
-	assert.Equal(t, synccommon.ResultCodePruned, result[2].Status)
+	assert.Len(t, results, 3)
+	assert.Equal(t, "pod-3", results[0].ResourceKey.Name)
+	assert.Equal(t, "pod-2", results[1].ResourceKey.Name)
+	assert.Equal(t, "pod-1", results[2].ResourceKey.Name)
+	assert.Equal(t, synccommon.ResultCodePruned, results[0].Status)
+	assert.Equal(t, synccommon.ResultCodePruned, results[1].Status)
+	assert.Equal(t, synccommon.ResultCodePruned, results[2].Status)
 }
 
 func BenchmarkSync(b *testing.B) {
