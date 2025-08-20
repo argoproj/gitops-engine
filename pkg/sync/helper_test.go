@@ -9,6 +9,7 @@ import (
 
 	"github.com/argoproj/gitops-engine/pkg/health"
 	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
+	"github.com/argoproj/gitops-engine/pkg/sync/hook"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 	testingutils "github.com/argoproj/gitops-engine/pkg/utils/testing"
 )
@@ -37,7 +38,7 @@ func newHook(name string, hookType synccommon.HookType, deletePolicy synccommon.
 	obj.SetNamespace(testingutils.FakeArgoCDNamespace)
 	testingutils.Annotate(obj, synccommon.AnnotationKeyHook, string(hookType))
 	testingutils.Annotate(obj, synccommon.AnnotationKeyHookDeletePolicy, string(deletePolicy))
-	obj.SetFinalizers([]string{synccommon.HookFinalizer})
+	obj.SetFinalizers([]string{hook.HookFinalizer})
 	return obj
 }
 

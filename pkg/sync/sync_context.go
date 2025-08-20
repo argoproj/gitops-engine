@@ -752,7 +752,7 @@ func (sc *syncContext) removeHookFinalizer(task *syncTask) error {
 	removeFinalizerMutation := func(obj *unstructured.Unstructured) bool {
 		finalizers := obj.GetFinalizers()
 		for i, finalizer := range finalizers {
-			if finalizer == common.HookFinalizer {
+			if finalizer == hook.HookFinalizer {
 				obj.SetFinalizers(append(finalizers[:i], finalizers[i+1:]...))
 				return true
 			}
@@ -895,7 +895,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 					targetObj.SetName(fmt.Sprintf("%s%s", generateName, postfix))
 				}
 				if !hook.HasHookFinalizer(targetObj) {
-					targetObj.SetFinalizers(append(targetObj.GetFinalizers(), common.HookFinalizer))
+					targetObj.SetFinalizers(append(targetObj.GetFinalizers(), hook.HookFinalizer))
 				}
 				hookTasks = append(hookTasks, &syncTask{phase: phase, targetObj: targetObj})
 			}

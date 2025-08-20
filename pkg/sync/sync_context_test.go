@@ -31,6 +31,7 @@ import (
 	"github.com/argoproj/gitops-engine/pkg/diff"
 	"github.com/argoproj/gitops-engine/pkg/health"
 	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
+	"github.com/argoproj/gitops-engine/pkg/sync/hook"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube/kubetest"
 	testingutils "github.com/argoproj/gitops-engine/pkg/utils/testing"
@@ -1431,7 +1432,7 @@ func TestBeforeHookCreation(t *testing.T) {
 	finalizerRemoved := false
 	syncCtx := newTestSyncCtx(nil)
 	hookObj := testingutils.Annotate(testingutils.Annotate(testingutils.NewPod(), synccommon.AnnotationKeyHook, "Sync"), synccommon.AnnotationKeyHookDeletePolicy, "BeforeHookCreation")
-	hookObj.SetFinalizers([]string{synccommon.HookFinalizer})
+	hookObj.SetFinalizers([]string{hook.HookFinalizer})
 	hookObj.SetNamespace(testingutils.FakeArgoCDNamespace)
 	syncCtx.resources = groupResources(ReconciliationResult{
 		Live:   []*unstructured.Unstructured{hookObj},
