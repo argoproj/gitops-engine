@@ -61,7 +61,7 @@ Hooks can be deleted in an automatic fashion using the annotation: argocd.argopr
 
 The following policies define when the hook will be deleted.
 
-  - HookSucceeded - the hook resource is deleted if the sync succeeds (e.g. Job/Workflow completed successfully).
+  - HookSucceeded - the hook resource is deleted if the sync succeeds
   - HookFailed - the hook resource is deleted if the sync fails.
   - BeforeHookCreation - any existing hook resource is deleted before the new one is created
 
