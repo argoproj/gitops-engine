@@ -1491,7 +1491,7 @@ func TestSync_ExistingHooksWithFinalizer(t *testing.T) {
 	phase, message, _ := syncCtx.GetState()
 
 	assert.Equal(t, synccommon.OperationRunning, phase)
-	assert.Equal(t, "waiting for deletion of hook /Pod/existing-hook-1 and 2 more hooks", message)
+	assert.Equal(t, "waiting for deletion of hook /Pod/existing-hook-1", message)
 	assert.Equal(t, 3, updatedCount)
 	assert.Equal(t, 1, deletedCount)
 

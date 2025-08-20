@@ -637,7 +637,9 @@ func (sc *syncContext) Sync() {
 			sc.setRunningPhase(tasks, false)
 		}
 	default:
-		sc.setRunningPhase(tasks, true)
+		sc.setRunningPhase(tasks.Filter(func(task *syncTask) bool {
+			return task.deleteBeforeCreation() || (task.isPrune() && task.pending())
+		}), true)
 	}
 }
 
@@ -1434,16 +1436,7 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 	sc.log.WithValues("numTasks", len(tasks), "dryRun", dryRun).V(1).Info("Running tasks")
 
 	state := successful
-	var createTasks syncTasks
-	var pruneTasks syncTasks
-
-	for _, task := range tasks {
-		if task.isPrune() {
-			pruneTasks = append(pruneTasks, task)
-		} else {
-			createTasks = append(createTasks, task)
-		}
-	}
+	pruneTasks, createTasks := tasks.Split(func(task *syncTask) bool { return task.isPrune() })
 
 	// remove finalizers from previous sync on existing hooks to make sure the operation is idempotent
 	{
