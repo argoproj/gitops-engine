@@ -53,6 +53,9 @@ const (
 
 	// Default field manager for client-side apply migration
 	DefaultClientSideApplyMigrationManager = "kubectl-client-side-apply"
+
+	// HookFinalizer is the finalizer added to hooks to ensure they are deleted only after the sync phase is completed.
+	HookFinalizer = "argocd.argoproj.io/hook-finalizer"
 )
 
 type PermissionValidator func(un *unstructured.Unstructured, res *metav1.APIResource) error

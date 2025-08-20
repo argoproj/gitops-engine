@@ -4,7 +4,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
-	"github.com/argoproj/gitops-engine/pkg/sync/hook"
+
+	"github.com/argoproj/gitops-engine/pkg/utils/kube/kubetest"
 )
 
 const (
@@ -31,7 +32,7 @@ func NewHook(name string, hookType synccommon.HookType, deletePolicy synccommon.
 	obj.SetNamespace(FakeArgoCDNamespace)
 	Annotate(obj, synccommon.AnnotationKeyHook, string(hookType))
 	Annotate(obj, synccommon.AnnotationKeyHookDeletePolicy, string(deletePolicy))
-	obj.SetFinalizers([]string{hook.HookFinalizer})
+	obj.SetFinalizers([]string{synccommon.HookFinalizer})
 	return obj
 }
 
@@ -59,7 +60,7 @@ var PodManifest = `
 `
 
 func NewPod() *unstructured.Unstructured {
-	return Unstructured(PodManifest)
+	return kubetest.Unstructured(PodManifest)
 }
 
 var ServiceManifest = `
@@ -86,11 +87,11 @@ var ServiceManifest = `
 `
 
 func NewService() *unstructured.Unstructured {
-	return Unstructured(ServiceManifest)
+	return kubetest.Unstructured(ServiceManifest)
 }
 
 func NewCRD() *unstructured.Unstructured {
-	return Unstructured(`apiVersion: apiextensions.k8s.io/v1beta1
+	return kubetest.Unstructured(`apiVersion: apiextensions.k8s.io/v1beta1
 kind: CustomResourceDefinition
 metadata:
   name: testcrds.argoproj.io
@@ -104,7 +105,7 @@ spec:
 }
 
 func NewNamespace() *unstructured.Unstructured {
-	return Unstructured(`apiVersion: v1
+	return kubetest.Unstructured(`apiVersion: v1
 kind: Namespace
 metadata:
   name: testnamespace
