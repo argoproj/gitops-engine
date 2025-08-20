@@ -127,6 +127,7 @@ func TestSyncNamespaceCreatedBeforeDryRunWithFailure(t *testing.T) {
 		return true, nil
 	}), func(ctx *syncContext) {
 		resourceOps := ctx.resourceOps.(*kubetest.MockResourceOps)
+		resourceOps.ExecuteForDryRun = true
 		resourceOps.Commands = map[string]kubetest.KubectlOutput{}
 		resourceOps.Commands[pod.GetName()] = kubetest.KubectlOutput{
 			Output: "should not be returned",
@@ -1663,7 +1664,7 @@ func TestSync_HooksDeletedAfterSyncFailed(t *testing.T) {
 		return false, nil, nil
 	})
 	deletedCount := 0
-	fakeDynamicClient.PrependReactor("delete", "*", func(action testcore.Action) (handled bool, ret runtime.Object, err error) {
+	fakeDynamicClient.PrependReactor("delete", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
 		deletedCount++
 		return false, nil, nil
 	})
