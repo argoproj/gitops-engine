@@ -96,6 +96,12 @@ type ClusterInfo struct {
 	SyncError error
 	// APIResources holds list of API resources supported by the cluster
 	APIResources []kube.APIResourceInfo
+	// FailedResourceGVKs holds list of GVKs that failed to sync due to conversion webhook errors
+	FailedResourceGVKs []string
+	// IsTainted indicates if the cluster cache is in a tainted state
+	IsTainted bool
+	// TaintReason provides information about why the cluster is tainted
+	TaintReason string
 }
 
 // OnEventHandler is a function that handles Kubernetes event
@@ -1378,6 +1384,9 @@ func (c *clusterCache) GetClusterInfo() ClusterInfo {
 	c.syncStatus.lock.Lock()
 	defer c.syncStatus.lock.Unlock()
 
+	// Retrieve failed resource GVKs from the internal state
+	failedGVKs := c.getFailedResourceGVKs()
+	
 	return ClusterInfo{
 		APIsCount:         len(c.apisMeta),
 		K8SVersion:        c.serverVersion,
@@ -1386,7 +1395,16 @@ func (c *clusterCache) GetClusterInfo() ClusterInfo {
 		LastCacheSyncTime: c.syncStatus.syncTime,
 		SyncError:         c.syncStatus.syncError,
 		APIResources:      c.apiResources,
+		FailedResourceGVKs: failedGVKs,
 	}
+}
+
+// getFailedResourceGVKs returns a list of GVKs that failed to sync due to conversion webhook errors.
+// This method should be called with the clusterCache lock held.
+func (c *clusterCache) getFailedResourceGVKs() []string {
+	// This would be implemented by the liveStateCache in Argo CD and tracked there
+	// For now, return an empty list as this is just the gitops-engine interface
+	return []string{}
 }
 
 // skipAppRequeuing checks if the object is an API type which we want to skip requeuing against.
