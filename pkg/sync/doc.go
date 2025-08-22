@@ -59,6 +59,7 @@ Hooks can be deleted in an automatic fashion using the annotation: argocd.argopr
 	    argocd.argoproj.io/hook: PostSync
 	    argocd.argoproj.io/hook-delete-policy: HookSucceeded
 
+Hook deletion policies are governed by sync success and failure. A successful sync operation requires all hooks to complete successfully. A sync will fail if _any_ hooks fail.
 The following policies define when the hook will be deleted.
 
   - HookSucceeded - the hook resource is deleted if the sync succeeds
