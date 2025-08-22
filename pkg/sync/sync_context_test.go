@@ -45,15 +45,15 @@ func newTestSyncCtx(getResourceFunc *func(ctx context.Context, config *rest.Conf
 		&metav1.APIResourceList{
 			GroupVersion: "v1",
 			APIResources: []metav1.APIResource{
-				{Kind: "Pod", Group: "", Version: "v1", Namespaced: true, Verbs: standardVerbs},
-				{Kind: "Service", Group: "", Version: "v1", Namespaced: true, Verbs: standardVerbs},
-				{Kind: "Namespace", Group: "", Version: "v1", Namespaced: false, Verbs: standardVerbs},
+				{Name: "pods", Kind: "Pod", Group: "", Version: "v1", Namespaced: true, Verbs: standardVerbs},
+				{Name: "services", Kind: "Service", Group: "", Version: "v1", Namespaced: true, Verbs: standardVerbs},
+				{Name: "namespaces", Kind: "Namespace", Group: "", Version: "v1", Namespaced: false, Verbs: standardVerbs},
 			},
 		},
 		&metav1.APIResourceList{
 			GroupVersion: "apps/v1",
 			APIResources: []metav1.APIResource{
-				{Kind: "Deployment", Group: "apps", Version: "v1", Namespaced: true, Verbs: standardVerbs},
+				{Name: "deployments", Kind: "Deployment", Group: "apps", Version: "v1", Namespaced: true, Verbs: standardVerbs},
 			},
 		})
 	sc := syncContext{
@@ -805,6 +805,39 @@ func withDisableServerSideApplyAnnotation(un *unstructured.Unstructured) *unstru
 func withReplaceAndServerSideApplyAnnotations(un *unstructured.Unstructured) *unstructured.Unstructured {
 	un.SetAnnotations(map[string]string{synccommon.AnnotationSyncOptions: "Replace=true,ServerSideApply=true"})
 	return un
+}
+
+func TestSync_HookWithReplaceAndBeforeHookCreation_AlreadyDeleted(t *testing.T) {
+	// This test a race condition when Delete is called on an already deleted object
+	// LiveObj is set, but then the resource is deleted asynchronously in kubernetes
+	syncCtx := newTestSyncCtx(nil)
+
+	target := withReplaceAnnotation(testingutils.NewPod())
+	target.SetNamespace(testingutils.FakeArgoCDNamespace)
+	target = testingutils.Annotate(target, synccommon.AnnotationKeyHookDeletePolicy, string(synccommon.HookDeletePolicyBeforeHookCreation))
+	target = testingutils.Annotate(target, synccommon.AnnotationKeyHook, string(synccommon.SyncPhasePreSync))
+	live := target.DeepCopy()
+
+	syncCtx.resources = groupResources(ReconciliationResult{
+		Live:   []*unstructured.Unstructured{live},
+		Target: []*unstructured.Unstructured{target},
+	})
+	syncCtx.hooks = []*unstructured.Unstructured{live}
+
+	client := fake.NewSimpleDynamicClient(runtime.NewScheme())
+	deleted := false
+	client.PrependReactor("delete", "pods", func(_ testcore.Action) (bool, runtime.Object, error) {
+		deleted = true
+		// simulate the race conditions where liveObj was not null, but is now deleted in k8s
+		return true, nil, apierrors.NewNotFound(corev1.Resource("pods"), live.GetName())
+	})
+	syncCtx.dynamicIf = client
+
+	syncCtx.Sync()
+
+	resourceOps, _ := syncCtx.resourceOps.(*kubetest.MockResourceOps)
+	assert.Equal(t, "create", resourceOps.GetLastResourceCommand(kube.GetResourceKey(target)))
+	assert.True(t, deleted)
 }
 
 func TestSync_ServerSideApply(t *testing.T) {
