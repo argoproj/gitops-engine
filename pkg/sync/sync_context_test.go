@@ -393,10 +393,13 @@ func TestSyncCreateFailure(t *testing.T) {
 func TestSync_ApplyOutOfSyncOnly(t *testing.T) {
 	pod1 := testingutils.NewPod()
 	pod1.SetName("pod-1")
+	pod1.SetNamespace("fake-argocd-ns")
 	pod2 := testingutils.NewPod()
 	pod2.SetName("pod-2")
+	pod2.SetNamespace("fake-argocd-ns")
 	pod3 := testingutils.NewPod()
 	pod3.SetName("pod-3")
+	pod3.SetNamespace("fake-argocd-ns")
 
 	syncCtx := newTestSyncCtx(nil)
 	syncCtx.applyOutOfSyncOnly = true
