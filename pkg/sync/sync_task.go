@@ -148,5 +148,9 @@ func (t *syncTask) deleteOnPhaseFailed() bool {
 }
 
 func (t *syncTask) resourceKey() kube.ResourceKey {
-	return kube.GetResourceKey(t.obj())
+	resourceKey := kube.GetResourceKey(t.obj())
+	if t.liveObj != nil {
+		resourceKey.Namespace = t.liveObj.GetNamespace()
+	}
+	return resourceKey
 }
