@@ -509,6 +509,49 @@ func TestSync_ApplyOutOfSyncOnly(t *testing.T) {
 	})
 }
 
+func TestSync_ApplyOutOfSyncOnly_ClusterResources(t *testing.T) {
+	ns1 := testingutils.NewNamespace()
+	ns1.SetName("ns-1")
+
+	ns2 := testingutils.NewNamespace()
+	ns2.SetName("ns-2")
+
+	ns2Target := testingutils.NewNamespace()
+	ns2Target.SetName("ns-2")
+	ns2Target.SetNamespace("ns-2")
+
+	ns3 := testingutils.NewNamespace()
+	ns3.SetName("ns-3")
+
+	syncCtx := newTestSyncCtx(nil, WithResourceModificationChecker(true, &diff.DiffResultList{
+		Diffs:    []diff.DiffResult{},
+		Modified: false,
+	}))
+	syncCtx.applyOutOfSyncOnly = true
+	fakeDisco := syncCtx.disco.(*fakedisco.FakeDiscovery)
+	fakeDisco.Resources = []*metav1.APIResourceList{
+		{
+			GroupVersion: "v1",
+			APIResources: []metav1.APIResource{
+				{Kind: "Namespace", Group: "", Version: "v1", Namespaced: false, Verbs: standardVerbs},
+			},
+		},
+	}
+
+	t.Run("cluster resource with target ns having namespace filled", func(t *testing.T) {
+		syncCtx.modificationResult = nil
+		syncCtx.resources = groupResources(ReconciliationResult{
+			Live:   []*unstructured.Unstructured{nil, ns2, ns3},
+			Target: []*unstructured.Unstructured{ns1, ns2Target, ns3},
+		})
+
+		syncCtx.Sync()
+		phase, _, resources := syncCtx.GetState()
+		assert.Equal(t, synccommon.OperationSucceeded, phase)
+		assert.Len(t, resources, 3)
+	})
+
+}
 func TestSyncPruneFailure(t *testing.T) {
 	syncCtx := newTestSyncCtx(nil, WithOperationSettings(false, true, false, false))
 	mockKubectl := &kubetest.MockKubectlCmd{
