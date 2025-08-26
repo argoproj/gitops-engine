@@ -550,8 +550,8 @@ func TestSync_ApplyOutOfSyncOnly_ClusterResources(t *testing.T) {
 		assert.Equal(t, synccommon.OperationSucceeded, phase)
 		assert.Len(t, resources, 3)
 	})
-
 }
+
 func TestSyncPruneFailure(t *testing.T) {
 	syncCtx := newTestSyncCtx(nil, WithOperationSettings(false, true, false, false))
 	mockKubectl := &kubetest.MockKubectlCmd{
