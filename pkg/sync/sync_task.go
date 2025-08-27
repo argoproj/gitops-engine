@@ -151,6 +151,6 @@ func (t *syncTask) resourceKey() kube.ResourceKey {
 	resourceKey := kube.GetResourceKey(t.obj())
 	if t.liveObj != nil {
 		resourceKey.Namespace = t.liveObj.GetNamespace()
-	}// for handling cluster resources
+	}
 	return resourceKey
 }
