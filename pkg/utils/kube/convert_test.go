@@ -3,12 +3,12 @@ package kube
 import (
 	"testing"
 
-	testingutils "github.com/argoproj/gitops-engine/pkg/utils/testing"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/yaml"
+
+	testingutils "github.com/argoproj/gitops-engine/pkg/utils/testing"
 )
 
 type testcase struct {

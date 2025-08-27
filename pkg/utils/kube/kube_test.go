@@ -150,7 +150,7 @@ spec:
       - name: nginx
         image: nginx:1.7.9
         ports:
-        - containerPort: 80	
+        - containerPort: 80
 `)
 	deployment := unstructured.Unstructured{}
 	err := yaml.Unmarshal(manifest, &deployment)
