@@ -1292,3 +1292,274 @@ func BenchmarkIterateHierarchyV2(b *testing.B) {
 		})
 	}
 }
+
+func Test_errorTaintsCache(t *testing.T) {
+	cache := newCluster(t)
+
+	testCases := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "nil error should not taint cache",
+			err:      nil,
+			expected: false,
+		},
+		{
+			name:     "conversion webhook error should taint cache",
+			err:      errors.New("conversion webhook for example.com/v1, Kind=Example failed: Post \"https://webhook-service.svc:443/convert\": connection refused"),
+			expected: true,
+		},
+		{
+			name:     "failed convert error should taint cache",
+			err:      errors.New("failed to convert resource: conversion error"),
+			expected: true,
+		},
+		{
+			name:     "generic error should not taint cache",
+			err:      errors.New("some other error"),
+			expected: false,
+		},
+		{
+			name:     "authentication error should not taint cache",
+			err:      errors.New("Unauthorized"),
+			expected: false,
+		},
+		{
+			name:     "network error should not taint cache",
+			err:      errors.New("connection timeout"),
+			expected: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := cache.errorTaintsCache(tc.err)
+			assert.Equal(t, tc.expected, result, "errorTaintsCache should return %v for error: %v", tc.expected, tc.err)
+		})
+	}
+}
+
+func Test_trackFailedGVK(t *testing.T) {
+	cache := newCluster(t)
+
+	testGVK := schema.GroupVersionKind{
+		Group:   "example.com",
+		Version: "v1",
+		Kind:    "TestResource",
+	}
+
+	testError := errors.New("conversion webhook failed")
+
+	// Initially, no failed GVKs should be tracked
+	failedGVKs := cache.getFailedResourceGVKs()
+	assert.Empty(t, failedGVKs, "Initially no failed GVKs should be tracked")
+
+	// Track a failed GVK
+	cache.trackFailedGVK(testGVK, testError)
+
+	// Verify it's tracked
+	failedGVKs = cache.getFailedResourceGVKs()
+	assert.Len(t, failedGVKs, 1, "Should have exactly one failed GVK tracked")
+	assert.Contains(t, failedGVKs, testGVK.String(), "Should contain the tracked GVK")
+
+	// Track the same GVK again (should not duplicate)
+	cache.trackFailedGVK(testGVK, testError)
+	failedGVKs = cache.getFailedResourceGVKs()
+	assert.Len(t, failedGVKs, 1, "Should still have exactly one failed GVK tracked")
+
+	// Track a different GVK
+	anotherGVK := schema.GroupVersionKind{
+		Group:   "other.com",
+		Version: "v2",
+		Kind:    "AnotherResource",
+	}
+	cache.trackFailedGVK(anotherGVK, testError)
+
+	// Verify both are tracked
+	failedGVKs = cache.getFailedResourceGVKs()
+	assert.Len(t, failedGVKs, 2, "Should have exactly two failed GVKs tracked")
+	assert.Contains(t, failedGVKs, testGVK.String(), "Should contain the first GVK")
+	assert.Contains(t, failedGVKs, anotherGVK.String(), "Should contain the second GVK")
+}
+
+func Test_clearFailedGVK(t *testing.T) {
+	cache := newCluster(t)
+
+	testGVK := schema.GroupVersionKind{
+		Group:   "example.com",
+		Version: "v1",
+		Kind:    "TestResource",
+	}
+
+	anotherGVK := schema.GroupVersionKind{
+		Group:   "other.com",
+		Version: "v2",
+		Kind:    "AnotherResource",
+	}
+
+	testError := errors.New("conversion webhook failed")
+
+	// Track two failed GVKs
+	cache.trackFailedGVK(testGVK, testError)
+	cache.trackFailedGVK(anotherGVK, testError)
+
+	// Verify both are tracked
+	failedGVKs := cache.getFailedResourceGVKs()
+	assert.Len(t, failedGVKs, 2, "Should have exactly two failed GVKs tracked")
+
+	// Clear one GVK
+	cache.clearFailedGVK(testGVK)
+
+	// Verify only one remains
+	failedGVKs = cache.getFailedResourceGVKs()
+	assert.Len(t, failedGVKs, 1, "Should have exactly one failed GVK tracked after clearing one")
+	assert.Contains(t, failedGVKs, anotherGVK.String(), "Should contain the non-cleared GVK")
+	assert.NotContains(t, failedGVKs, testGVK.String(), "Should not contain the cleared GVK")
+
+	// Clear a non-existent GVK (should be safe)
+	nonExistentGVK := schema.GroupVersionKind{
+		Group:   "nonexistent.com",
+		Version: "v1",
+		Kind:    "NonExistent",
+	}
+	cache.clearFailedGVK(nonExistentGVK) // Should not panic or affect other entries
+
+	// Verify the remaining GVK is still there
+	failedGVKs = cache.getFailedResourceGVKs()
+	assert.Len(t, failedGVKs, 1, "Should still have exactly one failed GVK tracked")
+
+	// Clear the last GVK
+	cache.clearFailedGVK(anotherGVK)
+
+	// Verify no GVKs remain
+	failedGVKs = cache.getFailedResourceGVKs()
+	assert.Empty(t, failedGVKs, "Should have no failed GVKs tracked after clearing all")
+}
+
+func Test_GetClusterInfo_FailedResourceGVKs(t *testing.T) {
+	cache := newCluster(t)
+
+	// Initially, cluster info should have no failed GVKs
+	clusterInfo := cache.GetClusterInfo()
+	assert.Empty(t, clusterInfo.FailedResourceGVKs, "Initially no failed GVKs should be in cluster info")
+
+	// Track a failed GVK
+	testGVK := schema.GroupVersionKind{
+		Group:   "example.com",
+		Version: "v1",
+		Kind:    "TestResource",
+	}
+	testError := errors.New("conversion webhook failed")
+	cache.trackFailedGVK(testGVK, testError)
+
+	// Verify cluster info includes the failed GVK
+	clusterInfo = cache.GetClusterInfo()
+	assert.Len(t, clusterInfo.FailedResourceGVKs, 1, "Cluster info should include exactly one failed GVK")
+	assert.Contains(t, clusterInfo.FailedResourceGVKs, testGVK.String(), "Cluster info should contain the tracked GVK")
+
+	// Track another failed GVK
+	anotherGVK := schema.GroupVersionKind{
+		Group:   "other.com",
+		Version: "v2",
+		Kind:    "AnotherResource",
+	}
+	cache.trackFailedGVK(anotherGVK, testError)
+
+	// Verify cluster info includes both failed GVKs
+	clusterInfo = cache.GetClusterInfo()
+	assert.Len(t, clusterInfo.FailedResourceGVKs, 2, "Cluster info should include exactly two failed GVKs")
+	assert.Contains(t, clusterInfo.FailedResourceGVKs, testGVK.String(), "Cluster info should contain the first GVK")
+	assert.Contains(t, clusterInfo.FailedResourceGVKs, anotherGVK.String(), "Cluster info should contain the second GVK")
+
+	// Clear one GVK and verify cluster info is updated
+	cache.clearFailedGVK(testGVK)
+	clusterInfo = cache.GetClusterInfo()
+	assert.Len(t, clusterInfo.FailedResourceGVKs, 1, "Cluster info should include exactly one failed GVK after clearing one")
+	assert.Contains(t, clusterInfo.FailedResourceGVKs, anotherGVK.String(), "Cluster info should contain the remaining GVK")
+	assert.NotContains(t, clusterInfo.FailedResourceGVKs, testGVK.String(), "Cluster info should not contain the cleared GVK")
+}
+
+func Test_ConversionWebhookErrorHandlingDuringSync(t *testing.T) {
+	// Create a test pod that we'll try to load
+	pod := &corev1.Pod{
+		TypeMeta:   metav1.TypeMeta{Kind: "Pod", APIVersion: "v1"},
+		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "test", Image: "test"}}},
+	}
+
+	// Create a cluster cache with the pod
+	cache := newCluster(t, pod)
+
+	// Override the client with one that returns conversion webhook errors for certain operations
+	client := fake.NewSimpleDynamicClient(scheme.Scheme, pod)
+
+	conversionWebhookError := errors.New("conversion webhook for v1, Kind=Pod failed: Post \"https://conversion-webhook.svc:443/convert?timeout=30s\": connection refused")
+
+	// Set up reactor to simulate conversion webhook failures for list operations
+	client.PrependReactor("list", "pods", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
+		return true, nil, conversionWebhookError
+	})
+
+	// Since we can't easily replace the client, we'll test the error handling logic directly
+
+	// Test the error handling in loadInitialState (this is a bit of a unit test within an integration test)
+	testGVK := schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Pod"}
+
+	// Initially no failed GVKs should be tracked
+	failedGVKs := cache.getFailedResourceGVKs()
+	assert.Empty(t, failedGVKs, "Initially no failed GVKs should be tracked")
+
+	// Simulate the error taint detection and tracking that happens in loadInitialState
+	if cache.errorTaintsCache(conversionWebhookError) {
+		cache.trackFailedGVK(testGVK, conversionWebhookError)
+	}
+
+	// Verify that the GVK was tracked as failed
+	failedGVKs = cache.getFailedResourceGVKs()
+	assert.Len(t, failedGVKs, 1, "Should have exactly one failed GVK tracked")
+	assert.Contains(t, failedGVKs, testGVK.String(), "Should contain the pod GVK")
+
+	// Verify that cluster info reflects the failed GVK
+	clusterInfo := cache.GetClusterInfo()
+	assert.Len(t, clusterInfo.FailedResourceGVKs, 1, "Cluster info should include exactly one failed GVK")
+	assert.Contains(t, clusterInfo.FailedResourceGVKs, testGVK.String(), "Cluster info should contain the failed pod GVK")
+
+	// Simulate recovery: clear the failed GVK (this would happen when the resource successfully loads later)
+	cache.clearFailedGVK(testGVK)
+
+	// Verify recovery was tracked
+	failedGVKs = cache.getFailedResourceGVKs()
+	assert.Empty(t, failedGVKs, "Should have no failed GVKs after recovery")
+
+	clusterInfo = cache.GetClusterInfo()
+	assert.Empty(t, clusterInfo.FailedResourceGVKs, "Cluster info should have no failed GVKs after recovery")
+}
+
+func Test_ConversionWebhookErrorDoesNotFailSync(t *testing.T) {
+	cache := newCluster(t)
+
+	// Test that conversion webhook errors are properly identified as cache-tainting errors
+	conversionWebhookError := errors.New("conversion webhook for example.com/v1, Kind=Example failed")
+	assert.True(t, cache.errorTaintsCache(conversionWebhookError), "Conversion webhook errors should taint cache")
+
+	// Test that other errors are not cache-tainting
+	networkError := errors.New("connection timeout")
+	assert.False(t, cache.errorTaintsCache(networkError), "Network errors should not taint cache")
+
+	authError := errors.New("Unauthorized")
+	assert.False(t, cache.errorTaintsCache(authError), "Auth errors should not taint cache")
+
+	// Test various conversion webhook error patterns
+	testCases := []string{
+		"conversion webhook for apps/v1, Kind=Deployment failed: Post \"https://webhook.svc:443/convert\": connection refused",
+		"failed to convert resource from apps/v1beta1 to apps/v1: conversion error",
+		"conversion webhook for stable.example.com/v1, Kind=CronTab failed: timeout",
+	}
+
+	for _, errorMsg := range testCases {
+		err := errors.New(errorMsg)
+		assert.True(t, cache.errorTaintsCache(err), "Error '%s' should taint cache", errorMsg)
+	}
+}

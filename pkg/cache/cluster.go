@@ -234,7 +234,7 @@ type clusterCache struct {
 	lock      sync.RWMutex
 	resources map[kube.ResourceKey]*Resource
 	nsIndex   map[string]map[kube.ResourceKey]*Resource
-	
+
 	// failedResourceGVKs tracks GVKs that failed to sync due to conversion webhook errors
 	failedResourceGVKs map[string]bool
 
@@ -656,7 +656,7 @@ func (c *clusterCache) loadInitialState(ctx context.Context, api kube.APIResourc
 				Kind:    api.GroupKind.Kind,
 			}
 			if lock {
-				runSynced(&c.lock, func() error {
+				_ = runSynced(&c.lock, func() error {
 					c.trackFailedGVK(gvk, err)
 					return nil
 				})
@@ -675,7 +675,7 @@ func (c *clusterCache) loadInitialState(ctx context.Context, api kube.APIResourc
 		Version: api.GroupVersionResource.Version,
 		Kind:    api.GroupKind.Kind,
 	}
-	
+
 	if lock {
 		return resourceVersion, runSynced(&c.lock, func() error {
 			c.clearFailedGVK(gvk)
@@ -1440,15 +1440,15 @@ func (c *clusterCache) GetClusterInfo() ClusterInfo {
 
 	// Retrieve failed resource GVKs from the internal state
 	failedGVKs := c.getFailedResourceGVKs()
-	
+
 	return ClusterInfo{
-		APIsCount:         len(c.apisMeta),
-		K8SVersion:        c.serverVersion,
-		ResourcesCount:    len(c.resources),
-		Server:            c.config.Host,
-		LastCacheSyncTime: c.syncStatus.syncTime,
-		SyncError:         c.syncStatus.syncError,
-		APIResources:      c.apiResources,
+		APIsCount:          len(c.apisMeta),
+		K8SVersion:         c.serverVersion,
+		ResourcesCount:     len(c.resources),
+		Server:             c.config.Host,
+		LastCacheSyncTime:  c.syncStatus.syncTime,
+		SyncError:          c.syncStatus.syncError,
+		APIResources:       c.apiResources,
 		FailedResourceGVKs: failedGVKs,
 	}
 }
@@ -1488,9 +1488,9 @@ func (c *clusterCache) errorTaintsCache(err error) bool {
 	if err == nil {
 		return false
 	}
-	
+
 	errStr := err.Error()
-	
+
 	switch {
 	case strings.Contains(errStr, "conversion webhook"):
 		return true
