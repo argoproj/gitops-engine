@@ -663,11 +663,7 @@ func (sc *syncContext) removeHookFinalizer(task *syncTask) error {
 		updateErr := sc.updateResource(task)
 		if apierrors.IsConflict(updateErr) {
 			sc.log.WithValues("task", task).V(1).Info("Retrying hook finalizer removal due to conflict on update")
-			resIf, err := sc.getResourceIf(task, "get")
-			if err != nil {
-				return fmt.Errorf("failed to get resource interface: %w", err)
-			}
-			liveObj, err := resIf.Get(context.TODO(), task.liveObj.GetName(), metav1.GetOptions{})
+			liveObj, err := sc.getResource(task)
 			if apierrors.IsNotFound(err) {
 				sc.log.WithValues("task", task).V(1).Info("Resource is already deleted")
 				return nil
@@ -685,6 +681,19 @@ func (sc *syncContext) removeHookFinalizer(task *syncTask) error {
 		}
 		return nil
 	})
+}
+
+func (sc *syncContext) getResource(task *syncTask) (*unstructured.Unstructured, error) {
+	sc.log.WithValues("task", task).V(1).Info("Getting resource")
+	resIf, err := sc.getResourceIf(task, "get")
+	if err != nil {
+		return nil, err
+	}
+	liveObj, err := resIf.Get(context.TODO(), task.name(), metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get resource: %w", err)
+	}
+	return liveObj, nil
 }
 
 func (sc *syncContext) updateResource(task *syncTask) error {

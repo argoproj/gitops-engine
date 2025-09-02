@@ -1318,22 +1318,84 @@ func TestSyncFailureHookWithFailedSync(t *testing.T) {
 }
 
 func TestBeforeHookCreation(t *testing.T) {
+	finalizerRemoved := false
 	syncCtx := newTestSyncCtx(nil)
-	hook := testingutils.Annotate(testingutils.Annotate(testingutils.NewPod(), synccommon.AnnotationKeyHook, "Sync"), synccommon.AnnotationKeyHookDeletePolicy, "BeforeHookCreation")
-	hook.SetNamespace(testingutils.FakeArgoCDNamespace)
+	hookObj := testingutils.Annotate(testingutils.Annotate(testingutils.NewPod(), synccommon.AnnotationKeyHook, "Sync"), synccommon.AnnotationKeyHookDeletePolicy, "BeforeHookCreation")
+	hookObj.SetFinalizers([]string{hook.HookFinalizer})
+	hookObj.SetNamespace(testingutils.FakeArgoCDNamespace)
 	syncCtx.resources = groupResources(ReconciliationResult{
-		Live:   []*unstructured.Unstructured{hook},
+		Live:   []*unstructured.Unstructured{hookObj},
 		Target: []*unstructured.Unstructured{nil},
 	})
-	syncCtx.hooks = []*unstructured.Unstructured{hook}
-	syncCtx.dynamicIf = fake.NewSimpleDynamicClient(runtime.NewScheme())
+	syncCtx.hooks = []*unstructured.Unstructured{hookObj}
+	client := fake.NewSimpleDynamicClient(runtime.NewScheme(), hookObj)
+	client.PrependReactor("update", "pods", func(_ testcore.Action) (bool, runtime.Object, error) {
+		finalizerRemoved = true
+		return false, nil, nil
+	})
+	syncCtx.dynamicIf = client
+
+	// First sync will delete the existing hook
+	syncCtx.Sync()
+	phase, _, _ := syncCtx.GetState()
+	assert.Equal(t, synccommon.OperationRunning, phase)
+	assert.True(t, finalizerRemoved)
+
+	// Second sync will create the hook
+	syncCtx.Sync()
+	phase, message, resources := syncCtx.GetState()
+	assert.Equal(t, synccommon.OperationRunning, phase)
+	assert.Len(t, resources, 1)
+	assert.Equal(t, synccommon.OperationRunning, resources[0].HookPhase)
+	assert.Equal(t, "waiting for completion of hook /Pod/my-pod", message)
+}
+
+func TestSync_ExistingHooksWithFinalizer(t *testing.T) {
+	newHook := func(name string, hookType synccommon.HookType, deletePolicy synccommon.HookDeletePolicy) *unstructured.Unstructured {
+		obj := testingutils.NewPod()
+		obj.SetName(name)
+		obj.SetNamespace(testingutils.FakeArgoCDNamespace)
+		testingutils.Annotate(obj, synccommon.AnnotationKeyHook, string(hookType))
+		testingutils.Annotate(obj, synccommon.AnnotationKeyHookDeletePolicy, string(deletePolicy))
+		obj.SetFinalizers([]string{hook.HookFinalizer})
+		return obj
+	}
+
+	hook1 := newHook("existing-hook-1", synccommon.HookTypePreSync, synccommon.HookDeletePolicyBeforeHookCreation)
+	hook2 := newHook("existing-hook-2", synccommon.HookTypePreSync, synccommon.HookDeletePolicyHookFailed)
+	hook3 := newHook("existing-hook-3", synccommon.HookTypePreSync, synccommon.HookDeletePolicyHookSucceeded)
+
+	syncCtx := newTestSyncCtx(nil)
+	fakeDynamicClient := fake.NewSimpleDynamicClient(runtime.NewScheme(), hook1, hook2, hook3)
+	syncCtx.dynamicIf = fakeDynamicClient
+	updatedCount := 0
+	fakeDynamicClient.PrependReactor("update", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
+		// Removing the finalizers
+		updatedCount++
+		return false, nil, nil
+	})
+	deletedCount := 0
+	fakeDynamicClient.PrependReactor("delete", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
+		// because of HookDeletePolicyBeforeHookCreation
+		deletedCount++
+		return false, nil, nil
+	})
+	syncCtx.resources = groupResources(ReconciliationResult{
+		Live:   []*unstructured.Unstructured{hook1, hook2, hook3},
+		Target: []*unstructured.Unstructured{nil, nil, nil},
+	})
+	syncCtx.hooks = []*unstructured.Unstructured{hook1, hook2, hook3}
 
 	syncCtx.Sync()
+	phase, _, _ := syncCtx.GetState()
 
-	_, _, resources := syncCtx.GetState()
-	assert.Len(t, resources, 1)
-	assert.Empty(t, resources[0].Message)
-	assert.Equal(t, "waiting for completion of hook /Pod/my-pod", syncCtx.message)
+	assert.Equal(t, synccommon.OperationRunning, phase)
+	assert.Equal(t, 3, updatedCount)
+	assert.Equal(t, 1, deletedCount)
+
+	_, err := syncCtx.getResource(&syncTask{liveObj: hook1})
+	require.Error(t, err, "Expected resource to be deleted")
+	assert.True(t, apierrors.IsNotFound(err))
 }
 
 func TestRunSyncFailHooksFailed(t *testing.T) {
