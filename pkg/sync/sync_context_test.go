@@ -2534,8 +2534,8 @@ func TestTerminate_Hooks_Running(t *testing.T) {
 			metav1.Now(),
 		))
 	syncCtx.resources = groupResources(ReconciliationResult{
-		Live:   []*unstructured.Unstructured{obj},
-		Target: []*unstructured.Unstructured{obj},
+		Live:   []*unstructured.Unstructured{obj, hook1, hook2, hook3},
+		Target: []*unstructured.Unstructured{obj, nil, nil, nil},
 	})
 	syncCtx.hooks = []*unstructured.Unstructured{hook1, hook2, hook3}
 	fakeDynamicClient := fake.NewSimpleDynamicClient(runtime.NewScheme(), hook1, hook2, hook3)
@@ -2612,8 +2612,8 @@ func TestTerminate_Hooks_Running_Healthy(t *testing.T) {
 			metav1.Now(),
 		))
 	syncCtx.resources = groupResources(ReconciliationResult{
-		Live:   []*unstructured.Unstructured{obj},
-		Target: []*unstructured.Unstructured{obj},
+		Live:   []*unstructured.Unstructured{obj, hook1, hook2, hook3},
+		Target: []*unstructured.Unstructured{obj, nil, nil, nil},
 	})
 	syncCtx.hooks = []*unstructured.Unstructured{hook1, hook2, hook3}
 	fakeDynamicClient := fake.NewSimpleDynamicClient(runtime.NewScheme(), hook1, hook2, hook3)
@@ -2697,8 +2697,8 @@ func TestTerminate_Hooks_Completed(t *testing.T) {
 			metav1.Now(),
 		))
 	syncCtx.resources = groupResources(ReconciliationResult{
-		Live:   []*unstructured.Unstructured{obj},
-		Target: []*unstructured.Unstructured{obj},
+		Live:   []*unstructured.Unstructured{obj, hook1, hook2, hook3},
+		Target: []*unstructured.Unstructured{obj, nil, nil, nil},
 	})
 	syncCtx.hooks = []*unstructured.Unstructured{hook1, hook2, hook3}
 	fakeDynamicClient := fake.NewSimpleDynamicClient(runtime.NewScheme(), hook1, hook2, hook3)
@@ -2729,7 +2729,7 @@ func TestTerminate_Hooks_Completed(t *testing.T) {
 	assert.Equal(t, kube.GetResourceKey(hook3), results[2].ResourceKey)
 	assert.Equal(t, synccommon.OperationError, results[2].HookPhase)
 	assert.Equal(t, "hook3 error", results[2].Message)
-	assert.Equal(t, 0, updatedCount)
+	assert.Equal(t, 3, updatedCount)
 	assert.Equal(t, 0, deletedCount)
 }
 
@@ -2759,8 +2759,8 @@ func TestTerminate_Hooks_Error(t *testing.T) {
 			metav1.Now(),
 		))
 	syncCtx.resources = groupResources(ReconciliationResult{
-		Live:   []*unstructured.Unstructured{obj},
-		Target: []*unstructured.Unstructured{obj},
+		Live:   []*unstructured.Unstructured{obj, hook1},
+		Target: []*unstructured.Unstructured{obj, nil},
 	})
 	syncCtx.hooks = []*unstructured.Unstructured{hook1}
 	fakeDynamicClient := fake.NewSimpleDynamicClient(runtime.NewScheme(), hook1)

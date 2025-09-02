@@ -647,6 +647,18 @@ func (sc *syncContext) Sync() {
 func (sc *syncContext) Terminate() {
 	sc.log.V(1).Info("terminating")
 	tasks, _ := sc.getSyncTasks()
+
+	// Remove completed hook finalizers
+	hooksCompleted := tasks.Filter(func(task *syncTask) bool {
+		return task.isHook() && task.completed()
+	})
+	for _, task := range hooksCompleted {
+		if err := sc.removeHookFinalizer(task); err != nil {
+			sc.setResourceResult(task, task.syncStatus, common.OperationError, fmt.Sprintf("Failed to remove hook finalizer: %v", err))
+		}
+	}
+
+	// Terminate running hooks
 	terminateSuccessful := sc.terminateHooksPreemptively(tasks.Filter(func(task *syncTask) bool { return task.isHook() }))
 	if terminateSuccessful {
 		sc.setOperationPhase(common.OperationFailed, "Operation terminated")
