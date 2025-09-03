@@ -1065,7 +1065,7 @@ func (c *clusterCache) IterateHierarchyV2(keys []kube.ResourceKey, action func(r
 	}
 	for namespace, namespaceKeys := range keysPerNamespace {
 		nsNodes := c.nsIndex[namespace]
-		graph := buildGraph(nsNodes)
+		graph := buildGraph(nsNodes, c.resources)
 		visited := make(map[kube.ResourceKey]int)
 		for _, key := range namespaceKeys {
 			visited[key] = 0
@@ -1095,7 +1095,7 @@ func (c *clusterCache) IterateHierarchyV2(keys []kube.ResourceKey, action func(r
 	}
 }
 
-func buildGraph(nsNodes map[kube.ResourceKey]*Resource) map[kube.ResourceKey]map[types.UID]*Resource {
+func buildGraph(nsNodes map[kube.ResourceKey]*Resource, allResources map[kube.ResourceKey]*Resource) map[kube.ResourceKey]map[types.UID]*Resource {
 	// Prepare to construct a graph
 	nodesByUID := make(map[types.UID][]*Resource, len(nsNodes))
 	for _, node := range nsNodes {
@@ -1106,6 +1106,7 @@ func buildGraph(nsNodes map[kube.ResourceKey]*Resource) map[kube.ResourceKey]map
 	graph := make(map[kube.ResourceKey]map[types.UID]*Resource)
 
 	// Loop through all nodes, calling each one "childNode," because we're only bothering with it if it has a parent.
+	// First process nodes in the current namespace
 	for _, childNode := range nsNodes {
 		for i, ownerRef := range childNode.OwnerRefs {
 			// First, backfill UID of inferred owner child references.
@@ -1115,7 +1116,16 @@ func buildGraph(nsNodes map[kube.ResourceKey]*Resource) map[kube.ResourceKey]map
 					// APIVersion is invalid, so we couldn't find the parent.
 					continue
 				}
-				graphKeyNode, ok := nsNodes[kube.ResourceKey{Group: group.Group, Kind: ownerRef.Kind, Namespace: childNode.Ref.Namespace, Name: ownerRef.Name}]
+				// Try same-namespace lookup first (preserves existing behavior)
+				sameNSKey := kube.ResourceKey{Group: group.Group, Kind: ownerRef.Kind, Namespace: childNode.Ref.Namespace, Name: ownerRef.Name}
+				graphKeyNode, ok := nsNodes[sameNSKey]
+
+				// If not found and we have cross-namespace capabilities, try cluster-scoped lookup
+				if !ok && allResources != nil {
+					clusterScopedKey := kube.ResourceKey{Group: group.Group, Kind: ownerRef.Kind, Namespace: "", Name: ownerRef.Name}
+					graphKeyNode, ok = allResources[clusterScopedKey]
+				}
+
 				if !ok {
 					// No resource found with the given graph key, so move on.
 					continue
@@ -1126,6 +1136,18 @@ func buildGraph(nsNodes map[kube.ResourceKey]*Resource) map[kube.ResourceKey]map
 
 			// Now that we have the UID of the parent, update the graph.
 			uidNodes, ok := nodesByUID[ownerRef.UID]
+			if !ok && allResources != nil {
+				// If parent not found in current namespace, check if it exists in allResources
+				// and create a temporary uidNodes list for cross-namespace relationships
+				for _, parentCandidate := range allResources {
+					if parentCandidate.Ref.UID == ownerRef.UID {
+						uidNodes = []*Resource{parentCandidate}
+						ok = true
+						break
+					}
+				}
+			}
+
 			if ok {
 				for _, uidNode := range uidNodes {
 					// Update the graph for this owner to include the child.
@@ -1148,6 +1170,31 @@ func buildGraph(nsNodes map[kube.ResourceKey]*Resource) map[kube.ResourceKey]map
 			}
 		}
 	}
+
+	// Second pass: process cross-namespace children if allResources is provided
+	for _, childNode := range allResources {
+		// Skip if already processed in the current namespace
+		if _, exists := nsNodes[childNode.ResourceKey()]; exists {
+			continue
+		}
+
+		// Check if this child has a parent in the current namespace
+		for _, ownerRef := range childNode.OwnerRefs {
+			group, err := schema.ParseGroupVersion(ownerRef.APIVersion)
+			if err != nil {
+				continue
+			}
+			parentKey := kube.ResourceKey{Group: group.Group, Kind: ownerRef.Kind, Namespace: "", Name: ownerRef.Name}
+			if parentNode, exists := nsNodes[parentKey]; exists {
+				// Found a cross-namespace relationship
+				if _, ok := graph[parentNode.ResourceKey()]; !ok {
+					graph[parentNode.ResourceKey()] = make(map[types.UID]*Resource)
+				}
+				graph[parentNode.ResourceKey()][childNode.Ref.UID] = childNode
+			}
+		}
+	}
+
 	return graph
 }
 
