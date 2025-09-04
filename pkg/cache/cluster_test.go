@@ -1158,10 +1158,10 @@ func TestIterateHierachyV2(t *testing.T) {
 	})
 }
 
-// TestIterateHierarchyV2_CrossNamespaceOwnerReference tests that cross-namespace
+// TestIterateHierarchyV2_ClusterScopedParentOwnerReference tests that cluster-scoped parent
 // owner references work correctly, specifically cluster-scoped resources with
 // namespaced children
-func TestIterateHierarchyV2_CrossNamespaceOwnerReference(t *testing.T) {
+func TestIterateHierarchyV2_ClusterScopedParentOwnerReference(t *testing.T) {
 	cluster := newCluster(t)
 
 	// Create cluster-scoped parent resource (ProviderRevision)
@@ -1253,6 +1253,63 @@ func TestIterateHierarchyV2_CrossNamespaceOwnerReference(t *testing.T) {
 	assert.True(t, foundParent, "Should visit ProviderRevision parent")
 	assert.True(t, foundClusterChild, "Should visit ClusterRole child")
 	assert.True(t, foundNamespacedChild, "Should visit Deployment child (this tests the fix)")
+}
+
+// TestIterateHierarchyV2_DisabledClusterScopedParents tests that the environment variable
+// disables cluster-scoped parent owner reference resolution
+func TestIterateHierarchyV2_DisabledClusterScopedParents(t *testing.T) {
+	// Set environment variable to disable cluster-scoped parent functionality
+	t.Setenv("GITOPS_ENGINE_DISABLE_CLUSTER_SCOPED_PARENT_REFS", "1")
+
+	cluster := newCluster(t)
+
+	// Create cluster-scoped parent resource (ProviderRevision)
+	parentUID := types.UID("parent-uid-123")
+	clusterScopedParent := &Resource{
+		Ref: corev1.ObjectReference{
+			APIVersion: "pkg.crossplane.io/v1",
+			Kind:       "ProviderRevision",
+			Name:       "provider-aws-cloudformation-3b2c213545b8",
+			UID:        parentUID,
+			// No namespace = cluster-scoped
+		},
+		OwnerRefs: []metav1.OwnerReference{},
+	}
+
+	// Create namespaced child with ownerReference to cluster-scoped parent
+	namespacedChild := &Resource{
+		Ref: corev1.ObjectReference{
+			APIVersion: "apps/v1",
+			Kind:       "Deployment",
+			Name:       "provider-aws-cloudformation-3b2c213545b8",
+			Namespace:  "crossplane-system",
+			UID:        types.UID("child-uid-456"),
+		},
+		OwnerRefs: []metav1.OwnerReference{{
+			APIVersion: "pkg.crossplane.io/v1",
+			Kind:       "ProviderRevision",
+			Name:       "provider-aws-cloudformation-3b2c213545b8",
+		}},
+	}
+
+	// Add resources to cluster cache
+	cluster.setNode(clusterScopedParent)
+	cluster.setNode(namespacedChild)
+
+	// Test hierarchy traversal starting from cluster-scoped parent
+	var visitedResources []*Resource
+	cluster.IterateHierarchyV2(
+		[]kube.ResourceKey{clusterScopedParent.ResourceKey()},
+		func(resource *Resource, _ map[kube.ResourceKey]*Resource) bool {
+			visitedResources = append(visitedResources, resource)
+			return true
+		},
+	)
+
+	// When disabled, should only visit the parent (1 resource)
+	// because cluster-scoped parent resolution is disabled
+	assert.Len(t, visitedResources, 1, "Should only visit parent when cluster-scoped parent resolution disabled")
+	assert.Equal(t, "ProviderRevision", visitedResources[0].Ref.Kind)
 }
 
 // buildGraphTestHelper creates test resources and maps for buildGraph testing
