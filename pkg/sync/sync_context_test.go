@@ -2281,84 +2281,6 @@ func BenchmarkSync(b *testing.B) {
 	}
 }
 
-func TestNeedsClientSideApplyMigration(t *testing.T) {
-	syncCtx := newTestSyncCtx(nil)
-
-	tests := []struct {
-		name     string
-		liveObj  *unstructured.Unstructured
-		expected bool
-	}{
-		{
-			name:     "nil object",
-			liveObj:  nil,
-			expected: false,
-		},
-		{
-			name:     "object with no managed fields",
-			liveObj:  testingutils.NewPod(),
-			expected: false,
-		},
-		{
-			name: "object with kubectl-client-side-apply fields",
-			liveObj: func() *unstructured.Unstructured {
-				obj := testingutils.NewPod()
-				obj.SetManagedFields([]metav1.ManagedFieldsEntry{
-					{
-						Manager:   "kubectl-client-side-apply",
-						Operation: metav1.ManagedFieldsOperationUpdate,
-						FieldsV1:  &metav1.FieldsV1{Raw: []byte(`{"f:metadata":{"f:annotations":{}}}`)},
-					},
-				})
-				return obj
-			}(),
-			expected: true,
-		},
-		{
-			name: "object with only argocd-controller fields",
-			liveObj: func() *unstructured.Unstructured {
-				obj := testingutils.NewPod()
-				obj.SetManagedFields([]metav1.ManagedFieldsEntry{
-					{
-						Manager:   "argocd-controller",
-						Operation: metav1.ManagedFieldsOperationApply,
-						FieldsV1:  &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}}}`)},
-					},
-				})
-				return obj
-			}(),
-			expected: false,
-		},
-		{
-			name: "object with mixed field managers",
-			liveObj: func() *unstructured.Unstructured {
-				obj := testingutils.NewPod()
-				obj.SetManagedFields([]metav1.ManagedFieldsEntry{
-					{
-						Manager:   "kubectl-client-side-apply",
-						Operation: metav1.ManagedFieldsOperationUpdate,
-						FieldsV1:  &metav1.FieldsV1{Raw: []byte(`{"f:metadata":{"f:annotations":{}}}`)},
-					},
-					{
-						Manager:   "argocd-controller",
-						Operation: metav1.ManagedFieldsOperationApply,
-						FieldsV1:  &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}}}`)},
-					},
-				})
-				return obj
-			}(),
-			expected: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := syncCtx.needsClientSideApplyMigration(tt.liveObj, "kubectl-client-side-apply")
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 func diffResultListClusterResource() *diff.DiffResultList {
 	ns1 := testingutils.NewNamespace()
 	ns1.SetName("ns-1")
@@ -2383,4 +2305,3 @@ func diffResultListClusterResource() *diff.DiffResultList {
 
 	return &diffResultList
 }
->>>>>>> b3a2ec1 (fix(sync): ApplyOutOfSyncOnly=true sync option is not honoured for cluster scoped resources (#765))
