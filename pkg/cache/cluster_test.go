@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -681,7 +680,7 @@ func TestProcessNewChildEvent(t *testing.T) {
 
 	rsChildren := getChildren(cluster, mustToUnstructured(testRS()))
 	sort.Slice(rsChildren, func(i, j int) bool {
-		return strings.Compare(rsChildren[i].Ref.Name, rsChildren[j].Ref.Name) < 0
+		return rsChildren[i].Ref.Name < rsChildren[j].Ref.Name
 	})
 	assert.Equal(t, []*Resource{{
 		Ref: corev1.ObjectReference{
