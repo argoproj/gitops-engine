@@ -1265,6 +1265,31 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 			createTasks = append(createTasks, task)
 		}
 	}
+
+	// remove finalizers from previous sync on existing hooks to make sure the operation is idempotent
+	{
+		ss := newStateSync(state)
+		existingHooks := tasks.Filter(func(t *syncTask) bool { return t.isHook() && t.pending() && t.liveObj != nil })
+		for _, task := range existingHooks {
+			t := task
+			ss.Go(func(state runState) runState {
+				logCtx := sc.log.WithValues("dryRun", dryRun, "task", t)
+				logCtx.V(1).Info("Removing finalizers")
+				if !dryRun {
+					if err := sc.removeHookFinalizer(t); err != nil {
+						state = failed
+						sc.setResourceResult(t, t.syncStatus, common.OperationError, fmt.Sprintf("failed to remove hook finalizer: %v", err))
+					}
+				}
+				return state
+			})
+		}
+		state = ss.Wait()
+	}
+	if state != successful {
+		return state
+	}
+
 	// prune first
 	{
 		if !sc.pruneConfirmed {
@@ -1316,15 +1341,19 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 		for _, task := range hooksPendingDeletion {
 			t := task
 			ss.Go(func(state runState) runState {
-				sc.log.WithValues("dryRun", dryRun, "task", t).V(1).Info("Deleting")
+				log := sc.log.WithValues("dryRun", dryRun, "task", t).V(1)
+				log.Info("Deleting")
 				if !dryRun {
 					err := sc.deleteResource(t)
 					if err != nil {
 						// it is possible to get a race condition here, such that the resource does not exist when
-						// delete is requested, we treat this as a nop
+						// delete is requested, we treat this as a nopand remove the liveObj
 						if !apierrors.IsNotFound(err) {
 							state = failed
-							sc.setResourceResult(t, "", common.OperationError, fmt.Sprintf("failed to delete resource: %v", err))
+							sc.setResourceResult(t, t.syncStatus, common.OperationError, fmt.Sprintf("failed to delete resource: %v", err))
+						} else {
+							log.Info("Resource not found, treating as no-op and removing liveObj")
+							t.liveObj = nil
 						}
 					} else {
 						// if there is anything that needs deleting, we are at best now in pending and
