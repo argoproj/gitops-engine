@@ -18,9 +18,17 @@ linters:
     gocritic:
       disabled-checks:
         - appendAssign
-        - assignOp
+        - badRegexp
+        - builtinShadow
+        - commentedOutCode
         - exitAfterDefer
-        - typeSwitchVar
+        - hugeParam
+        - importShadow
+        - paramTypeCombine
+        - rangeValCopy
+        - unnamedResult
+        - whyNoLint
+      enable-all: true
     importas:
       alias:
         - pkg: k8s.io/api/apps/v1
