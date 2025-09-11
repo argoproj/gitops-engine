@@ -2434,8 +2434,6 @@ func TestNeedsClientSideApplyMigration(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 func diffResultListClusterResource() *diff.DiffResultList {
 	ns1 := testingutils.NewNamespace()
 	ns1.SetName("ns-1")
@@ -2459,15 +2457,11 @@ func diffResultListClusterResource() *diff.DiffResultList {
 	diffResultList.Diffs = append(diffResultList.Diffs, diff.DiffResult{NormalizedLive: nsBytes, PredictedLive: nsBytes, Modified: false})
 
 	return &diffResultList
-=======
-func templateWithStorage(name, storage string) map[string]interface{} {
-	return map[string]interface{}{
-		"metadata": map[string]interface{}{
-=======
+}
+
 func templateWithStorage(name, storage string) map[string]any {
 	return map[string]any{
 		"metadata": map[string]any{
->>>>>>> 2a210a3 (resolve linter issues)
 			"name": name,
 		},
 		"spec": map[string]any{
@@ -2483,16 +2477,16 @@ func templateWithStorage(name, storage string) map[string]any {
 func TestStatefulSetImmutableFieldErrors(t *testing.T) {
 	tests := []struct {
 		name            string
-		currentSpec     map[string]any
-		desiredSpec     map[string]any
+		currentSpec     map[string]interface{}
+		desiredSpec     map[string]interface{}
 		expectedMessage string
 	}{
 		{
 			name: "single field change - serviceName",
-			currentSpec: map[string]any{
+			currentSpec: map[string]interface{}{
 				"serviceName": "old-svc",
 			},
-			desiredSpec: map[string]any{
+			desiredSpec: map[string]interface{}{
 				"serviceName": "new-svc",
 			},
 			expectedMessage: `attempting to change immutable fields:
@@ -2504,15 +2498,15 @@ Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordina
 		},
 		{
 			name: "volumeClaimTemplates change with storage size",
-			currentSpec: map[string]any{
-				"volumeClaimTemplates": []any{
-					map[string]any{
-						"metadata": map[string]any{
+			currentSpec: map[string]interface{}{
+				"volumeClaimTemplates": []interface{}{
+					map[string]interface{}{
+						"metadata": map[string]interface{}{
 							"name": "data",
 						},
-						"spec": map[string]any{
-							"resources": map[string]any{
-								"requests": map[string]any{
+						"spec": map[string]interface{}{
+							"resources": map[string]interface{}{
+								"requests": map[string]interface{}{
 									"storage": "1Gi",
 								},
 							},
@@ -2520,15 +2514,15 @@ Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordina
 					},
 				},
 			},
-			desiredSpec: map[string]any{
-				"volumeClaimTemplates": []any{
-					map[string]any{
-						"metadata": map[string]any{
+			desiredSpec: map[string]interface{}{
+				"volumeClaimTemplates": []interface{}{
+					map[string]interface{}{
+						"metadata": map[string]interface{}{
 							"name": "data",
 						},
-						"spec": map[string]any{
-							"resources": map[string]any{
-								"requests": map[string]any{
+						"spec": map[string]interface{}{
+							"resources": map[string]interface{}{
+								"requests": map[string]interface{}{
 									"storage": "2Gi",
 								},
 							},
@@ -2545,16 +2539,16 @@ Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordina
 		},
 		{
 			name: "selector change",
-			currentSpec: map[string]any{
-				"selector": map[string]any{
-					"matchLabels": map[string]any{
+			currentSpec: map[string]interface{}{
+				"selector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{
 						"app": "old-app",
 					},
 				},
 			},
-			desiredSpec: map[string]any{
-				"selector": map[string]any{
-					"matchLabels": map[string]any{
+			desiredSpec: map[string]interface{}{
+				"selector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{
 						"app": "new-app",
 					},
 				},
@@ -2568,14 +2562,14 @@ Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordina
 		},
 		{
 			name: "volumeClaimTemplates change from nil",
-			currentSpec: map[string]any{
+			currentSpec: map[string]interface{}{
 				"serviceName": "test-svc",
 			},
-			desiredSpec: map[string]any{
+			desiredSpec: map[string]interface{}{
 				"serviceName": "test-svc",
-				"volumeClaimTemplates": []any{
-					map[string]any{
-						"metadata": map[string]any{
+				"volumeClaimTemplates": []interface{}{
+					map[string]interface{}{
+						"metadata": map[string]interface{}{
 							"name": "data",
 						},
 					},
@@ -2590,24 +2584,24 @@ Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordina
 		},
 		{
 			name: "complex volumeClaimTemplates change",
-			currentSpec: map[string]any{
-				"volumeClaimTemplates": []any{
-					map[string]any{
-						"metadata": map[string]any{
+			currentSpec: map[string]interface{}{
+				"volumeClaimTemplates": []interface{}{
+					map[string]interface{}{
+						"metadata": map[string]interface{}{
 							"name": "data1",
 						},
 					},
 				},
 			},
-			desiredSpec: map[string]any{
-				"volumeClaimTemplates": []any{
-					map[string]any{
-						"metadata": map[string]any{
+			desiredSpec: map[string]interface{}{
+				"volumeClaimTemplates": []interface{}{
+					map[string]interface{}{
+						"metadata": map[string]interface{}{
 							"name": "data1",
 						},
 					},
-					map[string]any{
-						"metadata": map[string]any{
+					map[string]interface{}{
+						"metadata": map[string]interface{}{
 							"name": "data2",
 						},
 					},
@@ -2622,30 +2616,30 @@ Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordina
 		},
 		{
 			name: "multiple volumeClaimTemplate change",
-			currentSpec: map[string]any{
-				"serviceName": postgresqlSvc,
-				"selector": map[string]any{
-					"matchLabels": map[string]any{
+			currentSpec: map[string]interface{}{
+				"serviceName": "postgresql-svc",
+				"selector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{
 						"app": "postgresql",
 					},
 				},
-				"volumeClaimTemplates": []any{
-					templateWithStorage(staticFiles, "1Gi"),
-					templateWithStorage(dexconfig, "1Gi"),
-					templateWithStorage(argocdDexServerTLS, "1Gi"),
+				"volumeClaimTemplates": []interface{}{
+					templateWithStorage("static-files", "1Gi"),
+					templateWithStorage("dexconfig", "1Gi"),
+					templateWithStorage("argocd-dex-server-tls", "1Gi"),
 				},
 			},
-			desiredSpec: map[string]any{
-				"serviceName": postgresqlSvc,
-				"selector": map[string]any{
-					"matchLabels": map[string]any{
+			desiredSpec: map[string]interface{}{
+				"serviceName": "postgresql-svc",
+				"selector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{
 						"app": "postgresql",
 					},
 				},
-				"volumeClaimTemplates": []any{
-					templateWithStorage(staticFiles, "2Gi"),
-					templateWithStorage(dexconfig, "3Gi"),
-					templateWithStorage(argocdDexServerTLS, "4Gi"),
+				"volumeClaimTemplates": []interface{}{
+					templateWithStorage("static-files", "2Gi"),
+					templateWithStorage("dexconfig", "3Gi"),
+					templateWithStorage("argocd-dex-server-tls", "4Gi"),
 				},
 			},
 			expectedMessage: `attempting to change immutable fields:
@@ -2663,30 +2657,30 @@ Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordina
 		},
 		{
 			name: "multiple field changes",
-			currentSpec: map[string]any{
-				"serviceName": postgresqlSvc,
-				"selector": map[string]any{
-					"matchLabels": map[string]any{
+			currentSpec: map[string]interface{}{
+				"serviceName": "postgresql-svc",
+				"selector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{
 						"app": "postgresql",
 					},
 				},
-				"volumeClaimTemplates": []any{
-					templateWithStorage(staticFiles, "1Gi"),
-					templateWithStorage(dexconfig, "1Gi"),
-					templateWithStorage(argocdDexServerTLS, "1Gi"),
+				"volumeClaimTemplates": []interface{}{
+					templateWithStorage("static-files", "1Gi"),
+					templateWithStorage("dexconfig", "1Gi"),
+					templateWithStorage("argocd-dex-server-tls", "1Gi"),
 				},
 			},
-			desiredSpec: map[string]any{
+			desiredSpec: map[string]interface{}{
 				"serviceName": "postgresql-svc-new",
-				"selector": map[string]any{
-					"matchLabels": map[string]any{
+				"selector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{
 						"app": "postgresql-new",
 					},
 				},
-				"volumeClaimTemplates": []any{
-					templateWithStorage(staticFiles, "2Gi"),
-					templateWithStorage(dexconfig, "1Gi"),
-					templateWithStorage(argocdDexServerTLS, "1Gi"),
+				"volumeClaimTemplates": []interface{}{
+					templateWithStorage("static-files", "2Gi"),
+					templateWithStorage("dexconfig", "1Gi"),
+					templateWithStorage("argocd-dex-server-tls", "1Gi"),
 				},
 			},
 			expectedMessage: `attempting to change immutable fields:
@@ -2707,10 +2701,10 @@ Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordina
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			current := &unstructured.Unstructured{
-				Object: map[string]any{
+				Object: map[string]interface{}{
 					"apiVersion": testAPIVersion,
 					"kind":       "StatefulSet",
-					"metadata": map[string]any{
+					"metadata": map[string]interface{}{
 						"name":      testStatefulSet,
 						"namespace": testNamespace,
 					},
@@ -2719,10 +2713,10 @@ Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordina
 			}
 
 			desired := &unstructured.Unstructured{
-				Object: map[string]any{
+				Object: map[string]interface{}{
 					"apiVersion": testAPIVersion,
 					"kind":       "StatefulSet",
-					"metadata": map[string]any{
+					"metadata": map[string]interface{}{
 						"name":      testStatefulSet,
 						"namespace": testNamespace,
 					},
@@ -2751,5 +2745,4 @@ Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordina
 			assert.Equal(t, tt.expectedMessage, message)
 		})
 	}
->>>>>>> 58d4d7c (This is a combination of 8 commits.)
 }
