@@ -1135,7 +1135,7 @@ func (sc *syncContext) needsClientSideApplyMigration(liveObj *unstructured.Unstr
 // The next time server-side apply is performed, kubernetes automatically migrates all fields from the manager
 // that owns 'last-applied-configuration' to the manager that uses server-side apply. This will remove the
 // specified manager from the resources managed fields. 'kubectl-client-side-apply' is used as the default manager.
-func (sc *syncContext) performClientSideApplyMigration(targetObj *unstructured.Unstructured, fieldManager string) error {
+func (sc *syncContext) performClientSideApplyMigration(targetObj *unstructured.Unstructured, fieldManager string, cascadingStrategy metav1.DeletionPropagation) error {
 	sc.log.WithValues("resource", kubeutil.GetResourceKey(targetObj)).V(1).Info("Performing client-side apply migration step")
 
 	// Apply with the specified manager to set up the migration
@@ -1147,6 +1147,7 @@ func (sc *syncContext) performClientSideApplyMigration(targetObj *unstructured.U
 		false,
 		false,
 		fieldManager,
+		cascadingStrategy,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to perform client-side apply migration on manager %s: %w", fieldManager, err)
@@ -1189,7 +1190,7 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 	// Check if we need to perform client-side apply migration for server-side apply
 	if serverSideApply && !dryRun && sc.enableClientSideApplyMigration {
 		if sc.needsClientSideApplyMigration(t.liveObj, sc.clientSideApplyMigrationManager) {
-			err = sc.performClientSideApplyMigration(t.targetObj, sc.clientSideApplyMigrationManager)
+			err = sc.performClientSideApplyMigration(t.targetObj, sc.clientSideApplyMigrationManager, prunePropagationPolicy)
 			if err != nil {
 				return common.ResultCodeSyncFailed, fmt.Sprintf("Failed to perform client-side apply migration: %v", err)
 			}
