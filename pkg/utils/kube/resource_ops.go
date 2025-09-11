@@ -303,6 +303,32 @@ func (k *kubectlResourceOperations) UpdateResource(ctx context.Context, obj *uns
 }
 
 // ApplyResource performs an apply of a unstructured resource
+func (k *kubectlServerSideDiffDryRunApplier) ApplyResource(_ context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string, cascadingStrategy metav1.DeletionPropagation) (string, error) {
+	span := k.tracer.StartSpan("ApplyResource")
+	span.SetBaggageItem("kind", obj.GetKind())
+	span.SetBaggageItem("name", obj.GetName())
+	defer span.Finish()
+	k.log.V(1).WithValues(
+		"dry-run", [...]string{"none", "client", "server"}[dryRunStrategy],
+		"manager", manager,
+		"serverSideApply", serverSideApply).Info(fmt.Sprintf("Running server-side diff. Dry run applying resource %s/%s in cluster: %s, namespace: %s", obj.GetKind(), obj.GetName(), k.config.Host, obj.GetNamespace()))
+
+	return k.runResourceCommand(obj, func(ioStreams genericclioptions.IOStreams, fileName string) error {
+		cleanup, err := processKubectlRun(k.onKubectlRun, "apply")
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+
+		applyOpts, err := k.newApplyOptions(ioStreams, obj, fileName, validate, force, serverSideApply, dryRunStrategy, manager, cascadingStrategy)
+		if err != nil {
+			return err
+		}
+		return applyOpts.Run()
+	})
+}
+
+// ApplyResource performs an apply of a unstructured resource
 func (k *kubectlResourceOperations) ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string, cascadingStrategy metav1.DeletionPropagation) (string, error) {
 	span := k.tracer.StartSpan("ApplyResource")
 	span.SetBaggageItem("kind", obj.GetKind())
