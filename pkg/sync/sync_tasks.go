@@ -83,7 +83,6 @@ func (s syncTasks) Swap(i, j int) {
 // 3. kind
 // 4. name
 func (s syncTasks) Less(i, j int) bool {
-
 	tA := s[i]
 	tB := s[j]
 
@@ -198,7 +197,7 @@ func (s syncTasks) Split(predicate func(task *syncTask) bool) (trueTasks, falseT
 }
 
 func (s syncTasks) Map(predicate func(task *syncTask) string) []string {
-	messagesMap := make(map[string]interface{})
+	messagesMap := make(map[string]any)
 	for _, task := range s {
 		messagesMap[predicate(task)] = nil
 	}

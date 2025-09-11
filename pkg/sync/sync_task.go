@@ -29,9 +29,8 @@ type syncTask struct {
 func ternary(val bool, a, b string) string {
 	if val {
 		return a
-	} else {
-		return b
 	}
+	return b
 }
 
 func (t *syncTask) String() string {
@@ -71,6 +70,7 @@ func (t *syncTask) isHook() bool {
 func (t *syncTask) group() string {
 	return t.groupVersionKind().Group
 }
+
 func (t *syncTask) kind() string {
 	return t.groupVersionKind().Kind
 }
@@ -114,9 +114,8 @@ func (t *syncTask) pruned() bool {
 func (t *syncTask) hookType() common.HookType {
 	if t.isHook() {
 		return common.HookType(t.phase)
-	} else {
-		return ""
 	}
+	return ""
 }
 
 func (t *syncTask) hasHookDeletePolicy(policy common.HookDeletePolicy) bool {
@@ -149,5 +148,17 @@ func (t *syncTask) deleteOnPhaseFailed() bool {
 }
 
 func (t *syncTask) resourceKey() kube.ResourceKey {
-	return kube.GetResourceKey(t.obj())
+	resourceKey := kube.GetResourceKey(t.obj())
+	if t.liveObj != nil {
+		// t.targetObj has a namespace set for cluster-scoped resources, which causes kube.GetResourceKey()
+		// to produce an incorrect key with the namespace included. For example:
+		// rbac.authorization.k8s.io/ClusterRole/my-namespace/my-cluster-role
+		// instead of the correct rbac.authorization.k8s.io/ClusterRole//my-cluster-role.
+		// To prevent resource lookup issues, we always rely on the namespace of the live object if it is available.
+		// This logic will work for both cluster scoped and namespace scoped resources.
+		//
+		// Refer to https://github.com/argoproj/gitops-engine/blob/8007df5f6c5dd78a1a8cef73569468ce4d83682c/pkg/sync/sync_context.go#L827-L833
+		resourceKey.Namespace = t.liveObj.GetNamespace()
+	}
+	return resourceKey
 }

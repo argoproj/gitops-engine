@@ -17,8 +17,7 @@ func NewNoopSettings() *noopSettings {
 	return &noopSettings{}
 }
 
-type noopSettings struct {
-}
+type noopSettings struct{}
 
 func (f *noopSettings) GetResourceHealth(_ *unstructured.Unstructured) (*health.HealthStatus, error) {
 	return nil, nil
@@ -168,5 +167,19 @@ func SetRespectRBAC(respectRBAC int) UpdateSettingsFunc {
 		} else {
 			cache.respectRBAC = respectRBAC
 		}
+	}
+}
+
+// SetBatchEventsProcessing allows to set whether to process events in batch
+func SetBatchEventsProcessing(batchProcessing bool) UpdateSettingsFunc {
+	return func(cache *clusterCache) {
+		cache.batchEventsProcessing = batchProcessing
+	}
+}
+
+// SetEventProcessingInterval allows to set the interval for processing events
+func SetEventProcessingInterval(interval time.Duration) UpdateSettingsFunc {
+	return func(cache *clusterCache) {
+		cache.eventProcessingInterval = interval
 	}
 }

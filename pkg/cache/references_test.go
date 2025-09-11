@@ -1,13 +1,16 @@
 package cache
 
 import (
-	"github.com/argoproj/gitops-engine/pkg/utils/kube"
+	"testing"
+
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"testing"
+
+	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 )
 
 func Test_isStatefulSetChild(t *testing.T) {
@@ -36,9 +39,7 @@ func Test_isStatefulSetChild(t *testing.T) {
 
 	// Create a new unstructured object from the JSON string
 	un, err := kube.ToUnstructured(statefulSet)
-	if err != nil {
-		t.Errorf("Failed to convert StatefulSet to unstructured: %v", err)
-	}
+	require.NoErrorf(t, err, "Failed to convert StatefulSet to unstructured: %v", err)
 
 	tests := []struct {
 		name      string
@@ -67,16 +68,16 @@ func Test_isStatefulSetChild(t *testing.T) {
 		{
 			name: "Mismatch PVC for sw-broker",
 			args: args{un: &unstructured.Unstructured{
-				Object: map[string]interface{}{
+				Object: map[string]any{
 					"apiVersion": "apps/v1",
 					"kind":       "StatefulSet",
-					"metadata": map[string]interface{}{
+					"metadata": map[string]any{
 						"name": "sw-broker",
 					},
-					"spec": map[string]interface{}{
-						"volumeClaimTemplates": []interface{}{
-							map[string]interface{}{
-								"metadata": map[string]interface{}{
+					"spec": map[string]any{
+						"volumeClaimTemplates": []any{
+							map[string]any{
+								"metadata": map[string]any{
 									"name": "volume-2",
 								},
 							},

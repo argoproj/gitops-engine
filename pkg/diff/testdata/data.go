@@ -24,6 +24,15 @@ var (
 	//go:embed smd-deploy-config.yaml
 	DeploymentConfigYAML string
 
+	//go:embed smd-deploy2-live.yaml
+	Deployment2LiveYAML string
+
+	//go:embed smd-deploy2-config.yaml
+	Deployment2ConfigYAML string
+
+	//go:embed smd-deploy2-predicted-live.json
+	Deployment2PredictedLiveJSONSSD string
+
 	// OpenAPIV2Doc is a binary representation of the openapi
 	// document available in a given k8s instance. To update
 	// this file the following commands can be executed:
@@ -41,4 +50,31 @@ var (
 
 	//go:embed ssd-service-predicted-live.json
 	ServicePredictedLiveJSONSSD string
+
+	//go:embed ssd-deploy-nested-config.yaml
+	DeploymentNestedConfigYAMLSSD string
+
+	//go:embed ssd-deploy-nested-live.yaml
+	DeploymentNestedLiveYAMLSSD string
+
+	//go:embed ssd-deploy-nested-predicted-live.json
+	DeploymentNestedPredictedLiveJSONSSD string
+
+	//go:embed ssd-deploy-with-manual-apply-config.yaml
+	DeploymentApplyConfigYAMLSSD string
+
+	//go:embed ssd-deploy-with-manual-apply-live.yaml
+	DeploymentApplyLiveYAMLSSD string
+
+	//go:embed ssd-deploy-with-manual-apply-predicted-live.json
+	DeploymentApplyPredictedLiveJSONSSD string
+
+	//go:embed ssd-svc-label-live.yaml
+	ServiceLiveLabelYAMLSSD string
+
+	//go:embed ssd-svc-no-label-config.yaml
+	ServiceConfigNoLabelYAMLSSD string
+
+	//go:embed ssd-svc-no-label-predicted-live.json
+	ServicePredictedLiveNoLabelJSONSSD string
 )

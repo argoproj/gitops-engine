@@ -59,7 +59,7 @@ func NewEngine(config *rest.Config, clusterCache cache.ClusterCache, opts ...Opt
 func (e *gitOpsEngine) Run() (StopFunc, error) {
 	err := e.cache.EnsureSynced()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to ensure the cache is synced: %w", err)
 	}
 
 	return func() {
@@ -76,23 +76,23 @@ func (e *gitOpsEngine) Sync(ctx context.Context,
 ) ([]common.ResourceSyncResult, error) {
 	managedResources, err := e.cache.GetManagedLiveObjs(resources, isManaged)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get managed live objects: %w", err)
 	}
 	result := sync.Reconcile(resources, managedResources, namespace, e.cache)
 	diffRes, err := diff.DiffArray(result.Target, result.Live, diff.WithLogr(e.log))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to diff objects: %w", err)
 	}
 	opts = append(opts, sync.WithSkipHooks(!diffRes.Modified))
 	syncCtx, cleanup, err := sync.NewSyncContext(revision, result, e.config, e.config, e.kubectl, namespace, e.cache.GetOpenAPISchema(), opts...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create sync context: %w", err)
 	}
 	defer cleanup()
 
 	resUpdated := make(chan bool)
 	resIgnore := make(chan struct{})
-	unsubscribe := e.cache.OnResourceUpdated(func(newRes *cache.Resource, oldRes *cache.Resource, namespaceResources map[kube.ResourceKey]*cache.Resource) {
+	unsubscribe := e.cache.OnResourceUpdated(func(newRes *cache.Resource, oldRes *cache.Resource, _ map[kube.ResourceKey]*cache.Resource) {
 		var key kube.ResourceKey
 		if newRes != nil {
 			key = newRes.ResourceKey()
@@ -120,6 +120,7 @@ func (e *gitOpsEngine) Sync(ctx context.Context,
 		select {
 		case <-ctx.Done():
 			syncCtx.Terminate()
+			//nolint:wrapcheck // don't wrap context errors
 			return resources, ctx.Err()
 		case <-time.After(operationRefreshTimeout):
 		case <-resUpdated:

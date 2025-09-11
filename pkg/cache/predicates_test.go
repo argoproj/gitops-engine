@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/rest"
@@ -25,7 +25,7 @@ func TestResourceOfGroupKind(t *testing.T) {
 			Name: "deploy",
 		},
 	}
-	service := &v1.Service{
+	service := &corev1.Service{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "",
 			Kind:       "Service",
@@ -82,12 +82,12 @@ func TestGetNamespaceResources(t *testing.T) {
 
 	resources := cluster.FindResources("default", TopLevelResource)
 	assert.Len(t, resources, 2)
-	assert.Equal(t, resources[getResourceKey(t, defaultNamespaceTopLevel1)].Ref.Name, "helm-guestbook1")
-	assert.Equal(t, resources[getResourceKey(t, defaultNamespaceTopLevel2)].Ref.Name, "helm-guestbook2")
+	assert.Equal(t, "helm-guestbook1", resources[getResourceKey(t, defaultNamespaceTopLevel1)].Ref.Name)
+	assert.Equal(t, "helm-guestbook2", resources[getResourceKey(t, defaultNamespaceTopLevel2)].Ref.Name)
 
 	resources = cluster.FindResources("kube-system", TopLevelResource)
 	assert.Len(t, resources, 1)
-	assert.Equal(t, resources[getResourceKey(t, kubesystemNamespaceTopLevel2)].Ref.Name, "helm-guestbook3")
+	assert.Equal(t, "helm-guestbook3", resources[getResourceKey(t, kubesystemNamespaceTopLevel2)].Ref.Name)
 }
 
 func ExampleNewClusterCache_inspectNamespaceResources() {
@@ -98,7 +98,7 @@ func ExampleNewClusterCache_inspectNamespaceResources() {
 		// cache default namespace only
 		SetNamespaces([]string{"default", "kube-system"}),
 		// configure custom logic to cache resources manifest and additional metadata
-		SetPopulateResourceInfoHandler(func(un *unstructured.Unstructured, isRoot bool) (info interface{}, cacheManifest bool) {
+		SetPopulateResourceInfoHandler(func(un *unstructured.Unstructured, _ bool) (info any, cacheManifest bool) {
 			// if resource belongs to 'extensions' group then mark if with 'deprecated' label
 			if un.GroupVersionKind().Group == "extensions" {
 				info = []string{"deprecated"}
@@ -115,7 +115,7 @@ func ExampleNewClusterCache_inspectNamespaceResources() {
 	}
 	// Iterate default namespace resources tree
 	for _, root := range clusterCache.FindResources("default", TopLevelResource) {
-		clusterCache.IterateHierarchy(root.ResourceKey(), func(resource *Resource, _ map[kube.ResourceKey]*Resource) bool {
+		clusterCache.IterateHierarchyV2([]kube.ResourceKey{root.ResourceKey()}, func(resource *Resource, _ map[kube.ResourceKey]*Resource) bool {
 			fmt.Printf("resource: %s, info: %v\n", resource.Ref.String(), resource.Info)
 			return true
 		})

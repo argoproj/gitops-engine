@@ -5,11 +5,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	apiv1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/argoproj/gitops-engine/pkg/sync/common"
-	. "github.com/argoproj/gitops-engine/pkg/utils/testing"
+	testingutils "github.com/argoproj/gitops-engine/pkg/utils/testing"
 )
 
 func Test_syncTasks_kindOrder(t *testing.T) {
@@ -58,24 +58,24 @@ func TestSplitSyncTasks(t *testing.T) {
 var unsortedTasks = syncTasks{
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"GroupVersion": apiv1.SchemeGroupVersion.String(),
+			Object: map[string]any{
+				"GroupVersion": corev1.SchemeGroupVersion.String(),
 				"kind":         "Pod",
 			},
 		},
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"GroupVersion": apiv1.SchemeGroupVersion.String(),
+			Object: map[string]any{
+				"GroupVersion": corev1.SchemeGroupVersion.String(),
 				"kind":         "Service",
 			},
 		},
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"GroupVersion": apiv1.SchemeGroupVersion.String(),
+			Object: map[string]any{
+				"GroupVersion": corev1.SchemeGroupVersion.String(),
 				"kind":         "PersistentVolume",
 			},
 		},
@@ -85,9 +85,9 @@ var unsortedTasks = syncTasks{
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"metadata": map[string]interface{}{
-					"annotations": map[string]interface{}{
+			Object: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
 						"argocd.argoproj.io/sync-wave": "1",
 					},
 				},
@@ -96,8 +96,8 @@ var unsortedTasks = syncTasks{
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"metadata": map[string]interface{}{
+			Object: map[string]any{
+				"metadata": map[string]any{
 					"name": "b",
 				},
 			},
@@ -105,8 +105,8 @@ var unsortedTasks = syncTasks{
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"metadata": map[string]interface{}{
+			Object: map[string]any{
+				"metadata": map[string]any{
 					"name": "a",
 				},
 			},
@@ -114,9 +114,9 @@ var unsortedTasks = syncTasks{
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"metadata": map[string]interface{}{
-					"annotations": map[string]interface{}{
+			Object: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
 						"argocd.argoproj.io/sync-wave": "-1",
 					},
 				},
@@ -125,8 +125,8 @@ var unsortedTasks = syncTasks{
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"GroupVersion": apiv1.SchemeGroupVersion.String(),
+			Object: map[string]any{
+				"GroupVersion": corev1.SchemeGroupVersion.String(),
 			},
 		},
 	},
@@ -139,8 +139,8 @@ var unsortedTasks = syncTasks{
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"GroupVersion": apiv1.SchemeGroupVersion.String(),
+			Object: map[string]any{
+				"GroupVersion": corev1.SchemeGroupVersion.String(),
 				"kind":         "ConfigMap",
 			},
 		},
@@ -154,9 +154,9 @@ var sortedTasks = syncTasks{
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"metadata": map[string]interface{}{
-					"annotations": map[string]interface{}{
+			Object: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
 						"argocd.argoproj.io/sync-wave": "-1",
 					},
 				},
@@ -165,47 +165,47 @@ var sortedTasks = syncTasks{
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"GroupVersion": apiv1.SchemeGroupVersion.String(),
+			Object: map[string]any{
+				"GroupVersion": corev1.SchemeGroupVersion.String(),
 				"kind":         "ConfigMap",
 			},
 		},
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"GroupVersion": apiv1.SchemeGroupVersion.String(),
+			Object: map[string]any{
+				"GroupVersion": corev1.SchemeGroupVersion.String(),
 				"kind":         "PersistentVolume",
 			},
 		},
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"GroupVersion": apiv1.SchemeGroupVersion.String(),
+			Object: map[string]any{
+				"GroupVersion": corev1.SchemeGroupVersion.String(),
 				"kind":         "Service",
 			},
 		},
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"GroupVersion": apiv1.SchemeGroupVersion.String(),
+			Object: map[string]any{
+				"GroupVersion": corev1.SchemeGroupVersion.String(),
 				"kind":         "Pod",
 			},
 		},
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"GroupVersion": apiv1.SchemeGroupVersion.String(),
+			Object: map[string]any{
+				"GroupVersion": corev1.SchemeGroupVersion.String(),
 			},
 		},
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"metadata": map[string]interface{}{
+			Object: map[string]any{
+				"metadata": map[string]any{
 					"name": "a",
 				},
 			},
@@ -213,8 +213,8 @@ var sortedTasks = syncTasks{
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"metadata": map[string]interface{}{
+			Object: map[string]any{
+				"metadata": map[string]any{
 					"name": "b",
 				},
 			},
@@ -222,9 +222,9 @@ var sortedTasks = syncTasks{
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"metadata": map[string]interface{}{
-					"annotations": map[string]interface{}{
+			Object: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
 						"argocd.argoproj.io/sync-wave": "1",
 					},
 				},
@@ -244,8 +244,8 @@ var sortedTasks = syncTasks{
 var namedObjTasks = syncTasks{
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"metadata": map[string]interface{}{
+			Object: map[string]any{
+				"metadata": map[string]any{
 					"name": "a",
 				},
 			},
@@ -253,8 +253,8 @@ var namedObjTasks = syncTasks{
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"metadata": map[string]interface{}{
+			Object: map[string]any{
+				"metadata": map[string]any{
 					"name": "b",
 				},
 			},
@@ -269,9 +269,9 @@ var unnamedTasks = syncTasks{
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"metadata": map[string]interface{}{
-					"annotations": map[string]interface{}{
+			Object: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
 						"argocd.argoproj.io/sync-wave": "-1",
 					},
 				},
@@ -280,48 +280,48 @@ var unnamedTasks = syncTasks{
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"GroupVersion": apiv1.SchemeGroupVersion.String(),
+			Object: map[string]any{
+				"GroupVersion": corev1.SchemeGroupVersion.String(),
 				"kind":         "ConfigMap",
 			},
 		},
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"GroupVersion": apiv1.SchemeGroupVersion.String(),
+			Object: map[string]any{
+				"GroupVersion": corev1.SchemeGroupVersion.String(),
 				"kind":         "PersistentVolume",
 			},
 		},
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"GroupVersion": apiv1.SchemeGroupVersion.String(),
+			Object: map[string]any{
+				"GroupVersion": corev1.SchemeGroupVersion.String(),
 				"kind":         "Service",
 			},
 		},
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"GroupVersion": apiv1.SchemeGroupVersion.String(),
+			Object: map[string]any{
+				"GroupVersion": corev1.SchemeGroupVersion.String(),
 				"kind":         "Pod",
 			},
 		},
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"GroupVersion": apiv1.SchemeGroupVersion.String(),
+			Object: map[string]any{
+				"GroupVersion": corev1.SchemeGroupVersion.String(),
 			},
 		},
 	},
 	{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"metadata": map[string]interface{}{
-					"annotations": map[string]interface{}{
+			Object: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
 						"argocd.argoproj.io/sync-wave": "1",
 					},
 				},
@@ -349,13 +349,14 @@ func Test_syncTasks_Filter(t *testing.T) {
 func TestSyncNamespaceAgainstCRD(t *testing.T) {
 	crd := &syncTask{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
+			Object: map[string]any{
 				"kind": "Workflow",
 			},
-		}}
+		},
+	}
 	namespace := &syncTask{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
+			Object: map[string]any{
 				"kind": "Namespace",
 			},
 		},
@@ -371,30 +372,32 @@ func TestSyncTasksSort_NamespaceAndObjectInNamespace(t *testing.T) {
 	hook1 := &syncTask{
 		phase: common.SyncPhasePreSync,
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
+			Object: map[string]any{
 				"kind": "Job",
-				"metadata": map[string]interface{}{
+				"metadata": map[string]any{
 					"namespace": "myNamespace1",
 					"name":      "mySyncHookJob1",
 				},
 			},
-		}}
+		},
+	}
 	hook2 := &syncTask{
 		phase: common.SyncPhasePreSync,
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
+			Object: map[string]any{
 				"kind": "Job",
-				"metadata": map[string]interface{}{
+				"metadata": map[string]any{
 					"namespace": "myNamespace2",
 					"name":      "mySyncHookJob2",
 				},
 			},
-		}}
+		},
+	}
 	namespace1 := &syncTask{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
+			Object: map[string]any{
 				"kind": "Namespace",
-				"metadata": map[string]interface{}{
+				"metadata": map[string]any{
 					"name": "myNamespace1",
 					"annotations": map[string]string{
 						"argocd.argoproj.io/sync-wave": "1",
@@ -405,9 +408,9 @@ func TestSyncTasksSort_NamespaceAndObjectInNamespace(t *testing.T) {
 	}
 	namespace2 := &syncTask{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
+			Object: map[string]any{
 				"kind": "Namespace",
-				"metadata": map[string]interface{}{
+				"metadata": map[string]any{
 					"name": "myNamespace2",
 					"annotations": map[string]string{
 						"argocd.argoproj.io/sync-wave": "2",
@@ -431,7 +434,7 @@ func TestSyncTasksSort_CRDAndCR(t *testing.T) {
 	cr := &syncTask{
 		phase: common.SyncPhasePreSync,
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
+			Object: map[string]any{
 				"kind":       "Workflow",
 				"apiVersion": "argoproj.io/v1",
 			},
@@ -439,17 +442,18 @@ func TestSyncTasksSort_CRDAndCR(t *testing.T) {
 	}
 	crd := &syncTask{
 		targetObj: &unstructured.Unstructured{
-			Object: map[string]interface{}{
+			Object: map[string]any{
 				"apiVersion": "apiextensions.k8s.io/v1",
 				"kind":       "CustomResourceDefinition",
-				"spec": map[string]interface{}{
+				"spec": map[string]any{
 					"group": "argoproj.io",
-					"names": map[string]interface{}{
+					"names": map[string]any{
 						"kind": "Workflow",
 					},
 				},
 			},
-		}}
+		},
+	}
 
 	unsorted := syncTasks{cr, crd}
 	unsorted.Sort()
@@ -459,7 +463,7 @@ func TestSyncTasksSort_CRDAndCR(t *testing.T) {
 
 func Test_syncTasks_multiStep(t *testing.T) {
 	t.Run("Single", func(t *testing.T) {
-		tasks := syncTasks{{liveObj: Annotate(NewPod(), common.AnnotationSyncWave, "-1"), phase: common.SyncPhaseSync}}
+		tasks := syncTasks{{liveObj: testingutils.Annotate(testingutils.NewPod(), common.AnnotationSyncWave, "-1"), phase: common.SyncPhaseSync}}
 		assert.Equal(t, common.SyncPhaseSync, string(tasks.phase()))
 		assert.Equal(t, -1, tasks.wave())
 		assert.Equal(t, common.SyncPhaseSync, string(tasks.lastPhase()))
@@ -468,8 +472,8 @@ func Test_syncTasks_multiStep(t *testing.T) {
 	})
 	t.Run("Double", func(t *testing.T) {
 		tasks := syncTasks{
-			{liveObj: Annotate(NewPod(), common.AnnotationSyncWave, "-1"), phase: common.SyncPhasePreSync},
-			{liveObj: Annotate(NewPod(), common.AnnotationSyncWave, "1"), phase: common.SyncPhasePostSync},
+			{liveObj: testingutils.Annotate(testingutils.NewPod(), common.AnnotationSyncWave, "-1"), phase: common.SyncPhasePreSync},
+			{liveObj: testingutils.Annotate(testingutils.NewPod(), common.AnnotationSyncWave, "1"), phase: common.SyncPhasePostSync},
 		}
 		assert.Equal(t, common.SyncPhasePreSync, string(tasks.phase()))
 		assert.Equal(t, -1, tasks.wave())

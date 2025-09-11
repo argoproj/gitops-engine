@@ -19,6 +19,7 @@ import (
 	"k8s.io/kube-openapi/pkg/util/proto"
 	"k8s.io/kubectl/pkg/util/openapi"
 
+	"github.com/argoproj/gitops-engine/pkg/diff"
 	utils "github.com/argoproj/gitops-engine/pkg/utils/io"
 	"github.com/argoproj/gitops-engine/pkg/utils/tracing"
 )
@@ -58,7 +59,7 @@ type filterFunc func(apiResource *metav1.APIResource) bool
 func (k *KubectlCmd) filterAPIResources(config *rest.Config, preferred bool, resourceFilter ResourceFilter, filter filterFunc) ([]APIResourceInfo, error) {
 	disco, err := discovery.NewDiscoveryClientForConfig(config)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create discovery client: %w", err)
 	}
 
 	var serverResources []*metav1.APIResourceList
@@ -70,7 +71,7 @@ func (k *KubectlCmd) filterAPIResources(config *rest.Config, preferred bool, res
 
 	if err != nil {
 		if len(serverResources) == 0 {
-			return nil, err
+			return nil, fmt.Errorf("failed to discover server resources, zero resources returned: %w", err)
 		}
 		k.Log.Error(err, "Partial success when performing preferred resource discovery")
 	}
@@ -81,7 +82,6 @@ func (k *KubectlCmd) filterAPIResources(config *rest.Config, preferred bool, res
 			gv = schema.GroupVersion{}
 		}
 		for _, apiResource := range apiResourcesList.APIResources {
-
 			if resourceFilter.IsExcludedResource(gv.Group, apiResource.Kind, config.Host) {
 				continue
 			}
@@ -90,7 +90,7 @@ func (k *KubectlCmd) filterAPIResources(config *rest.Config, preferred bool, res
 				resource := ToGroupVersionResource(apiResourcesList.GroupVersion, &apiResource)
 				gv, err := schema.ParseGroupVersion(apiResourcesList.GroupVersion)
 				if err != nil {
-					return nil, err
+					return nil, fmt.Errorf("failed to parse group version %q: %w", apiResourcesList.GroupVersion, err)
 				}
 				apiResIf := APIResourceInfo{
 					GroupKind:            schema.GroupKind{Group: gv.Group, Kind: apiResource.Kind},
@@ -118,20 +118,6 @@ func isSupportedVerb(apiResource *metav1.APIResource, verb string) bool {
 	return false
 }
 
-type CreateGVKParserError struct {
-	err error
-}
-
-func NewCreateGVKParserError(err error) *CreateGVKParserError {
-	return &CreateGVKParserError{
-		err: err,
-	}
-}
-
-func (e *CreateGVKParserError) Error() string {
-	return fmt.Sprintf("error creating gvk parser: %s", e.err)
-}
-
 // LoadOpenAPISchema will load all existing resource schemas from the cluster
 // and return:
 // - openapi.Resources: used for getting the proto.Schema from a GVK
@@ -140,36 +126,38 @@ func (e *CreateGVKParserError) Error() string {
 func (k *KubectlCmd) LoadOpenAPISchema(config *rest.Config) (openapi.Resources, *managedfields.GvkParser, error) {
 	disco, err := discovery.NewDiscoveryClientForConfig(config)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to create discovery client: %w", err)
 	}
 
 	oapiGetter := openapi.NewOpenAPIGetter(disco)
 	oapiResources, err := openapi.NewOpenAPIParser(oapiGetter).Parse()
 	if err != nil {
-		return nil, nil, fmt.Errorf("error getting openapi resources: %s", err)
+		return nil, nil, fmt.Errorf("error getting openapi resources: %w", err)
 	}
-	gvkParser, err := newGVKParser(oapiGetter)
+	gvkParser, err := k.newGVKParser(oapiGetter)
 	if err != nil {
-		// return a specific error type to allow gracefully handle
-		// creating GVK Parser bug:
-		// https://github.com/kubernetes/kubernetes/issues/103597
-		return oapiResources, nil, NewCreateGVKParserError(err)
+		return oapiResources, nil, fmt.Errorf("error getting gvk parser: %w", err)
 	}
 	return oapiResources, gvkParser, nil
 }
 
-func newGVKParser(oapiGetter *openapi.CachedOpenAPIGetter) (*managedfields.GvkParser, error) {
+func (k *KubectlCmd) newGVKParser(oapiGetter discovery.OpenAPISchemaInterface) (*managedfields.GvkParser, error) {
 	doc, err := oapiGetter.OpenAPISchema()
 	if err != nil {
-		return nil, fmt.Errorf("error getting openapi schema: %s", err)
+		return nil, fmt.Errorf("error getting openapi schema: %w", err)
 	}
 	models, err := proto.NewOpenAPIData(doc)
 	if err != nil {
-		return nil, fmt.Errorf("error getting openapi data: %s", err)
+		return nil, fmt.Errorf("error getting openapi data: %w", err)
+	}
+	var taintedGVKs []schema.GroupVersionKind
+	models, taintedGVKs = newUniqueModels(models)
+	if len(taintedGVKs) > 0 {
+		k.Log.Info("Duplicate GVKs detected in OpenAPI schema. This could cause inaccurate diffs.", "gvks", taintedGVKs)
 	}
 	gvkParser, err := managedfields.NewGVKParser(models, false)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create GVK parser: %w", err)
 	}
 	return gvkParser, nil
 }
@@ -194,18 +182,19 @@ func (k *KubectlCmd) GetResource(ctx context.Context, config *rest.Config, gvk s
 	defer span.Finish()
 	dynamicIf, err := dynamic.NewForConfig(config)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create dynamic client: %w", err)
 	}
 	disco, err := discovery.NewDiscoveryClientForConfig(config)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create discovery client: %w", err)
 	}
 	apiResource, err := ServerResourceForGroupVersionKind(disco, gvk, "get")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get api resource: %w", err)
 	}
 	resource := gvk.GroupVersion().WithResource(apiResource.Name)
 	resourceIf := ToResourceInterface(dynamicIf, apiResource, resource, namespace)
+	//nolint:wrapcheck // wrapped message would be same as calling method's wrapped error
 	return resourceIf.Get(ctx, name, metav1.GetOptions{})
 }
 
@@ -217,18 +206,19 @@ func (k *KubectlCmd) CreateResource(ctx context.Context, config *rest.Config, gv
 	defer span.Finish()
 	dynamicIf, err := dynamic.NewForConfig(config)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create dynamic client: %w", err)
 	}
 	disco, err := discovery.NewDiscoveryClientForConfig(config)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create discovery client: %w", err)
 	}
 	apiResource, err := ServerResourceForGroupVersionKind(disco, gvk, "create")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get api resource: %w", err)
 	}
 	resource := gvk.GroupVersion().WithResource(apiResource.Name)
 	resourceIf := ToResourceInterface(dynamicIf, apiResource, resource, namespace)
+	//nolint:wrapcheck // wrapped message would be same as calling method's wrapped error
 	return resourceIf.Create(ctx, obj, createOptions, subresources...)
 }
 
@@ -240,18 +230,19 @@ func (k *KubectlCmd) PatchResource(ctx context.Context, config *rest.Config, gvk
 	defer span.Finish()
 	dynamicIf, err := dynamic.NewForConfig(config)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create dynamic client: %w", err)
 	}
 	disco, err := discovery.NewDiscoveryClientForConfig(config)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create discovery client: %w", err)
 	}
 	apiResource, err := ServerResourceForGroupVersionKind(disco, gvk, "patch")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get api resource: %w", err)
 	}
 	resource := gvk.GroupVersion().WithResource(apiResource.Name)
 	resourceIf := ToResourceInterface(dynamicIf, apiResource, resource, namespace)
+	//nolint:wrapcheck // wrapped message would be same as calling method's wrapped error
 	return resourceIf.Patch(ctx, name, patchType, patchBytes, metav1.PatchOptions{}, subresources...)
 }
 
@@ -263,15 +254,15 @@ func (k *KubectlCmd) DeleteResource(ctx context.Context, config *rest.Config, gv
 	defer span.Finish()
 	dynamicIf, err := dynamic.NewForConfig(config)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create dynamic client: %w", err)
 	}
 	disco, err := discovery.NewDiscoveryClientForConfig(config)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create discovery client: %w", err)
 	}
 	apiResource, err := ServerResourceForGroupVersionKind(disco, gvk, "delete")
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get api resource: %w", err)
 	}
 	resource := gvk.GroupVersion().WithResource(apiResource.Name)
 	resourceIf := ToResourceInterface(dynamicIf, apiResource, resource, namespace)
@@ -280,19 +271,20 @@ func (k *KubectlCmd) DeleteResource(ctx context.Context, config *rest.Config, gv
 		propagationPolicy := metav1.DeletePropagationForeground
 		deleteOptions = metav1.DeleteOptions{PropagationPolicy: &propagationPolicy}
 	}
+	//nolint:wrapcheck // wrapped message would be same as calling method's wrapped error
 	return resourceIf.Delete(ctx, name, deleteOptions)
 }
 
 func (k *KubectlCmd) ManageResources(config *rest.Config, openAPISchema openapi.Resources) (ResourceOperations, func(), error) {
 	f, err := os.CreateTemp(utils.TempDir, "")
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to generate temp file for kubeconfig: %v", err)
+		return nil, nil, fmt.Errorf("failed to generate temp file for kubeconfig: %w", err)
 	}
 	_ = f.Close()
 	err = WriteKubeConfig(config, "", f.Name())
 	if err != nil {
 		utils.DeleteFile(f.Name())
-		return nil, nil, fmt.Errorf("failed to write kubeconfig: %v", err)
+		return nil, nil, fmt.Errorf("failed to write kubeconfig: %w", err)
 	}
 	fact := kubeCmdFactory(f.Name(), "", config)
 	cleanup := func() {
@@ -305,6 +297,31 @@ func (k *KubectlCmd) ManageResources(config *rest.Config, openAPISchema openapi.
 		tracer:        k.Tracer,
 		log:           k.Log,
 		onKubectlRun:  k.OnKubectlRun,
+	}, cleanup, nil
+}
+
+func ManageServerSideDiffDryRuns(config *rest.Config, openAPISchema openapi.Resources, tracer tracing.Tracer, log logr.Logger, onKubectlRun OnKubectlRunFunc) (diff.KubeApplier, func(), error) {
+	f, err := os.CreateTemp(utils.TempDir, "")
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate temp file for kubeconfig: %w", err)
+	}
+	_ = f.Close()
+	err = WriteKubeConfig(config, "", f.Name())
+	if err != nil {
+		utils.DeleteFile(f.Name())
+		return nil, nil, fmt.Errorf("failed to write kubeconfig: %w", err)
+	}
+	fact := kubeCmdFactory(f.Name(), "", config)
+	cleanup := func() {
+		utils.DeleteFile(f.Name())
+	}
+	return &kubectlServerSideDiffDryRunApplier{
+		config:        config,
+		fact:          fact,
+		openAPISchema: openAPISchema,
+		tracer:        tracer,
+		log:           log,
+		onKubectlRun:  onKubectlRun,
 	}, cleanup, nil
 }
 
@@ -326,16 +343,17 @@ func (k *KubectlCmd) GetServerVersion(config *rest.Config) (string, error) {
 	defer span.Finish()
 	client, err := discovery.NewDiscoveryClientForConfig(config)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to create discovery client: %w", err)
 	}
 	v, err := client.ServerVersion()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to get server version: %w", err)
 	}
 	return fmt.Sprintf("%s.%s", v.Major, v.Minor), nil
 }
 
 func (k *KubectlCmd) NewDynamicClient(config *rest.Config) (dynamic.Interface, error) {
+	//nolint:wrapcheck // wrapped error message would be the same as the caller's wrapped message
 	return dynamic.NewForConfig(config)
 }
 
@@ -358,5 +376,6 @@ loop:
 		default:
 		}
 	}
+	//nolint:wrapcheck // don't wrap message from utility function
 	return g.Wait()
 }

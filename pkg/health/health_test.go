@@ -15,12 +15,14 @@ import (
 )
 
 func assertAppHealth(t *testing.T, yamlPath string, expectedStatus HealthStatusCode) {
-	health := getHealthStatus(yamlPath, t)
+	t.Helper()
+	health := getHealthStatus(t, yamlPath)
 	assert.NotNil(t, health)
 	assert.Equal(t, expectedStatus, health.Status)
 }
 
-func getHealthStatus(yamlPath string, t *testing.T) *HealthStatus {
+func getHealthStatus(t *testing.T, yamlPath string) *HealthStatus {
+	t.Helper()
 	yamlBytes, err := os.ReadFile(yamlPath)
 	require.NoError(t, err)
 	var obj unstructured.Unstructured
@@ -49,6 +51,7 @@ func TestStatefulSetOnDeleteHealth(t *testing.T) {
 func TestDaemonSetOnDeleteHealth(t *testing.T) {
 	assertAppHealth(t, "./testdata/daemonset-ondelete.yaml", HealthStatusHealthy)
 }
+
 func TestPVCHealth(t *testing.T) {
 	assertAppHealth(t, "./testdata/pvc-bound.yaml", HealthStatusHealthy)
 	assertAppHealth(t, "./testdata/pvc-pending.yaml", HealthStatusProgressing)
@@ -68,7 +71,7 @@ func TestIngressHealth(t *testing.T) {
 }
 
 func TestCRD(t *testing.T) {
-	assert.Nil(t, getHealthStatus("./testdata/knative-service.yaml", t))
+	assert.Nil(t, getHealthStatus(t, "./testdata/knative-service.yaml"))
 }
 
 func TestJob(t *testing.T) {
@@ -107,8 +110,8 @@ func TestPod(t *testing.T) {
 }
 
 func TestApplication(t *testing.T) {
-	assert.Nil(t, getHealthStatus("./testdata/application-healthy.yaml", t))
-	assert.Nil(t, getHealthStatus("./testdata/application-degraded.yaml", t))
+	assert.Nil(t, getHealthStatus(t, "./testdata/application-healthy.yaml"))
+	assert.Nil(t, getHealthStatus(t, "./testdata/application-degraded.yaml"))
 }
 
 func TestAPIService(t *testing.T) {
@@ -119,16 +122,17 @@ func TestAPIService(t *testing.T) {
 }
 
 func TestGetArgoWorkflowHealth(t *testing.T) {
-	sampleWorkflow := unstructured.Unstructured{Object: map[string]interface{}{
-		"spec": map[string]interface{}{
-			"entrypoint":    "sampleEntryPoint",
-			"extraneousKey": "we are agnostic to extraneous keys",
+	sampleWorkflow := unstructured.Unstructured{
+		Object: map[string]any{
+			"spec": map[string]any{
+				"entrypoint":    "sampleEntryPoint",
+				"extraneousKey": "we are agnostic to extraneous keys",
+			},
+			"status": map[string]any{
+				"phase":   "Running",
+				"message": "This node is running",
+			},
 		},
-		"status": map[string]interface{}{
-			"phase":   "Running",
-			"message": "This node is running",
-		},
-	},
 	}
 
 	health, err := getArgoWorkflowHealth(&sampleWorkflow)
@@ -136,16 +140,17 @@ func TestGetArgoWorkflowHealth(t *testing.T) {
 	assert.Equal(t, HealthStatusProgressing, health.Status)
 	assert.Equal(t, "This node is running", health.Message)
 
-	sampleWorkflow = unstructured.Unstructured{Object: map[string]interface{}{
-		"spec": map[string]interface{}{
-			"entrypoint":    "sampleEntryPoint",
-			"extraneousKey": "we are agnostic to extraneous keys",
+	sampleWorkflow = unstructured.Unstructured{
+		Object: map[string]any{
+			"spec": map[string]any{
+				"entrypoint":    "sampleEntryPoint",
+				"extraneousKey": "we are agnostic to extraneous keys",
+			},
+			"status": map[string]any{
+				"phase":   "Succeeded",
+				"message": "This node is has succeeded",
+			},
 		},
-		"status": map[string]interface{}{
-			"phase":   "Succeeded",
-			"message": "This node is has succeeded",
-		},
-	},
 	}
 
 	health, err = getArgoWorkflowHealth(&sampleWorkflow)
@@ -153,17 +158,17 @@ func TestGetArgoWorkflowHealth(t *testing.T) {
 	assert.Equal(t, HealthStatusHealthy, health.Status)
 	assert.Equal(t, "This node is has succeeded", health.Message)
 
-	sampleWorkflow = unstructured.Unstructured{Object: map[string]interface{}{
-		"spec": map[string]interface{}{
-			"entrypoint":    "sampleEntryPoint",
-			"extraneousKey": "we are agnostic to extraneous keys",
+	sampleWorkflow = unstructured.Unstructured{
+		Object: map[string]any{
+			"spec": map[string]any{
+				"entrypoint":    "sampleEntryPoint",
+				"extraneousKey": "we are agnostic to extraneous keys",
+			},
 		},
-	},
 	}
 
 	health, err = getArgoWorkflowHealth(&sampleWorkflow)
 	require.NoError(t, err)
 	assert.Equal(t, HealthStatusProgressing, health.Status)
-	assert.Equal(t, "", health.Message)
-
+	assert.Empty(t, health.Message)
 }

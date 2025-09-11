@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	v1 "k8s.io/api/core/v1"
-	v1extensions "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
-	apierr "k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -31,7 +31,6 @@ import (
 	"github.com/argoproj/gitops-engine/pkg/sync/common"
 	"github.com/argoproj/gitops-engine/pkg/sync/hook"
 	resourceutil "github.com/argoproj/gitops-engine/pkg/sync/resource"
-	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 	kubeutil "github.com/argoproj/gitops-engine/pkg/utils/kube"
 )
 
@@ -40,11 +39,11 @@ type reconciledResource struct {
 	Live   *unstructured.Unstructured
 }
 
-func (r *reconciledResource) key() kube.ResourceKey {
+func (r *reconciledResource) key() kubeutil.ResourceKey {
 	if r.Live != nil {
-		return kube.GetResourceKey(r.Live)
+		return kubeutil.GetResourceKey(r.Live)
 	}
-	return kube.GetResourceKey(r.Target)
+	return kubeutil.GetResourceKey(r.Target)
 }
 
 // SyncContext defines an interface that allows to execute sync operation step or terminate it.
@@ -96,7 +95,7 @@ func WithInitialState(phase common.OperationPhase, message string, results []com
 }
 
 // WithResourcesFilter sets sync operation resources filter
-func WithResourcesFilter(resourcesFilter func(key kube.ResourceKey, target *unstructured.Unstructured, live *unstructured.Unstructured) bool) SyncOpt {
+func WithResourcesFilter(resourcesFilter func(key kubeutil.ResourceKey, target *unstructured.Unstructured, live *unstructured.Unstructured) bool) SyncOpt {
 	return func(ctx *syncContext) {
 		ctx.resourcesFilter = resourcesFilter
 	}
@@ -113,6 +112,13 @@ func WithSkipHooks(skipHooks bool) SyncOpt {
 func WithPrune(prune bool) SyncOpt {
 	return func(ctx *syncContext) {
 		ctx.prune = prune
+	}
+}
+
+// WithPruneConfirmed specifies if prune is confirmed for resources that require confirmation
+func WithPruneConfirmed(confirmed bool) SyncOpt {
+	return func(ctx *syncContext) {
+		ctx.pruneConfirmed = confirmed
 	}
 }
 
@@ -182,6 +188,12 @@ func WithReplace(replace bool) SyncOpt {
 	}
 }
 
+func WithSkipDryRunOnMissingResource(skipDryRunOnMissingResource bool) SyncOpt {
+	return func(ctx *syncContext) {
+		ctx.skipDryRunOnMissingResource = skipDryRunOnMissingResource
+	}
+}
+
 func WithServerSideApply(serverSideApply bool) SyncOpt {
 	return func(ctx *syncContext) {
 		ctx.serverSideApply = serverSideApply
@@ -191,6 +203,18 @@ func WithServerSideApply(serverSideApply bool) SyncOpt {
 func WithServerSideApplyManager(manager string) SyncOpt {
 	return func(ctx *syncContext) {
 		ctx.serverSideApplyManager = manager
+	}
+}
+
+// WithClientSideApplyMigration configures client-side apply migration for server-side apply.
+// When enabled, fields managed by the specified manager will be migrated to server-side apply.
+// Defaults to enabled=true with manager="kubectl-client-side-apply" if not configured.
+func WithClientSideApplyMigration(enabled bool, manager string) SyncOpt {
+	return func(ctx *syncContext) {
+		ctx.enableClientSideApplyMigration = enabled
+		if enabled && manager != "" {
+			ctx.clientSideApplyMigrationManager = manager
+		}
 	}
 }
 
@@ -207,36 +231,38 @@ func NewSyncContext(
 ) (SyncContext, func(), error) {
 	dynamicIf, err := dynamic.NewForConfig(restConfig)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to create dynamic client: %w", err)
 	}
 	disco, err := discovery.NewDiscoveryClientForConfig(restConfig)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to create discovery client: %w", err)
 	}
 	extensionsclientset, err := clientset.NewForConfig(restConfig)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to create extensions client: %w", err)
 	}
 	resourceOps, cleanup, err := kubectl.ManageResources(rawConfig, openAPISchema)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to manage resources: %w", err)
 	}
 	ctx := &syncContext{
-		revision:            revision,
-		resources:           groupResources(reconciliationResult),
-		hooks:               reconciliationResult.Hooks,
-		config:              restConfig,
-		rawConfig:           rawConfig,
-		dynamicIf:           dynamicIf,
-		disco:               disco,
-		extensionsclientset: extensionsclientset,
-		kubectl:             kubectl,
-		resourceOps:         resourceOps,
-		namespace:           namespace,
-		log:                 textlogger.NewLogger(textlogger.NewConfig()),
-		validate:            true,
-		startedAt:           time.Now(),
-		syncRes:             map[string]common.ResourceSyncResult{},
+		revision:                        revision,
+		resources:                       groupResources(reconciliationResult),
+		hooks:                           reconciliationResult.Hooks,
+		config:                          restConfig,
+		rawConfig:                       rawConfig,
+		dynamicIf:                       dynamicIf,
+		disco:                           disco,
+		extensionsclientset:             extensionsclientset,
+		kubectl:                         kubectl,
+		resourceOps:                     resourceOps,
+		namespace:                       namespace,
+		log:                             textlogger.NewLogger(textlogger.NewConfig()),
+		validate:                        true,
+		startedAt:                       time.Now(),
+		syncRes:                         map[string]common.ResourceSyncResult{},
+		clientSideApplyMigrationManager: common.DefaultClientSideApplyMigrationManager,
+		enableClientSideApplyMigration:  true,
 		permissionValidator: func(_ *unstructured.Unstructured, _ *metav1.APIResource) error {
 			return nil
 		},
@@ -248,7 +274,7 @@ func NewSyncContext(
 }
 
 func groupResources(reconciliationResult ReconciliationResult) map[kubeutil.ResourceKey]reconciledResource {
-	resources := make(map[kube.ResourceKey]reconciledResource)
+	resources := make(map[kubeutil.ResourceKey]reconciledResource)
 	for i := 0; i < len(reconciliationResult.Target); i++ {
 		res := reconciledResource{
 			Target: reconciliationResult.Target[i],
@@ -261,14 +287,14 @@ func groupResources(reconciliationResult ReconciliationResult) map[kubeutil.Reso
 		} else {
 			obj = res.Target
 		}
-		resources[kube.GetResourceKey(obj)] = res
+		resources[kubeutil.GetResourceKey(obj)] = res
 	}
 	return resources
 }
 
 // generates a map of resource and its modification result based on diffResultList
 func groupDiffResults(diffResultList *diff.DiffResultList) map[kubeutil.ResourceKey]bool {
-	modifiedResources := make(map[kube.ResourceKey]bool)
+	modifiedResources := make(map[kubeutil.ResourceKey]bool)
 	for _, res := range diffResultList.Diffs {
 		var obj unstructured.Unstructured
 		var err error
@@ -280,7 +306,7 @@ func groupDiffResults(diffResultList *diff.DiffResultList) map[kubeutil.Resource
 		if err != nil {
 			continue
 		}
-		modifiedResources[kube.GetResourceKey(&obj)] = res.Modified
+		modifiedResources[kubeutil.GetResourceKey(&obj)] = res.Modified
 	}
 	return modifiedResources
 }
@@ -289,14 +315,14 @@ const (
 	crdReadinessTimeout = time.Duration(3) * time.Second
 )
 
-// getOperationPhase returns a hook status from an _live_ unstructured object
-func (sc *syncContext) getOperationPhase(hook *unstructured.Unstructured) (common.OperationPhase, string, error) {
+// getOperationPhase returns a health status from a _live_ unstructured object
+func (sc *syncContext) getOperationPhase(obj *unstructured.Unstructured) (common.OperationPhase, string, error) {
 	phase := common.OperationSucceeded
-	message := fmt.Sprintf("%s created", hook.GetName())
+	message := obj.GetName() + " created"
 
-	resHealth, err := health.GetResourceHealth(hook, sc.healthOverride)
+	resHealth, err := health.GetResourceHealth(obj, sc.healthOverride)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("failed to get resource health: %w", err)
 	}
 	if resHealth != nil {
 		switch resHealth.Status {
@@ -317,28 +343,32 @@ func (sc *syncContext) getOperationPhase(hook *unstructured.Unstructured) (commo
 type syncContext struct {
 	healthOverride      health.HealthOverride
 	permissionValidator common.PermissionValidator
-	resources           map[kube.ResourceKey]reconciledResource
+	resources           map[kubeutil.ResourceKey]reconciledResource
 	hooks               []*unstructured.Unstructured
 	config              *rest.Config
 	rawConfig           *rest.Config
 	dynamicIf           dynamic.Interface
 	disco               discovery.DiscoveryInterface
 	extensionsclientset *clientset.Clientset
-	kubectl             kube.Kubectl
-	resourceOps         kube.ResourceOperations
+	kubectl             kubeutil.Kubectl
+	resourceOps         kubeutil.ResourceOperations
 	namespace           string
 
-	dryRun                 bool
-	force                  bool
-	validate               bool
-	skipHooks              bool
-	resourcesFilter        func(key kube.ResourceKey, target *unstructured.Unstructured, live *unstructured.Unstructured) bool
-	prune                  bool
-	replace                bool
-	serverSideApply        bool
-	serverSideApplyManager string
-	pruneLast              bool
-	prunePropagationPolicy *metav1.DeletionPropagation
+	dryRun                          bool
+	skipDryRunOnMissingResource     bool
+	force                           bool
+	validate                        bool
+	skipHooks                       bool
+	resourcesFilter                 func(key kubeutil.ResourceKey, target *unstructured.Unstructured, live *unstructured.Unstructured) bool
+	prune                           bool
+	replace                         bool
+	serverSideApply                 bool
+	serverSideApplyManager          string
+	pruneLast                       bool
+	prunePropagationPolicy          *metav1.DeletionPropagation
+	pruneConfirmed                  bool
+	clientSideApplyMigrationManager string
+	enableClientSideApplyMigration  bool
 
 	syncRes   map[string]common.ResourceSyncResult
 	startedAt time.Time
@@ -358,7 +388,7 @@ type syncContext struct {
 
 	applyOutOfSyncOnly bool
 	// stores whether the resource is modified or not
-	modificationResult map[kube.ResourceKey]bool
+	modificationResult map[kubeutil.ResourceKey]bool
 }
 
 func (sc *syncContext) setRunningPhase(tasks []*syncTask, isPendingDeletion bool) {
@@ -400,10 +430,25 @@ func (sc *syncContext) Sync() {
 		// to perform the sync. we only wish to do this once per operation, performing additional dry-runs
 		// is harmless, but redundant. The indicator we use to detect if we have already performed
 		// the dry-run for this operation, is if the resource or hook list is empty.
-
 		dryRunTasks := tasks
+
+		// Before doing any validation, we have to create the application namespace if it does not exist.
+		// The validation is expected to fail in multiple scenarios if a namespace does not exist.
+		if nsCreateTask := sc.getNamespaceCreationTask(dryRunTasks); nsCreateTask != nil {
+			nsSyncTasks := syncTasks{nsCreateTask}
+			// No need to perform a dry-run on the namespace creation, because if it fails we stop anyway
+			sc.log.WithValues("task", nsCreateTask).Info("Creating namespace")
+			if sc.runTasks(nsSyncTasks, false) == failed {
+				sc.setOperationFailed(syncTasks{}, nsSyncTasks, "the namespace failed to apply")
+				return
+			}
+
+			// The namespace was created, we can remove this task from the dry-run
+			dryRunTasks = tasks.Filter(func(t *syncTask) bool { return t != nsCreateTask })
+		}
+
 		if sc.applyOutOfSyncOnly {
-			dryRunTasks = sc.filterOutOfSyncTasks(tasks)
+			dryRunTasks = sc.filterOutOfSyncTasks(dryRunTasks)
 		}
 
 		sc.log.WithValues("tasks", dryRunTasks).Info("Tasks (dry-run)")
@@ -466,6 +511,15 @@ func (sc *syncContext) Sync() {
 	if prunedTasksPendingDelete.Len() > 0 {
 		sc.setRunningPhase(prunedTasksPendingDelete, true)
 		return
+	}
+
+	hooksCompleted := tasks.Filter(func(task *syncTask) bool {
+		return task.isHook() && task.completed()
+	})
+	for _, task := range hooksCompleted {
+		if err := sc.removeHookFinalizer(task); err != nil {
+			sc.setResourceResult(task, task.syncStatus, common.OperationError, fmt.Sprintf("Failed to remove hook finalizer: %v", err))
+		}
 	}
 
 	// collect all completed hooks which have appropriate delete policy
@@ -569,10 +623,96 @@ func (sc *syncContext) filterOutOfSyncTasks(tasks syncTasks) syncTasks {
 	})
 }
 
+// getNamespaceCreationTask returns a task that will create the current namespace
+// or nil if the syncTasks does not contain one
+func (sc *syncContext) getNamespaceCreationTask(tasks syncTasks) *syncTask {
+	creationTasks := tasks.Filter(func(task *syncTask) bool {
+		return task.liveObj == nil && isNamespaceWithName(task.targetObj, sc.namespace)
+	})
+	if len(creationTasks) > 0 {
+		return creationTasks[0]
+	}
+	return nil
+}
+
+func (sc *syncContext) removeHookFinalizer(task *syncTask) error {
+	if task.liveObj == nil {
+		return nil
+	}
+	removeFinalizerMutation := func(obj *unstructured.Unstructured) bool {
+		finalizers := obj.GetFinalizers()
+		for i, finalizer := range finalizers {
+			if finalizer == hook.HookFinalizer {
+				obj.SetFinalizers(append(finalizers[:i], finalizers[i+1:]...))
+				return true
+			}
+		}
+		return false
+	}
+
+	// The cached live object may be stale in the controller cache, and the actual object may have been updated in the meantime,
+	// and Kubernetes API will return a conflict error on the Update call.
+	// In that case, we need to get the latest version of the object and retry the update.
+	//nolint:wrapcheck // wrap inside the retried function instead
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		mutated := removeFinalizerMutation(task.liveObj)
+		if !mutated {
+			return nil
+		}
+
+		updateErr := sc.updateResource(task)
+		if apierrors.IsConflict(updateErr) {
+			sc.log.WithValues("task", task).V(1).Info("Retrying hook finalizer removal due to conflict on update")
+			liveObj, err := sc.getResource(task)
+			if apierrors.IsNotFound(err) {
+				sc.log.WithValues("task", task).V(1).Info("Resource is already deleted")
+				return nil
+			} else if err != nil {
+				return fmt.Errorf("failed to get resource: %w", err)
+			}
+			task.liveObj = liveObj
+		} else if apierrors.IsNotFound(updateErr) {
+			// If the resource is already deleted, it is a no-op
+			sc.log.WithValues("task", task).V(1).Info("Resource is already deleted")
+			return nil
+		}
+		if updateErr != nil {
+			return fmt.Errorf("failed to update resource: %w", updateErr)
+		}
+		return nil
+	})
+}
+
+func (sc *syncContext) getResource(task *syncTask) (*unstructured.Unstructured, error) {
+	sc.log.WithValues("task", task).V(1).Info("Getting resource")
+	resIf, err := sc.getResourceIf(task, "get")
+	if err != nil {
+		return nil, err
+	}
+	liveObj, err := resIf.Get(context.TODO(), task.name(), metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get resource: %w", err)
+	}
+	return liveObj, nil
+}
+
+func (sc *syncContext) updateResource(task *syncTask) error {
+	sc.log.WithValues("task", task).V(1).Info("Updating resource")
+	resIf, err := sc.getResourceIf(task, "update")
+	if err != nil {
+		return err
+	}
+	_, err = resIf.Update(context.TODO(), task.liveObj, metav1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to update resource: %w", err)
+	}
+	return nil
+}
+
 func (sc *syncContext) deleteHooks(hooksPendingDeletion syncTasks) {
 	for _, task := range hooksPendingDeletion {
 		err := sc.deleteResource(task)
-		if err != nil && !apierr.IsNotFound(err) {
+		if err != nil && !apierrors.IsNotFound(err) {
 			sc.setResourceResult(task, "", common.OperationError, fmt.Sprintf("failed to delete resource: %v", err))
 		}
 	}
@@ -590,8 +730,8 @@ func (sc *syncContext) GetState() (common.OperationPhase, string, []common.Resou
 }
 
 func (sc *syncContext) setOperationFailed(syncFailTasks, syncFailedTasks syncTasks, message string) {
-	errorMessageFactory := func(tasks []*syncTask, message string) string {
-		messages := syncFailedTasks.Map(func(task *syncTask) string {
+	errorMessageFactory := func(tasks syncTasks, message string) string {
+		messages := tasks.Map(func(task *syncTask) string {
 			return task.message
 		})
 		if len(messages) > 0 {
@@ -612,7 +752,9 @@ func (sc *syncContext) setOperationFailed(syncFailTasks, syncFailedTasks syncTas
 		// the phase, so we make sure we have at least one more sync
 		sc.log.WithValues("syncFailTasks", syncFailTasks).V(1).Info("Running sync fail tasks")
 		if sc.runTasks(syncFailTasks, false) == failed {
-			sc.setOperationPhase(common.OperationFailed, errorMessage)
+			failedSyncFailTasks := syncFailTasks.Filter(func(t *syncTask) bool { return t.syncStatus == common.ResultCodeSyncFailed })
+			syncFailTasksMessage := errorMessageFactory(failedSyncFailTasks, "one or more SyncFail hooks failed")
+			sc.setOperationPhase(common.OperationFailed, fmt.Sprintf("%s\n%s", errorMessage, syncFailTasksMessage))
 		}
 	} else {
 		sc.setOperationPhase(common.OperationFailed, errorMessage)
@@ -672,7 +814,9 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 					generateName := obj.GetGenerateName()
 					targetObj.SetName(fmt.Sprintf("%s%s", generateName, postfix))
 				}
-
+				if !hook.HasHookFinalizer(targetObj) {
+					targetObj.SetFinalizers(append(targetObj.GetFinalizers(), hook.HookFinalizer))
+				}
 				hookTasks = append(hookTasks, &syncTask{phase: phase, targetObj: targetObj})
 			}
 		}
@@ -711,15 +855,12 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 		task.liveObj = sc.liveObj(task.targetObj)
 	}
 
-	isRetryable := func(err error) bool {
-		return apierr.IsUnauthorized(err)
-	}
+	isRetryable := apierrors.IsUnauthorized
 
 	serverResCache := make(map[schema.GroupVersionKind]*metav1.APIResource)
 
 	// check permissions
 	for _, task := range tasks {
-
 		var serverRes *metav1.APIResource
 		var err error
 
@@ -728,7 +869,8 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 			err = nil
 		} else {
 			err = retry.OnError(retry.DefaultRetry, isRetryable, func() error {
-				serverRes, err = kube.ServerResourceForGroupVersionKind(sc.disco, task.groupVersionKind(), "get")
+				serverRes, err = kubeutil.ServerResourceForGroupVersionKind(sc.disco, task.groupVersionKind(), "get")
+				//nolint:wrapcheck // complicated function, not wrapping to avoid failure of error type checks
 				return err
 			})
 			if serverRes != nil {
@@ -736,17 +878,25 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 			}
 		}
 
+		shouldSkipDryRunOnMissingResource := func() bool {
+			// skip dry run on missing resource error for all application resources
+			if sc.skipDryRunOnMissingResource {
+				return true
+			}
+			return (task.targetObj != nil && resourceutil.HasAnnotationOption(task.targetObj, common.AnnotationSyncOptions, common.SyncOptionSkipDryRunOnMissingResource)) ||
+				sc.hasCRDOfGroupKind(task.group(), task.kind())
+		}
+
 		if err != nil {
-			// Special case for custom resources: if CRD is not yet known by the K8s API server,
-			// and the CRD is part of this sync or the resource is annotated with SkipDryRunOnMissingResource=true,
-			// then skip verification during `kubectl apply --dry-run` since we expect the CRD
-			// to be created during app synchronization.
-			if apierr.IsNotFound(err) &&
-				((task.targetObj != nil && resourceutil.HasAnnotationOption(task.targetObj, common.AnnotationSyncOptions, common.SyncOptionSkipDryRunOnMissingResource)) ||
-					sc.hasCRDOfGroupKind(task.group(), task.kind())) {
+			switch {
+			case apierrors.IsNotFound(err) && shouldSkipDryRunOnMissingResource():
+				// Special case for custom resources: if CRD is not yet known by the K8s API server,
+				// and the CRD is part of this sync or the resource is annotated with SkipDryRunOnMissingResource=true,
+				// then skip verification during `kubectl apply --dry-run` since we expect the CRD
+				// to be created during app synchronization.
 				sc.log.WithValues("task", task).V(1).Info("Skip dry-run for custom resource")
 				task.skipDryRun = true
-			} else {
+			default:
 				sc.setResourceResult(task, common.ResultCodeSyncFailed, "", err.Error())
 				successful = false
 			}
@@ -839,28 +989,26 @@ func (sc *syncContext) autoCreateNamespace(tasks syncTasks) syncTasks {
 	}
 
 	if isNamespaceCreationNeeded {
-		nsSpec := &v1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: kube.NamespaceKind}, ObjectMeta: metav1.ObjectMeta{Name: sc.namespace}}
-		managedNs, err := kube.ToUnstructured(nsSpec)
+		nsSpec := &corev1.Namespace{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: kubeutil.NamespaceKind}, ObjectMeta: metav1.ObjectMeta{Name: sc.namespace}}
+		managedNs, err := kubeutil.ToUnstructured(nsSpec)
 		if err == nil {
 			liveObj, err := sc.kubectl.GetResource(context.TODO(), sc.config, managedNs.GroupVersionKind(), managedNs.GetName(), metav1.NamespaceNone)
-			if err == nil {
+			switch {
+			case err == nil:
 				nsTask := &syncTask{phase: common.SyncPhasePreSync, targetObj: managedNs, liveObj: liveObj}
 				_, ok := sc.syncRes[nsTask.resultKey()]
-				if ok {
-					tasks = sc.appendNsTask(tasks, nsTask, managedNs, liveObj)
-				} else {
-					if liveObj != nil {
-						sc.log.WithValues("namespace", sc.namespace).Info("Namespace already exists")
-						tasks = sc.appendNsTask(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: managedNs, liveObj: liveObj}, managedNs, liveObj)
-					}
+				if !ok && liveObj != nil {
+					sc.log.WithValues("namespace", sc.namespace).Info("Namespace already exists")
 				}
-			} else if apierr.IsNotFound(err) {
+				tasks = sc.appendNsTask(tasks, nsTask, managedNs, liveObj)
+
+			case apierrors.IsNotFound(err):
 				tasks = sc.appendNsTask(tasks, &syncTask{phase: common.SyncPhasePreSync, targetObj: managedNs, liveObj: nil}, managedNs, nil)
-			} else {
-				tasks = sc.appendFailedNsTask(tasks, managedNs, fmt.Errorf("Namespace auto creation failed: %s", err))
+			default:
+				tasks = sc.appendFailedNsTask(tasks, managedNs, fmt.Errorf("namespace auto creation failed: %w", err))
 			}
 		} else {
-			sc.setOperationPhase(common.OperationFailed, fmt.Sprintf("Namespace auto creation failed: %s", err))
+			sc.setOperationPhase(common.OperationFailed, fmt.Sprintf("namespace auto creation failed: %s", err))
 		}
 	}
 	return tasks
@@ -869,7 +1017,7 @@ func (sc *syncContext) autoCreateNamespace(tasks syncTasks) syncTasks {
 func (sc *syncContext) appendNsTask(tasks syncTasks, preTask *syncTask, managedNs, liveNs *unstructured.Unstructured) syncTasks {
 	modified, err := sc.syncNamespace(managedNs, liveNs)
 	if err != nil {
-		tasks = sc.appendFailedNsTask(tasks, managedNs, fmt.Errorf("namespaceModifier error: %s", err))
+		tasks = sc.appendFailedNsTask(tasks, managedNs, fmt.Errorf("namespaceModifier error: %w", err))
 	} else if modified {
 		tasks = append(tasks, preTask)
 	}
@@ -892,15 +1040,14 @@ func isNamespaceWithName(res *unstructured.Unstructured, ns string) bool {
 func isNamespaceKind(res *unstructured.Unstructured) bool {
 	return res != nil &&
 		res.GetObjectKind().GroupVersionKind().Group == "" &&
-		res.GetKind() == kube.NamespaceKind
+		res.GetKind() == kubeutil.NamespaceKind
 }
 
 func obj(a, b *unstructured.Unstructured) *unstructured.Unstructured {
 	if a != nil {
 		return a
-	} else {
-		return b
 	}
+	return b
 }
 
 func (sc *syncContext) liveObj(obj *unstructured.Unstructured) *unstructured.Unstructured {
@@ -926,18 +1073,86 @@ func (sc *syncContext) setOperationPhase(phase common.OperationPhase, message st
 
 // ensureCRDReady waits until specified CRD is ready (established condition is true).
 func (sc *syncContext) ensureCRDReady(name string) error {
-	return wait.PollUntilContextTimeout(context.Background(), time.Duration(100)*time.Millisecond, crdReadinessTimeout, true, func(ctx context.Context) (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), time.Duration(100)*time.Millisecond, crdReadinessTimeout, true, func(_ context.Context) (bool, error) {
 		crd, err := sc.extensionsclientset.ApiextensionsV1().CustomResourceDefinitions().Get(context.TODO(), name, metav1.GetOptions{})
 		if err != nil {
+			//nolint:wrapcheck // wrapped outside the retry
 			return false, err
 		}
 		for _, condition := range crd.Status.Conditions {
-			if condition.Type == v1extensions.Established {
-				return condition.Status == v1extensions.ConditionTrue, nil
+			if condition.Type == apiextensionsv1.Established {
+				return condition.Status == apiextensionsv1.ConditionTrue, nil
 			}
 		}
 		return false, nil
 	})
+	if err != nil {
+		return fmt.Errorf("failed to ensure CRD ready: %w", err)
+	}
+	return nil
+}
+
+func (sc *syncContext) shouldUseServerSideApply(targetObj *unstructured.Unstructured, dryRun bool) bool {
+	// if it is a dry run, disable server side apply, as the goal is to validate only the
+	// yaml correctness of the rendered manifests.
+	// running dry-run in server mode breaks the auto create namespace feature
+	// https://github.com/argoproj/argo-cd/issues/13874
+	if sc.dryRun || dryRun {
+		return false
+	}
+
+	resourceHasDisableSSAAnnotation := resourceutil.HasAnnotationOption(targetObj, common.AnnotationSyncOptions, common.SyncOptionDisableServerSideApply)
+	if resourceHasDisableSSAAnnotation {
+		return false
+	}
+
+	return sc.serverSideApply || resourceutil.HasAnnotationOption(targetObj, common.AnnotationSyncOptions, common.SyncOptionServerSideApply)
+}
+
+// needsClientSideApplyMigration checks if a resource has fields managed by the specified manager
+// that need to be migrated to the server-side apply manager
+func (sc *syncContext) needsClientSideApplyMigration(liveObj *unstructured.Unstructured, fieldManager string) bool {
+	if liveObj == nil || fieldManager == "" {
+		return false
+	}
+
+	managedFields := liveObj.GetManagedFields()
+	if len(managedFields) == 0 {
+		return false
+	}
+
+	for _, field := range managedFields {
+		if field.Manager == fieldManager {
+			return true
+		}
+	}
+
+	return false
+}
+
+// performClientSideApplyMigration performs a client-side-apply using the specified field manager.
+// This moves the 'last-applied-configuration' field to be managed by the specified manager.
+// The next time server-side apply is performed, kubernetes automatically migrates all fields from the manager
+// that owns 'last-applied-configuration' to the manager that uses server-side apply. This will remove the
+// specified manager from the resources managed fields. 'kubectl-client-side-apply' is used as the default manager.
+func (sc *syncContext) performClientSideApplyMigration(targetObj *unstructured.Unstructured, fieldManager string) error {
+	sc.log.WithValues("resource", kubeutil.GetResourceKey(targetObj)).V(1).Info("Performing client-side apply migration step")
+
+	// Apply with the specified manager to set up the migration
+	_, err := sc.resourceOps.ApplyResource(
+		context.TODO(),
+		targetObj,
+		cmdutil.DryRunNone,
+		false,
+		false,
+		false,
+		fieldManager,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to perform client-side apply migration on manager %s: %w", fieldManager, err)
+	}
+
+	return nil
 }
 
 func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.ResultCode, string) {
@@ -968,17 +1183,25 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 	case resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyOrphan):
 		prunePropagationPolicy = metav1.DeletePropagationOrphan
 	}
-	// if it is a dry run, disable server side apply, as the goal is to validate only the
-	// yaml correctness of the rendered manifests.
-	// running dry-run in server mode breaks the auto create namespace feature
-	// https://github.com/argoproj/argo-cd/issues/13874
-	serverSideApply := !dryRun && (sc.serverSideApply || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionServerSideApply))
+
+	serverSideApply := sc.shouldUseServerSideApply(t.targetObj, dryRun)
+
+	// Check if we need to perform client-side apply migration for server-side apply
+	if serverSideApply && !dryRun && sc.enableClientSideApplyMigration {
+		if sc.needsClientSideApplyMigration(t.liveObj, sc.clientSideApplyMigrationManager) {
+			err = sc.performClientSideApplyMigration(t.targetObj, sc.clientSideApplyMigrationManager)
+			if err != nil {
+				return common.ResultCodeSyncFailed, fmt.Sprintf("Failed to perform client-side apply migration: %v", err)
+			}
+		}
+	}
+
 	if shouldReplace {
 		if t.liveObj != nil {
 			// Avoid using `kubectl replace` for CRDs since 'replace' might recreate resource and so delete all CRD instances.
 			// The same thing applies for namespaces, which would delete the namespace as well as everything within it,
 			// so we want to avoid using `kubectl replace` in that case as well.
-			if kube.IsCRD(t.targetObj) || t.targetObj.GetKind() == kubeutil.NamespaceKind {
+			if kubeutil.IsCRD(t.targetObj) || t.targetObj.GetKind() == kubeutil.NamespaceKind {
 				update := t.targetObj.DeepCopy()
 				update.SetResourceVersion(t.liveObj.GetResourceVersion())
 				_, err = sc.resourceOps.UpdateResource(context.TODO(), update, dryRunStrategy)
@@ -994,12 +1217,12 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 			message, err = sc.resourceOps.CreateResource(context.TODO(), t.targetObj, dryRunStrategy, validate)
 		}
 	} else {
-		message, err = sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager, false, prunePropagationPolicy)
+		message, err = sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager, prunePropagationPolicy)
 	}
 	if err != nil {
 		return common.ResultCodeSyncFailed, err.Error()
 	}
-	if kube.IsCRD(t.targetObj) && !dryRun {
+	if kubeutil.IsCRD(t.targetObj) && !dryRun {
 		crdName := t.targetObj.GetName()
 		if err = sc.ensureCRDReady(crdName); err != nil {
 			sc.log.Error(err, fmt.Sprintf("failed to ensure that CRD %s is ready", crdName))
@@ -1014,35 +1237,33 @@ func (sc *syncContext) pruneObject(liveObj *unstructured.Unstructured, prune, dr
 		return common.ResultCodePruneSkipped, "ignored (requires pruning)"
 	} else if resourceutil.HasAnnotationOption(liveObj, common.AnnotationSyncOptions, common.SyncOptionDisablePrune) {
 		return common.ResultCodePruneSkipped, "ignored (no prune)"
-	} else {
-		if dryRun {
-			return common.ResultCodePruned, "pruned (dry run)"
-		} else {
-			// Skip deletion if object is already marked for deletion, so we don't cause a resource update hotloop
-			deletionTimestamp := liveObj.GetDeletionTimestamp()
-			if deletionTimestamp == nil || deletionTimestamp.IsZero() {
-				propagationPolicy := metav1.DeletePropagationForeground
-				deleteOptions := sc.getDeleteOptions()
-				if deleteOptions.PropagationPolicy != nil {
-					propagationPolicy = *deleteOptions.PropagationPolicy
-				}
-				switch {
-				case resourceutil.HasAnnotationOption(liveObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyBackground):
-					propagationPolicy = metav1.DeletePropagationBackground
-				case resourceutil.HasAnnotationOption(liveObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyForeground):
-					propagationPolicy = metav1.DeletePropagationForeground
-				case resourceutil.HasAnnotationOption(liveObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyOrphan):
-					propagationPolicy = metav1.DeletePropagationOrphan
-				}
-				deleteOptions.PropagationPolicy = &propagationPolicy
-				err := sc.kubectl.DeleteResource(context.TODO(), sc.config, liveObj.GroupVersionKind(), liveObj.GetName(), liveObj.GetNamespace(), deleteOptions)
-				if err != nil {
-					return common.ResultCodeSyncFailed, err.Error()
-				}
-			}
-			return common.ResultCodePruned, "pruned"
+	}
+	if dryRun {
+		return common.ResultCodePruned, "pruned (dry run)"
+	}
+	// Skip deletion if object is already marked for deletion, so we don't cause a resource update hotloop
+	deletionTimestamp := liveObj.GetDeletionTimestamp()
+	if deletionTimestamp == nil || deletionTimestamp.IsZero() {
+		propagationPolicy := metav1.DeletePropagationForeground
+		deleteOptions := sc.getDeleteOptions()
+		if deleteOptions.PropagationPolicy != nil {
+			propagationPolicy = *deleteOptions.PropagationPolicy
+		}
+		switch {
+		case resourceutil.HasAnnotationOption(liveObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyBackground):
+			propagationPolicy = metav1.DeletePropagationBackground
+		case resourceutil.HasAnnotationOption(liveObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyForeground):
+			propagationPolicy = metav1.DeletePropagationForeground
+		case resourceutil.HasAnnotationOption(liveObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyOrphan):
+			propagationPolicy = metav1.DeletePropagationOrphan
+		}
+		deleteOptions.PropagationPolicy = &propagationPolicy
+		err := sc.kubectl.DeleteResource(context.TODO(), sc.config, liveObj.GroupVersionKind(), liveObj.GetName(), liveObj.GetNamespace(), sc.getDeleteOptions())
+		if err != nil {
+			return common.ResultCodeSyncFailed, err.Error()
 		}
 	}
+	return common.ResultCodePruned, "pruned"
 }
 
 func (sc *syncContext) getDeleteOptions() metav1.DeleteOptions {
@@ -1065,7 +1286,7 @@ func (sc *syncContext) targetObjs() []*unstructured.Unstructured {
 }
 
 func isCRDOfGroupKind(group string, kind string, obj *unstructured.Unstructured) bool {
-	if kube.IsCRD(obj) {
+	if kubeutil.IsCRD(obj) {
 		crdGroup, ok, err := unstructured.NestedString(obj.Object, "spec", "group")
 		if err != nil || !ok {
 			return false
@@ -1099,6 +1320,11 @@ func (sc *syncContext) Terminate() {
 		if !task.isHook() || task.liveObj == nil {
 			continue
 		}
+		if err := sc.removeHookFinalizer(task); err != nil {
+			sc.setResourceResult(task, task.syncStatus, common.OperationError, fmt.Sprintf("Failed to remove hook finalizer: %v", err))
+			terminateSuccessful = false
+			continue
+		}
 		phase, msg, err := sc.getOperationPhase(task.liveObj)
 		if err != nil {
 			sc.setOperationPhase(common.OperationError, fmt.Sprintf("Failed to get hook health: %v", err))
@@ -1106,7 +1332,7 @@ func (sc *syncContext) Terminate() {
 		}
 		if phase == common.OperationRunning {
 			err := sc.deleteResource(task)
-			if err != nil {
+			if err != nil && !apierrors.IsNotFound(err) {
 				sc.setResourceResult(task, "", common.OperationFailed, fmt.Sprintf("Failed to delete: %v", err))
 				terminateSuccessful = false
 			} else {
@@ -1129,17 +1355,21 @@ func (sc *syncContext) deleteResource(task *syncTask) error {
 	if err != nil {
 		return err
 	}
-	return resIf.Delete(context.TODO(), task.name(), sc.getDeleteOptions())
+	err = resIf.Delete(context.TODO(), task.name(), sc.getDeleteOptions())
+	if err != nil {
+		return fmt.Errorf("failed to delete resource: %w", err)
+	}
+	return nil
 }
 
 func (sc *syncContext) getResourceIf(task *syncTask, verb string) (dynamic.ResourceInterface, error) {
-	apiResource, err := kube.ServerResourceForGroupVersionKind(sc.disco, task.groupVersionKind(), verb)
+	apiResource, err := kubeutil.ServerResourceForGroupVersionKind(sc.disco, task.groupVersionKind(), verb)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get api resource: %w", err)
 	}
-	res := kube.ToGroupVersionResource(task.groupVersionKind().GroupVersion().String(), apiResource)
-	resIf := kube.ToResourceInterface(sc.dynamicIf, apiResource, res, task.namespace())
-	return resIf, err
+	res := kubeutil.ToGroupVersionResource(task.groupVersionKind().GroupVersion().String(), apiResource)
+	resIf := kubeutil.ToResourceInterface(sc.dynamicIf, apiResource, res, task.namespace())
+	return resIf, nil
 }
 
 var operationPhases = map[common.ResultCode]common.OperationPhase{
@@ -1174,8 +1404,51 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 			createTasks = append(createTasks, task)
 		}
 	}
+
+	// remove finalizers from previous sync on existing hooks to make sure the operation is idempotent
+	{
+		ss := newStateSync(state)
+		existingHooks := tasks.Filter(func(t *syncTask) bool { return t.isHook() && t.pending() && t.liveObj != nil })
+		for _, task := range existingHooks {
+			t := task
+			ss.Go(func(state runState) runState {
+				logCtx := sc.log.WithValues("dryRun", dryRun, "task", t)
+				logCtx.V(1).Info("Removing finalizers")
+				if !dryRun {
+					if err := sc.removeHookFinalizer(t); err != nil {
+						state = failed
+						sc.setResourceResult(t, t.syncStatus, common.OperationError, fmt.Sprintf("failed to remove hook finalizer: %v", err))
+					}
+				}
+				return state
+			})
+		}
+		state = ss.Wait()
+	}
+	if state != successful {
+		return state
+	}
+
 	// prune first
 	{
+		if !sc.pruneConfirmed {
+			var resources []string
+			for _, task := range pruneTasks {
+				if resourceutil.HasAnnotationOption(task.liveObj, common.AnnotationSyncOptions, common.SyncOptionPruneRequireConfirm) {
+					resources = append(resources, fmt.Sprintf("%s/%s/%s", task.obj().GetAPIVersion(), task.obj().GetKind(), task.name()))
+				}
+			}
+			if len(resources) > 0 {
+				sc.log.WithValues("resources", resources).Info("Prune requires confirmation")
+				andMessage := ""
+				if len(resources) > 1 {
+					andMessage = fmt.Sprintf(" and %d more resources", len(resources)-1)
+				}
+				sc.message = fmt.Sprintf("Waiting for pruning confirmation of %s%s", resources[0], andMessage)
+				return pending
+			}
+		}
+
 		ss := newStateSync(state)
 		for _, task := range pruneTasks {
 			t := task
@@ -1207,15 +1480,19 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 		for _, task := range hooksPendingDeletion {
 			t := task
 			ss.Go(func(state runState) runState {
-				sc.log.WithValues("dryRun", dryRun, "task", t).V(1).Info("Deleting")
+				log := sc.log.WithValues("dryRun", dryRun, "task", t).V(1)
+				log.Info("Deleting")
 				if !dryRun {
 					err := sc.deleteResource(t)
 					if err != nil {
 						// it is possible to get a race condition here, such that the resource does not exist when
-						// delete is requested, we treat this as a nop
-						if !apierr.IsNotFound(err) {
+						// delete is requested, we treat this as a nopand remove the liveObj
+						if !apierrors.IsNotFound(err) {
 							state = failed
-							sc.setResourceResult(t, "", common.OperationError, fmt.Sprintf("failed to delete resource: %v", err))
+							sc.setResourceResult(t, t.syncStatus, common.OperationError, fmt.Sprintf("failed to delete resource: %v", err))
+						} else {
+							log.Info("Resource not found, treating as no-op and removing liveObj")
+							t.liveObj = nil
 						}
 					} else {
 						// if there is anything that needs deleting, we are at best now in pending and
@@ -1236,7 +1513,7 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 	// finally create resources
 	var tasksGroup syncTasks
 	for _, task := range createTasks {
-		//Only wait if the type of the next task is different than the previous type
+		// Only wait if the type of the next task is different than the previous type
 		if len(tasksGroup) > 0 && tasksGroup[0].targetObj.GetKind() != task.kind() {
 			state = sc.processCreateTasks(state, tasksGroup, dryRun)
 			tasksGroup = syncTasks{task}
@@ -1295,7 +1572,8 @@ func (sc *syncContext) setResourceResult(task *syncTask, syncStatus common.Resul
 	existing, ok := sc.syncRes[task.resultKey()]
 
 	res := common.ResourceSyncResult{
-		ResourceKey: kube.GetResourceKey(task.obj()),
+		ResourceKey: kubeutil.GetResourceKey(task.obj()),
+		Images:      kubeutil.GetResourceImages(task.obj()),
 		Version:     task.version(),
 		Status:      task.syncStatus,
 		Message:     task.message,

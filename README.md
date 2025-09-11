@@ -1,3 +1,14 @@
+# Ongoing migration 
+The gitops-engine repository is migrating to https://github.com/argoproj/argo-cd.
+
+As part of this migration, we are going to:
+
+- close PRs with no updates older than 1 year
+- ask ppl to update the remaining PRs that had some update in the last year but are outdated.
+- review the pending recent open PRs that we deem important
+
+Hold on your PRs until the migration is complete.
+
 # GitOps Engine
 
 Various GitOps operators address different use-cases and provide different user experiences but all have similar set of core features. The team behind
@@ -31,10 +42,10 @@ The GitOps Engine follows the [CNCF Code of Conduct](https://github.com/cncf/fou
 
 If you are as excited about GitOps and one common engine for it as much as we are, please get in touch. If you want to write code that's great, if you want to share feedback, ideas and use-cases, that's great too.
 
-Find us on the [#gitops channel][gitops-slack] on Kubernetes Slack (get an [invite here][kube-slack]).
+Find us on the [#argo-cd-contributors][argo-cd-contributors-slack] on CNCF Slack (get an [invite here][cncf-slack]).
 
-[gitops-slack]: https://kubernetes.slack.com/archives/CBT6N1ASG
-[kube-slack]: https://slack.k8s.io/
+[argo-cd-contributors-slack]: https://cloud-native.slack.com/archives/C020XM04CUW
+[cncf-slack]: https://slack.cncf.io/
 
 ### Contributing to the effort
 

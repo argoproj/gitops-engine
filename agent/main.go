@@ -54,7 +54,7 @@ type settings struct {
 
 func (s *settings) getGCMark(key kube.ResourceKey) string {
 	h := sha256.New()
-	_, _ = h.Write([]byte(fmt.Sprintf("%s/%s", s.repoPath, strings.Join(s.paths, ","))))
+	_, _ = fmt.Fprintf(h, "%s/%s", s.repoPath, strings.Join(s.paths, ","))
 	_, _ = h.Write([]byte(strings.Join([]string{key.Group, key.Kind, key.Name}, "/")))
 	return "sha256." + base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 }
@@ -64,7 +64,7 @@ func (s *settings) parseManifests() ([]*unstructured.Unstructured, string, error
 	cmd.Dir = s.repoPath
 	revision, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("failed to determine git revision: %w", err)
 	}
 	var res []*unstructured.Unstructured
 	for i := range s.paths {
@@ -80,16 +80,16 @@ func (s *settings) parseManifests() ([]*unstructured.Unstructured, string, error
 			}
 			data, err := os.ReadFile(path)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to read file %s: %w", path, err)
 			}
 			items, err := kube.SplitYAML(data)
 			if err != nil {
-				return fmt.Errorf("failed to parse %s: %v", path, err)
+				return fmt.Errorf("failed to parse %s: %w", path, err)
 			}
 			res = append(res, items...)
 			return nil
 		}); err != nil {
-			return nil, "", err
+			return nil, "", fmt.Errorf("failed to parse %s: %w", s.paths[i], err)
 		}
 	}
 	for i := range res {
@@ -150,7 +150,7 @@ func newCmd(log logr.Logger) *cobra.Command {
 			clusterCache := cache.NewClusterCache(config,
 				cache.SetNamespaces(namespaces),
 				cache.SetLogr(log),
-				cache.SetPopulateResourceInfoHandler(func(un *unstructured.Unstructured, isRoot bool) (info interface{}, cacheManifest bool) {
+				cache.SetPopulateResourceInfoHandler(func(un *unstructured.Unstructured, _ bool) (info any, cacheManifest bool) {
 					// store gc mark of every resource
 					gcMark := un.GetAnnotations()[annotationGCMark]
 					info = &resourceInfo{gcMark: un.GetAnnotations()[annotationGCMark]}
@@ -175,7 +175,7 @@ func newCmd(log logr.Logger) *cobra.Command {
 					resync <- true
 				}
 			}()
-			http.HandleFunc("/api/v1/sync", func(writer http.ResponseWriter, request *http.Request) {
+			http.HandleFunc("/api/v1/sync", func(_ http.ResponseWriter, _ *http.Request) {
 				log.Info("Synchronization triggered by API call")
 				resync <- true
 			})
