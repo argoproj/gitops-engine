@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 
 	jsonpatch "github.com/evanphx/json-patch/v5"
 	corev1 "k8s.io/api/core/v1"
@@ -246,7 +247,6 @@ func removeWebhookMutation(predictedLive, live *unstructured.Unstructured, gvkPa
 	if managerFieldsSet.Empty() {
 		return nil, fmt.Errorf("no managed fields found for manager: %s", manager)
 	}
-
 	predictedLiveFieldSet, err := typedPredictedLive.ToFieldSet()
 	if err != nil {
 		return nil, fmt.Errorf("error converting predicted live state to FieldSet: %w", err)
@@ -268,7 +268,10 @@ func removeWebhookMutation(predictedLive, live *unstructured.Unstructured, gvkPa
 
 	// In case any of the removed fields cause schema violations, we will keep those fields
 	nonArgoFieldsSet = safelyRemoveFieldsSet(typedPredictedLive, nonArgoFieldsSet)
-	typedPredictedLive = typedPredictedLive.RemoveItems(nonArgoFieldsSet)
+	// Filter out known Kubernetes defaults that shouldn't be removed
+	filteredRemovalSet := filterOutKnownDefaults(nonArgoFieldsSet)
+
+	typedPredictedLive = typedPredictedLive.RemoveItems(filteredRemovalSet)
 
 	// Apply the predicted live state to the live state to get a diff without mutation webhook fields
 	typedPredictedLive, err = typedLive.Merge(typedPredictedLive)
@@ -287,6 +290,31 @@ func removeWebhookMutation(predictedLive, live *unstructured.Unstructured, gvkPa
 		return nil, fmt.Errorf("error converting live typedValue: expected map got %T", plu)
 	}
 	return &unstructured.Unstructured{Object: pl}, nil
+}
+
+// filterOutKnownDefaults removes known Kubernetes default fields from the removal set
+// This prevents removing fields that Kubernetes automatically adds and could cause merge issues
+func filterOutKnownDefaults(fieldsToRemove *fieldpath.Set) *fieldpath.Set {
+	knownDefaults := []string{
+		"protocol", // container port protocol defaults to TCP
+	}
+	filtered := fieldpath.NewSet()
+	fieldsToRemove.Iterate(func(p fieldpath.Path) {
+		pathStr := p.String()
+		shouldPreserve := false
+		// Check if this path contains any known default field
+		for _, defaultField := range knownDefaults {
+			if strings.Contains(pathStr, defaultField) {
+				shouldPreserve = true
+				break
+			}
+		}
+		if !shouldPreserve {
+			filtered.Insert(p)
+		}
+	})
+
+	return filtered
 }
 
 // safelyRemoveFieldSet will validate if removing the fieldsToRemove set from predictedLive maintains
