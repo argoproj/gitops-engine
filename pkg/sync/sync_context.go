@@ -668,11 +668,7 @@ func (sc *syncContext) removeHookFinalizer(task *syncTask) error {
 		updateErr := sc.updateResource(task)
 		if apierrors.IsConflict(updateErr) {
 			sc.log.WithValues("task", task).V(1).Info("Retrying hook finalizer removal due to conflict on update")
-			resIf, err := sc.getResourceIf(task, "get")
-			if err != nil {
-				return fmt.Errorf("failed to get resource interface: %w", err)
-			}
-			liveObj, err := resIf.Get(context.TODO(), task.liveObj.GetName(), metav1.GetOptions{})
+			liveObj, err := sc.getResource(task)
 			if apierrors.IsNotFound(err) {
 				sc.log.WithValues("task", task).V(1).Info("Resource is already deleted")
 				return nil
@@ -690,6 +686,19 @@ func (sc *syncContext) removeHookFinalizer(task *syncTask) error {
 		}
 		return nil
 	})
+}
+
+func (sc *syncContext) getResource(task *syncTask) (*unstructured.Unstructured, error) {
+	sc.log.WithValues("task", task).V(1).Info("Getting resource")
+	resIf, err := sc.getResourceIf(task, "get")
+	if err != nil {
+		return nil, err
+	}
+	liveObj, err := resIf.Get(context.TODO(), task.name(), metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get resource: %w", err)
+	}
+	return liveObj, nil
 }
 
 func (sc *syncContext) updateResource(task *syncTask) error {
@@ -1453,6 +1462,31 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 			createTasks = append(createTasks, task)
 		}
 	}
+
+	// remove finalizers from previous sync on existing hooks to make sure the operation is idempotent
+	{
+		ss := newStateSync(state)
+		existingHooks := tasks.Filter(func(t *syncTask) bool { return t.isHook() && t.pending() && t.liveObj != nil })
+		for _, task := range existingHooks {
+			t := task
+			ss.Go(func(state runState) runState {
+				logCtx := sc.log.WithValues("dryRun", dryRun, "task", t)
+				logCtx.V(1).Info("Removing finalizers")
+				if !dryRun {
+					if err := sc.removeHookFinalizer(t); err != nil {
+						state = failed
+						sc.setResourceResult(t, t.syncStatus, common.OperationError, fmt.Sprintf("failed to remove hook finalizer: %v", err))
+					}
+				}
+				return state
+			})
+		}
+		state = ss.Wait()
+	}
+	if state != successful {
+		return state
+	}
+
 	// prune first
 	{
 		if !sc.pruneConfirmed {
@@ -1504,15 +1538,19 @@ func (sc *syncContext) runTasks(tasks syncTasks, dryRun bool) runState {
 		for _, task := range hooksPendingDeletion {
 			t := task
 			ss.Go(func(state runState) runState {
-				sc.log.WithValues("dryRun", dryRun, "task", t).V(1).Info("Deleting")
+				log := sc.log.WithValues("dryRun", dryRun, "task", t).V(1)
+				log.Info("Deleting")
 				if !dryRun {
 					err := sc.deleteResource(t)
 					if err != nil {
 						// it is possible to get a race condition here, such that the resource does not exist when
-						// delete is requested, we treat this as a nop
+						// delete is requested, we treat this as a nopand remove the liveObj
 						if !apierrors.IsNotFound(err) {
 							state = failed
-							sc.setResourceResult(t, "", common.OperationError, fmt.Sprintf("failed to delete resource: %v", err))
+							sc.setResourceResult(t, t.syncStatus, common.OperationError, fmt.Sprintf("failed to delete resource: %v", err))
+						} else {
+							log.Info("Resource not found, treating as no-op and removing liveObj")
+							t.liveObj = nil
 						}
 					} else {
 						// if there is anything that needs deleting, we are at best now in pending and

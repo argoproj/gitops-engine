@@ -30,6 +30,8 @@ const (
 	SyncOptionPruneLast = "PruneLast=true"
 	// Sync option that enables use of replace or create command instead of apply
 	SyncOptionReplace = "Replace=true"
+	// Sync option that disables use of replace or create command instead of apply
+	SyncOptionDisableReplace = "Replace=false"
 	// Sync option that enables use of --force flag, delete and re-create
 	SyncOptionForce = "Force=true"
 	// Sync option that enables use of --server-side flag instead of client-side
@@ -40,6 +42,8 @@ const (
 	SyncOptionDisableDeletion = "Delete=false"
 	// Sync option that sync only out of sync resources
 	SyncOptionApplyOutOfSyncOnly = "ApplyOutOfSyncOnly=true"
+	// Sync option that disables sync only out of sync resources
+	SyncOptionDisableApplyOutOfSyncOnly = "ApplyOutOfSyncOnly=false"
 	// Sync option that requires confirmation before deleting the resource
 	SyncOptionDeleteRequireConfirm = "Delete=confirm"
 	// Sync option that requires confirmation before deleting the resource

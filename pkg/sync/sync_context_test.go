@@ -46,15 +46,15 @@ func newTestSyncCtx(getResourceFunc *func(ctx context.Context, config *rest.Conf
 		&metav1.APIResourceList{
 			GroupVersion: "v1",
 			APIResources: []metav1.APIResource{
-				{Kind: "Pod", Group: "", Version: "v1", Namespaced: true, Verbs: standardVerbs},
-				{Kind: "Service", Group: "", Version: "v1", Namespaced: true, Verbs: standardVerbs},
-				{Kind: "Namespace", Group: "", Version: "v1", Namespaced: false, Verbs: standardVerbs},
+				{Name: "pods", Kind: "Pod", Group: "", Version: "v1", Namespaced: true, Verbs: standardVerbs},
+				{Name: "services", Kind: "Service", Group: "", Version: "v1", Namespaced: true, Verbs: standardVerbs},
+				{Name: "namespaces", Kind: "Namespace", Group: "", Version: "v1", Namespaced: false, Verbs: standardVerbs},
 			},
 		},
 		&metav1.APIResourceList{
 			GroupVersion: "apps/v1",
 			APIResources: []metav1.APIResource{
-				{Kind: "Deployment", Group: "apps", Version: "v1", Namespaced: true, Verbs: standardVerbs},
+				{Name: "deployments", Kind: "Deployment", Group: "apps", Version: "v1", Namespaced: true, Verbs: standardVerbs},
 			},
 		})
 	sc := syncContext{
@@ -393,10 +393,13 @@ func TestSyncCreateFailure(t *testing.T) {
 func TestSync_ApplyOutOfSyncOnly(t *testing.T) {
 	pod1 := testingutils.NewPod()
 	pod1.SetName("pod-1")
+	pod1.SetNamespace("fake-argocd-ns")
 	pod2 := testingutils.NewPod()
 	pod2.SetName("pod-2")
+	pod2.SetNamespace("fake-argocd-ns")
 	pod3 := testingutils.NewPod()
 	pod3.SetName("pod-3")
+	pod3.SetNamespace("fake-argocd-ns")
 
 	syncCtx := newTestSyncCtx(nil)
 	syncCtx.applyOutOfSyncOnly = true
@@ -503,6 +506,70 @@ func TestSync_ApplyOutOfSyncOnly(t *testing.T) {
 		assert.Equal(t, "pod-1", resources[0].ResourceKey.Name)
 		assert.Equal(t, synccommon.ResultCodeSynced, resources[0].Status)
 		assert.Equal(t, synccommon.OperationRunning, resources[0].HookPhase)
+	})
+}
+
+func TestSync_ApplyOutOfSyncOnly_ClusterResources(t *testing.T) {
+	ns1 := testingutils.NewNamespace()
+	ns1.SetName("ns-1")
+	ns1.SetNamespace("")
+
+	ns2 := testingutils.NewNamespace()
+	ns2.SetName("ns-2")
+	ns1.SetNamespace("")
+
+	ns3 := testingutils.NewNamespace()
+	ns3.SetName("ns-3")
+	ns3.SetNamespace("")
+
+	ns2Target := testingutils.NewNamespace()
+	ns2Target.SetName("ns-2")
+	// set namespace for a cluster scoped resource. This is to simulate the behaviour, where the Application's
+	// spec.destination.namespace is set for all resources that does not have a namespace set, irrespective of whether
+	// the resource is cluster scoped or namespace scoped.
+	//
+	// Refer to https://github.com/argoproj/gitops-engine/blob/8007df5f6c5dd78a1a8cef73569468ce4d83682c/pkg/sync/sync_context.go#L827-L833
+	ns2Target.SetNamespace("ns-2")
+
+	syncCtx := newTestSyncCtx(nil, WithResourceModificationChecker(true, diffResultListClusterResource()))
+	syncCtx.applyOutOfSyncOnly = true
+	fakeDisco := syncCtx.disco.(*fakedisco.FakeDiscovery)
+	fakeDisco.Resources = []*metav1.APIResourceList{
+		{
+			GroupVersion: "v1",
+			APIResources: []metav1.APIResource{
+				{Kind: "Namespace", Group: "", Version: "v1", Namespaced: false, Verbs: standardVerbs},
+			},
+		},
+	}
+
+	t.Run("cluster resource with target ns having namespace filled", func(t *testing.T) {
+		syncCtx.resources = groupResources(ReconciliationResult{
+			Live:   []*unstructured.Unstructured{nil, ns2, ns3},
+			Target: []*unstructured.Unstructured{ns1, ns2Target, ns3},
+		})
+
+		syncCtx.Sync()
+		phase, _, resources := syncCtx.GetState()
+		assert.Equal(t, synccommon.OperationSucceeded, phase)
+		assert.Len(t, resources, 1)
+		for _, r := range resources {
+			switch r.ResourceKey.Name {
+			case "ns-1":
+				// ns-1 namespace does not exist yet in the cluster, so it must create it and resource must go to
+				// synced state.
+				assert.Equal(t, synccommon.ResultCodeSynced, r.Status)
+			case "ns-2":
+				// ns-2 namespace already exist and is synced. However, the target resource has metadata.namespace set for
+				// a cluster resource. This namespace must not be synced again, as the object already exists and
+				// a change in namespace for a cluster resource has no meaning and hence must not be treated as an
+				// out-of-sync resource.
+				t.Error("ns-2 should have been skipped, as no change")
+			case "ns-3":
+				// ns-3 namespace exists and there is no change in the target's metadata.namespace value. So it must not try to sync again.
+				t.Error("ns-3 should have been skipped, as no change")
+			}
+		}
 	})
 }
 
@@ -852,6 +919,39 @@ func withDisableServerSideApplyAnnotation(un *unstructured.Unstructured) *unstru
 func withReplaceAndServerSideApplyAnnotations(un *unstructured.Unstructured) *unstructured.Unstructured {
 	un.SetAnnotations(map[string]string{synccommon.AnnotationSyncOptions: "Replace=true,ServerSideApply=true"})
 	return un
+}
+
+func TestSync_HookWithReplaceAndBeforeHookCreation_AlreadyDeleted(t *testing.T) {
+	// This test a race condition when Delete is called on an already deleted object
+	// LiveObj is set, but then the resource is deleted asynchronously in kubernetes
+	syncCtx := newTestSyncCtx(nil)
+
+	target := withReplaceAnnotation(testingutils.NewPod())
+	target.SetNamespace(testingutils.FakeArgoCDNamespace)
+	target = testingutils.Annotate(target, synccommon.AnnotationKeyHookDeletePolicy, string(synccommon.HookDeletePolicyBeforeHookCreation))
+	target = testingutils.Annotate(target, synccommon.AnnotationKeyHook, string(synccommon.SyncPhasePreSync))
+	live := target.DeepCopy()
+
+	syncCtx.resources = groupResources(ReconciliationResult{
+		Live:   []*unstructured.Unstructured{live},
+		Target: []*unstructured.Unstructured{target},
+	})
+	syncCtx.hooks = []*unstructured.Unstructured{live}
+
+	client := fake.NewSimpleDynamicClient(runtime.NewScheme())
+	deleted := false
+	client.PrependReactor("delete", "pods", func(_ testcore.Action) (bool, runtime.Object, error) {
+		deleted = true
+		// simulate the race conditions where liveObj was not null, but is now deleted in k8s
+		return true, nil, apierrors.NewNotFound(corev1.Resource("pods"), live.GetName())
+	})
+	syncCtx.dynamicIf = client
+
+	syncCtx.Sync()
+
+	resourceOps, _ := syncCtx.resourceOps.(*kubetest.MockResourceOps)
+	assert.Equal(t, "create", resourceOps.GetLastResourceCommand(kube.GetResourceKey(target)))
+	assert.True(t, deleted)
 }
 
 func TestSync_ServerSideApply(t *testing.T) {
@@ -1285,22 +1385,84 @@ func TestSyncFailureHookWithFailedSync(t *testing.T) {
 }
 
 func TestBeforeHookCreation(t *testing.T) {
+	finalizerRemoved := false
 	syncCtx := newTestSyncCtx(nil)
-	hook := testingutils.Annotate(testingutils.Annotate(testingutils.NewPod(), synccommon.AnnotationKeyHook, "Sync"), synccommon.AnnotationKeyHookDeletePolicy, "BeforeHookCreation")
-	hook.SetNamespace(testingutils.FakeArgoCDNamespace)
+	hookObj := testingutils.Annotate(testingutils.Annotate(testingutils.NewPod(), synccommon.AnnotationKeyHook, "Sync"), synccommon.AnnotationKeyHookDeletePolicy, "BeforeHookCreation")
+	hookObj.SetFinalizers([]string{hook.HookFinalizer})
+	hookObj.SetNamespace(testingutils.FakeArgoCDNamespace)
 	syncCtx.resources = groupResources(ReconciliationResult{
-		Live:   []*unstructured.Unstructured{hook},
+		Live:   []*unstructured.Unstructured{hookObj},
 		Target: []*unstructured.Unstructured{nil},
 	})
-	syncCtx.hooks = []*unstructured.Unstructured{hook}
-	syncCtx.dynamicIf = fake.NewSimpleDynamicClient(runtime.NewScheme())
+	syncCtx.hooks = []*unstructured.Unstructured{hookObj}
+	client := fake.NewSimpleDynamicClient(runtime.NewScheme(), hookObj)
+	client.PrependReactor("update", "pods", func(_ testcore.Action) (bool, runtime.Object, error) {
+		finalizerRemoved = true
+		return false, nil, nil
+	})
+	syncCtx.dynamicIf = client
+
+	// First sync will delete the existing hook
+	syncCtx.Sync()
+	phase, _, _ := syncCtx.GetState()
+	assert.Equal(t, synccommon.OperationRunning, phase)
+	assert.True(t, finalizerRemoved)
+
+	// Second sync will create the hook
+	syncCtx.Sync()
+	phase, message, resources := syncCtx.GetState()
+	assert.Equal(t, synccommon.OperationRunning, phase)
+	assert.Len(t, resources, 1)
+	assert.Equal(t, synccommon.OperationRunning, resources[0].HookPhase)
+	assert.Equal(t, "waiting for completion of hook /Pod/my-pod", message)
+}
+
+func TestSync_ExistingHooksWithFinalizer(t *testing.T) {
+	newHook := func(name string, hookType synccommon.HookType, deletePolicy synccommon.HookDeletePolicy) *unstructured.Unstructured {
+		obj := testingutils.NewPod()
+		obj.SetName(name)
+		obj.SetNamespace(testingutils.FakeArgoCDNamespace)
+		testingutils.Annotate(obj, synccommon.AnnotationKeyHook, string(hookType))
+		testingutils.Annotate(obj, synccommon.AnnotationKeyHookDeletePolicy, string(deletePolicy))
+		obj.SetFinalizers([]string{hook.HookFinalizer})
+		return obj
+	}
+
+	hook1 := newHook("existing-hook-1", synccommon.HookTypePreSync, synccommon.HookDeletePolicyBeforeHookCreation)
+	hook2 := newHook("existing-hook-2", synccommon.HookTypePreSync, synccommon.HookDeletePolicyHookFailed)
+	hook3 := newHook("existing-hook-3", synccommon.HookTypePreSync, synccommon.HookDeletePolicyHookSucceeded)
+
+	syncCtx := newTestSyncCtx(nil)
+	fakeDynamicClient := fake.NewSimpleDynamicClient(runtime.NewScheme(), hook1, hook2, hook3)
+	syncCtx.dynamicIf = fakeDynamicClient
+	updatedCount := 0
+	fakeDynamicClient.PrependReactor("update", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
+		// Removing the finalizers
+		updatedCount++
+		return false, nil, nil
+	})
+	deletedCount := 0
+	fakeDynamicClient.PrependReactor("delete", "*", func(_ testcore.Action) (handled bool, ret runtime.Object, err error) {
+		// because of HookDeletePolicyBeforeHookCreation
+		deletedCount++
+		return false, nil, nil
+	})
+	syncCtx.resources = groupResources(ReconciliationResult{
+		Live:   []*unstructured.Unstructured{hook1, hook2, hook3},
+		Target: []*unstructured.Unstructured{nil, nil, nil},
+	})
+	syncCtx.hooks = []*unstructured.Unstructured{hook1, hook2, hook3}
 
 	syncCtx.Sync()
+	phase, _, _ := syncCtx.GetState()
 
-	_, _, resources := syncCtx.GetState()
-	assert.Len(t, resources, 1)
-	assert.Empty(t, resources[0].Message)
-	assert.Equal(t, "waiting for completion of hook /Pod/my-pod", syncCtx.message)
+	assert.Equal(t, synccommon.OperationRunning, phase)
+	assert.Equal(t, 3, updatedCount)
+	assert.Equal(t, 1, deletedCount)
+
+	_, err := syncCtx.getResource(&syncTask{liveObj: hook1})
+	require.Error(t, err, "Expected resource to be deleted")
+	assert.True(t, apierrors.IsNotFound(err))
 }
 
 func TestRunSyncFailHooksFailed(t *testing.T) {
@@ -2568,4 +2730,29 @@ func TestWaveReorderingOfPruneTasksUsingBinaryTreeOrdering(t *testing.T) {
 
 		runTest(test)
 	}
+}
+  
+func diffResultListClusterResource() *diff.DiffResultList {
+	ns1 := testingutils.NewNamespace()
+	ns1.SetName("ns-1")
+	ns2 := testingutils.NewNamespace()
+	ns2.SetName("ns-2")
+	ns3 := testingutils.NewNamespace()
+	ns3.SetName("ns-3")
+
+	diffResultList := diff.DiffResultList{
+		Modified: true,
+		Diffs:    []diff.DiffResult{},
+	}
+
+	nsBytes, _ := json.Marshal(ns1)
+	diffResultList.Diffs = append(diffResultList.Diffs, diff.DiffResult{NormalizedLive: nsBytes, PredictedLive: nsBytes, Modified: false})
+
+	nsBytes, _ = json.Marshal(ns2)
+	diffResultList.Diffs = append(diffResultList.Diffs, diff.DiffResult{NormalizedLive: nsBytes, PredictedLive: nsBytes, Modified: false})
+
+	nsBytes, _ = json.Marshal(ns3)
+	diffResultList.Diffs = append(diffResultList.Diffs, diff.DiffResult{NormalizedLive: nsBytes, PredictedLive: nsBytes, Modified: false})
+
+	return &diffResultList
 }

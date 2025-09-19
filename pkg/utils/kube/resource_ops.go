@@ -237,6 +237,7 @@ func (k *kubectlResourceOperations) ReplaceResource(ctx context.Context, obj *un
 		if err != nil {
 			return err
 		}
+
 		return replaceOptions.Run(k.fact)
 	})
 }
@@ -428,6 +429,10 @@ func (k *kubectlServerSideDiffDryRunApplier) newApplyOptions(ioStreams genericcl
 	}
 
 	o.ForceConflicts = true
+
+	if err := o.Validate(); err != nil {
+		return nil, fmt.Errorf("error validating options: %w", err)
+	}
 	return o, nil
 }
 
@@ -456,6 +461,10 @@ func (k *kubectlResourceOperations) newApplyOptions(ioStreams genericclioptions.
 
 	if serverSideApply {
 		o.ForceConflicts = true
+	}
+
+	if err := o.Validate(); err != nil {
+		return nil, fmt.Errorf("error validating options: %w", err)
 	}
 	return o, nil
 }
@@ -491,6 +500,10 @@ func (k *kubectlResourceOperations) newCreateOptions(ioStreams genericclioptions
 		return printer.PrintObj(obj, o.Out)
 	}
 	o.FilenameOptions.Filenames = []string{fileName}
+
+	if err := o.Validate(); err != nil {
+		return nil, fmt.Errorf("error validating options: %w", err)
+	}
 	return o, nil
 }
 
@@ -541,7 +554,14 @@ func (k *kubectlResourceOperations) newReplaceOptions(config *rest.Config, f cmd
 
 	o.DeleteOptions.Filenames = []string{fileName}
 	o.Namespace = namespace
-	o.DeleteOptions.ForceDeletion = force
+
+	if dryRunStrategy == cmdutil.DryRunNone {
+		o.DeleteOptions.ForceDeletion = force
+	}
+
+	if err := o.Validate(); err != nil {
+		return nil, fmt.Errorf("error validating options: %w", err)
+	}
 	return o, nil
 }
 
@@ -571,6 +591,10 @@ func newReconcileOptions(f cmdutil.Factory, kubeClient *kubernetes.Clientset, fi
 		return nil, fmt.Errorf("error configuring printer: %w", err)
 	}
 	o.PrintObject = printer.PrintObj
+
+	if err := o.Validate(); err != nil {
+		return nil, fmt.Errorf("error validating options: %w", err)
+	}
 	return o, nil
 }
 
