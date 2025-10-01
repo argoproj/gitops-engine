@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"runtime/debug"
-	"strings"
 	"sync"
 	"time"
 
@@ -1140,7 +1139,7 @@ func buildGraph(nsNodes map[kube.ResourceKey]*Resource) map[kube.ResourceKey]map
 						// It is ok to pick any object, but we need to make sure we pick the same child after every refresh.
 						key1 := r.ResourceKey()
 						key2 := childNode.ResourceKey()
-						if strings.Compare(key1.String(), key2.String()) > 0 {
+						if key1.String() > key2.String() {
 							graph[uidNode.ResourceKey()][childNode.Ref.UID] = childNode
 						}
 					}

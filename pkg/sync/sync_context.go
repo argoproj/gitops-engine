@@ -57,6 +57,57 @@ type SyncContext interface {
 	GetState() (common.OperationPhase, string, []common.ResourceSyncResult)
 }
 
+type syncContext struct {
+	healthOverride      health.HealthOverride
+	permissionValidator common.PermissionValidator
+	resources           map[kubeutil.ResourceKey]reconciledResource
+	hooks               []*unstructured.Unstructured
+	config              *rest.Config
+	rawConfig           *rest.Config
+	dynamicIf           dynamic.Interface
+	disco               discovery.DiscoveryInterface
+	extensionsclientset *clientset.Clientset
+	kubectl             kubeutil.Kubectl
+	resourceOps         kubeutil.ResourceOperations
+	namespace           string
+
+	dryRun                          bool
+	skipDryRunOnMissingResource     bool
+	force                           bool
+	validate                        bool
+	skipHooks                       bool
+	resourcesFilter                 func(key kubeutil.ResourceKey, target *unstructured.Unstructured, live *unstructured.Unstructured) bool
+	prune                           bool
+	replace                         bool
+	serverSideApply                 bool
+	serverSideApplyManager          string
+	pruneLast                       bool
+	prunePropagationPolicy          *metav1.DeletionPropagation
+	pruneConfirmed                  bool
+	clientSideApplyMigrationManager string
+	enableClientSideApplyMigration  bool
+
+	syncRes   map[string]common.ResourceSyncResult
+	startedAt time.Time
+	revision  string
+	phase     common.OperationPhase
+	message   string
+
+	log logr.Logger
+	// lock to protect concurrent updates of the result list
+	lock sync.Mutex
+
+	// syncNamespace is a function that will determine if the managed
+	// namespace should be synced
+	syncNamespace func(*unstructured.Unstructured, *unstructured.Unstructured) (bool, error)
+
+	syncWaveHook common.SyncWaveHook
+
+	applyOutOfSyncOnly bool
+	// stores whether the resource is modified or not
+	modificationResult map[kubeutil.ResourceKey]bool
+}
+
 // SyncOpt is a callback that update sync operation settings
 type SyncOpt func(ctx *syncContext)
 
@@ -338,57 +389,6 @@ func (sc *syncContext) getOperationPhase(obj *unstructured.Unstructured) (common
 		}
 	}
 	return phase, message, nil
-}
-
-type syncContext struct {
-	healthOverride      health.HealthOverride
-	permissionValidator common.PermissionValidator
-	resources           map[kubeutil.ResourceKey]reconciledResource
-	hooks               []*unstructured.Unstructured
-	config              *rest.Config
-	rawConfig           *rest.Config
-	dynamicIf           dynamic.Interface
-	disco               discovery.DiscoveryInterface
-	extensionsclientset *clientset.Clientset
-	kubectl             kubeutil.Kubectl
-	resourceOps         kubeutil.ResourceOperations
-	namespace           string
-
-	dryRun                          bool
-	skipDryRunOnMissingResource     bool
-	force                           bool
-	validate                        bool
-	skipHooks                       bool
-	resourcesFilter                 func(key kubeutil.ResourceKey, target *unstructured.Unstructured, live *unstructured.Unstructured) bool
-	prune                           bool
-	replace                         bool
-	serverSideApply                 bool
-	serverSideApplyManager          string
-	pruneLast                       bool
-	prunePropagationPolicy          *metav1.DeletionPropagation
-	pruneConfirmed                  bool
-	clientSideApplyMigrationManager string
-	enableClientSideApplyMigration  bool
-
-	syncRes   map[string]common.ResourceSyncResult
-	startedAt time.Time
-	revision  string
-	phase     common.OperationPhase
-	message   string
-
-	log logr.Logger
-	// lock to protect concurrent updates of the result list
-	lock sync.Mutex
-
-	// syncNamespace is a function that will determine if the managed
-	// namespace should be synced
-	syncNamespace func(*unstructured.Unstructured, *unstructured.Unstructured) (bool, error)
-
-	syncWaveHook common.SyncWaveHook
-
-	applyOutOfSyncOnly bool
-	// stores whether the resource is modified or not
-	modificationResult map[kubeutil.ResourceKey]bool
 }
 
 func (sc *syncContext) setRunningPhase(tasks []*syncTask, isPendingDeletion bool) {
@@ -948,7 +948,7 @@ func (sc *syncContext) getSyncTasks() (_ syncTasks, successful bool) {
 			}
 		}
 	}
-	syncPhaseLastWave = syncPhaseLastWave + 1
+	syncPhaseLastWave++
 
 	for _, task := range tasks {
 		if task.isPrune() &&
