@@ -291,7 +291,7 @@ func removeWebhookMutation(predictedLive, live *unstructured.Unstructured, gvkPa
 
 // filterOutCompositeKeyFields filters out fields that are part of composite keys in associative lists.
 // These fields must be preserved to maintain list element identity during merge operations.
-func filterOutCompositeKeyFields(typedValue *typed.TypedValue, fieldsToRemove *fieldpath.Set) *fieldpath.Set {
+func filterOutCompositeKeyFields(_ *typed.TypedValue, fieldsToRemove *fieldpath.Set) *fieldpath.Set {
 	filteredFields := fieldpath.NewSet()
 
 	fieldsToRemove.Iterate(func(fieldPath fieldpath.Path) {
