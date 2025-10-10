@@ -14,6 +14,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
@@ -1123,6 +1124,24 @@ func TestUnnamedHooksGetUniqueNames(t *testing.T) {
 		assert.Contains(t, tasks[0].name(), "foobar-presync-")
 		assert.Contains(t, tasks[1].name(), "foobar-postsync-")
 		assert.Empty(t, pod.GetName())
+	})
+
+	t.Run("Long revision with dots", func(t *testing.T) {
+		syncCtx := newTestSyncCtx(nil)
+		pod := testingutils.NewPod()
+		pod.SetName("")
+		pod.SetAnnotations(map[string]string{synccommon.AnnotationKeyHook: "PreSync,PostSync"})
+		syncCtx.hooks = []*unstructured.Unstructured{pod}
+		syncCtx.revision = "f.ooba.r"
+		tasks, successful := syncCtx.getSyncTasks()
+
+		assert.True(t, successful)
+		assert.Len(t, tasks, 2)
+		assert.Contains(t, tasks[0].name(), "f.ooba-presync-")
+		assert.Contains(t, tasks[1].name(), "f.ooba-postsync-")
+		assert.Equal(t, "", pod.GetName())
+		assert.Empty(t, validation.IsDNS1123Subdomain(tasks[0].name()))
+		assert.Empty(t, validation.IsDNS1123Subdomain(tasks[1].name()))
 	})
 }
 
