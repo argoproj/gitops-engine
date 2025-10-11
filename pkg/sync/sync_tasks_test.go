@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"reflect"
 	"sort"
 	"testing"
 
@@ -465,9 +466,11 @@ func Test_syncTasks_multiStep(t *testing.T) {
 	t.Run("Single", func(t *testing.T) {
 		tasks := syncTasks{{liveObj: testingutils.Annotate(testingutils.NewPod(), common.AnnotationSyncWave, "-1"), phase: common.SyncPhaseSync}}
 		assert.Equal(t, common.SyncPhaseSync, string(tasks.phase()))
-		assert.Equal(t, -1, tasks.wave())
+		tasksWaves, _ := tasks.waves()
+		assert.True(t, reflect.DeepEqual([]int{-1}, tasksWaves))
 		assert.Equal(t, common.SyncPhaseSync, string(tasks.lastPhase()))
-		assert.Equal(t, -1, tasks.lastWave())
+		tasksLastWaves, _ := tasks.lastWaves()
+		assert.True(t, reflect.DeepEqual([]int{-1}, tasksLastWaves))
 		assert.False(t, tasks.multiStep())
 	})
 	t.Run("Double", func(t *testing.T) {
@@ -476,9 +479,147 @@ func Test_syncTasks_multiStep(t *testing.T) {
 			{liveObj: testingutils.Annotate(testingutils.NewPod(), common.AnnotationSyncWave, "1"), phase: common.SyncPhasePostSync},
 		}
 		assert.Equal(t, common.SyncPhasePreSync, string(tasks.phase()))
-		assert.Equal(t, -1, tasks.wave())
+		tasksWaves, _ := tasks.waves()
+		assert.True(t, reflect.DeepEqual([]int{-1}, tasksWaves))
 		assert.Equal(t, common.SyncPhasePostSync, string(tasks.lastPhase()))
-		assert.Equal(t, 1, tasks.lastWave())
+		tasksLastWaves, _ := tasks.lastWaves()
+		assert.True(t, reflect.DeepEqual([]int{1}, tasksLastWaves))
 		assert.True(t, tasks.multiStep())
 	})
+}
+
+var syncTaskUsingNormalWaveOrdering = syncTasks{
+	{
+		targetObj: &unstructured.Unstructured{
+			Object: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
+						common.AnnotationSyncWave: "-1",
+					},
+				},
+			},
+		},
+	},
+}
+
+func TestSyncTaskUsingNormalWaveOrdering(t *testing.T) {
+	tasks := syncTaskUsingNormalWaveOrdering
+	tasksWaves, _ := tasks.waves()
+	tasksLastWaves, _ := tasks.lastWaves()
+	assert.True(t, reflect.DeepEqual(tasksWaves, []int{-1}))
+	assert.True(t, reflect.DeepEqual(tasksLastWaves, []int{-1}))
+}
+
+var syncTasksUsingNormalWaveOrdering = syncTasks{
+	{
+		targetObj: &unstructured.Unstructured{
+			Object: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
+						common.AnnotationSyncWave: "-1",
+					},
+				},
+			},
+		},
+	},
+	{
+		targetObj: &unstructured.Unstructured{
+			Object: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
+						common.AnnotationSyncWave: "0",
+					},
+				},
+			},
+		},
+	},
+}
+
+func TestSyncTasksUsingNormalWaveOrdering(t *testing.T) {
+	tasks := syncTasksUsingNormalWaveOrdering
+	tasksWaves, _ := tasks.waves()
+	tasksLastWaves, _ := tasks.lastWaves()
+	assert.True(t, reflect.DeepEqual(tasksWaves, []int{-1}))
+	assert.True(t, reflect.DeepEqual(tasksLastWaves, []int{0}))
+}
+
+var syncTasksUsingBinaryTreeWaveOrdering_BothParentTasks = syncTasks{
+	{
+		targetObj: &unstructured.Unstructured{
+			Object: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
+						common.AnnotationSyncWave:                  "2",
+						common.AnnotationUseBinaryTreeWaveOrdering: "true",
+					},
+				},
+			},
+		},
+	},
+	{
+		targetObj: &unstructured.Unstructured{
+			Object: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
+						common.AnnotationSyncWave:                  "3",
+						common.AnnotationUseBinaryTreeWaveOrdering: "true",
+					},
+				},
+			},
+		},
+	},
+}
+
+func TestSyncTasksUsingBinaryTreeWaveOrderingBothParentTasks(t *testing.T) {
+	tasks := syncTasksUsingBinaryTreeWaveOrdering_BothParentTasks
+	tasksWaves, _ := tasks.waves()
+	tasksLastWaves, _ := tasks.lastWaves()
+	assert.True(t, reflect.DeepEqual(tasksWaves, []int{2, 3}))
+	assert.True(t, reflect.DeepEqual(tasksLastWaves, []int{2, 3}))
+}
+
+var syncTasksUsingBinaryTreeWaveOrdering_OneParentTasks = syncTasks{
+	{
+		targetObj: &unstructured.Unstructured{
+			Object: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
+						common.AnnotationSyncWave:                  "2",
+						common.AnnotationUseBinaryTreeWaveOrdering: "true",
+					},
+				},
+			},
+		},
+	},
+	{
+		targetObj: &unstructured.Unstructured{
+			Object: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
+						common.AnnotationSyncWave:                  "4",
+						common.AnnotationUseBinaryTreeWaveOrdering: "true",
+					},
+				},
+			},
+		},
+	},
+}
+
+func TestSyncTasksusingBinaryTreeWaveOrderingOneParentTasks(t *testing.T) {
+	tasks := syncTasksUsingBinaryTreeWaveOrdering_OneParentTasks
+	tasksWaves, _ := tasks.waves()
+	tasksLastWaves, _ := tasks.lastWaves()
+	assert.True(t, reflect.DeepEqual(tasksWaves, []int{2}))
+	assert.True(t, reflect.DeepEqual(tasksLastWaves, []int{4}))
+}
+
+func TestLessUsingBinaryTreeOrdering(t *testing.T) {
+	assert.True(t, LessUsingBinaryTreeOrdering(-4, -1))
+	assert.True(t, LessUsingBinaryTreeOrdering(-4, 2))
+	assert.True(t, LessUsingBinaryTreeOrdering(2, 4))
+	assert.True(t, LessUsingBinaryTreeOrdering(2, 8))
+	assert.False(t, LessUsingBinaryTreeOrdering(2, 3))
+	assert.False(t, LessUsingBinaryTreeOrdering(4, 3))
+	assert.False(t, LessUsingBinaryTreeOrdering(2, 6))
+	assert.False(t, LessUsingBinaryTreeOrdering(2, -1))
 }
