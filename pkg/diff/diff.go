@@ -182,7 +182,7 @@ func serverSideDiff(config, live *unstructured.Unstructured, opts ...Option) (*D
 			return nil, fmt.Errorf("error removing non config mutations for resource %s/%s: %w", config.GetKind(), config.GetName(), err)
 		}
 	}
-	
+
 	// Remarshal predictedLive to ensure it receives the same normalization as live.
 	predictedLive = remarshal(predictedLive, o)
 
