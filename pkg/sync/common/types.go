@@ -40,6 +40,9 @@ const (
 	SyncOptionDisableDeletion = "Delete=false"
 	// Sync option that sync only out of sync resources
 	SyncOptionApplyOutOfSyncOnly = "ApplyOutOfSyncOnly=true"
+	SyncOptionPrunePropagationPolicyForeground = "PrunePropagationPolicy=foreground"
+	SyncOptionPrunePropagationPolicyBackground = "PrunePropagationPolicy=background"
+	SyncOptionPrunePropagationPolicyOrphan     = "PrunePropagationPolicy=orphan"
 	// Sync option that disables sync only out of sync resources
 	SyncOptionDisableApplyOutOfSyncOnly = "ApplyOutOfSyncOnly=false"
 	// Sync option that requires confirmation before deleting the resource
