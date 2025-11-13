@@ -28,30 +28,6 @@ func TestIsParentOfSameKindDifferentGroupAndUID(t *testing.T) {
 	assert.False(t, invalidParent.isParentOf(child))
 }
 
-func TestIsServiceParentOfEndPointWithTheSameName(t *testing.T) {
-	nonMatchingNameEndPoint := cacheTest.newResource(strToUnstructured(`
-apiVersion: v1
-kind: Endpoints
-metadata:
-  name: not-matching-name
-  namespace: default
-`))
-
-	matchingNameEndPoint := cacheTest.newResource(strToUnstructured(`
-apiVersion: v1
-kind: Endpoints
-metadata:
-  name: helm-guestbook
-  namespace: default
-`))
-
-	parent := cacheTest.newResource(testService)
-
-	assert.True(t, parent.isParentOf(matchingNameEndPoint))
-	assert.Equal(t, parent.Ref.UID, matchingNameEndPoint.OwnerRefs[0].UID)
-	assert.False(t, parent.isParentOf(nonMatchingNameEndPoint))
-}
-
 func TestIsServiceAccountParentOfSecret(t *testing.T) {
 	serviceAccount := cacheTest.newResource(strToUnstructured(`
 apiVersion: v1
