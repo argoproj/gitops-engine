@@ -102,6 +102,13 @@ func SetListSemaphore(listSemaphore WeightedSemaphore) UpdateSettingsFunc {
 	}
 }
 
+// SetListItemSemaphoreWeight sets the weight to limit the amount of k8s list items to process in parallel.
+func SetListItemSemaphoreWeight(listItemSemaphoreWeight int64) UpdateSettingsFunc {
+	return func(cache *clusterCache) {
+		cache.listItemSemaphoreWeight = listItemSemaphoreWeight
+	}
+}
+
 // SetResyncTimeout updates cluster re-sync timeout
 func SetResyncTimeout(timeout time.Duration) UpdateSettingsFunc {
 	return func(cache *clusterCache) {

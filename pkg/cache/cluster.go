@@ -55,6 +55,8 @@ const (
 	// Limit is required to avoid memory spikes during cache initialization.
 	// The default limit of 50 is chosen based on experiments.
 	defaultListSemaphoreWeight = 50
+	// defaultListItemSemaphoreWeight limits the amount of items to process in parallel for each k8s list.
+	defaultListItemSemaphoreWeight = int64(1)
 	// defaultEventProcessingInterval is the default interval for processing events
 	defaultEventProcessingInterval = 100 * time.Millisecond
 )
@@ -160,15 +162,16 @@ type ListRetryFunc func(err error) bool
 func NewClusterCache(config *rest.Config, opts ...UpdateSettingsFunc) *clusterCache {
 	log := textlogger.NewLogger(textlogger.NewConfig())
 	cache := &clusterCache{
-		settings:           Settings{ResourceHealthOverride: &noopSettings{}, ResourcesFilter: &noopSettings{}},
-		apisMeta:           make(map[schema.GroupKind]*apiMeta),
-		eventMetaCh:        nil,
-		listPageSize:       defaultListPageSize,
-		listPageBufferSize: defaultListPageBufferSize,
-		listSemaphore:      semaphore.NewWeighted(defaultListSemaphoreWeight),
-		resources:          make(map[kube.ResourceKey]*Resource),
-		nsIndex:            make(map[string]map[kube.ResourceKey]*Resource),
-		config:             config,
+		settings:                Settings{ResourceHealthOverride: &noopSettings{}, ResourcesFilter: &noopSettings{}},
+		apisMeta:                make(map[schema.GroupKind]*apiMeta),
+		eventMetaCh:             nil,
+		listPageSize:            defaultListPageSize,
+		listPageBufferSize:      defaultListPageBufferSize,
+		listSemaphore:           semaphore.NewWeighted(defaultListSemaphoreWeight),
+		listItemSemaphoreWeight: defaultListItemSemaphoreWeight,
+		resources:               make(map[kube.ResourceKey]*Resource),
+		nsIndex:                 make(map[string]map[kube.ResourceKey]*Resource),
+		config:                  config,
 		kubectl: &kube.KubectlCmd{
 			Log:    log,
 			Tracer: tracing.NopTracer{},
@@ -215,8 +218,9 @@ type clusterCache struct {
 	// size of a page for list operations pager.
 	listPageSize int64
 	// number of pages to prefetch for list pager.
-	listPageBufferSize int32
-	listSemaphore      WeightedSemaphore
+	listPageBufferSize      int32
+	listSemaphore           WeightedSemaphore
+	listItemSemaphoreWeight int64
 
 	// retry options for list operations
 	listRetryLimit      int32
@@ -256,6 +260,35 @@ type clusterCacheSync struct {
 	syncTime      *time.Time
 	syncError     error
 	resyncTimeout time.Duration
+}
+
+// listItemTaskLimiter limits the amount of list items to process in parallel.
+type listItemTaskLimiter struct {
+	sem WeightedSemaphore
+	wg  sync.WaitGroup
+}
+
+// Run executes the given task concurrently, blocking if the pool is at capacity.
+func (t *listItemTaskLimiter) Run(ctx context.Context, task func()) error {
+	t.wg.Add(1)
+	if err := t.sem.Acquire(ctx, 1); err != nil {
+		t.wg.Done()
+		return fmt.Errorf("failed to acquire semaphore: %w", err)
+	}
+
+	go func() {
+		defer t.wg.Done()
+		defer t.sem.Release(1)
+
+		task()
+	}()
+
+	return nil
+}
+
+// Wait blocks until all submitted tasks have completed.
+func (t *listItemTaskLimiter) Wait() {
+	t.wg.Wait()
 }
 
 // ListRetryFuncNever never retries on errors
@@ -442,6 +475,13 @@ func (c *clusterCache) newResource(un *unstructured.Unstructured) *Resource {
 	return resource
 }
 
+func (c *clusterCache) newListItemTaskLimiter() *listItemTaskLimiter {
+	return &listItemTaskLimiter{
+		sem: semaphore.NewWeighted(c.listItemSemaphoreWeight),
+		wg:  sync.WaitGroup{},
+	}
+}
+
 func (c *clusterCache) setNode(n *Resource) {
 	key := n.ResourceKey()
 	c.resources[key] = n
@@ -625,17 +665,33 @@ func (c *clusterCache) listResources(ctx context.Context, resClient dynamic.Reso
 
 // loadInitialState loads the state of all the resources retrieved by the given resource client.
 func (c *clusterCache) loadInitialState(ctx context.Context, api kube.APIResourceInfo, resClient dynamic.ResourceInterface, ns string, lock bool) (string, error) {
-	var items []*Resource
+	var (
+		items    []*Resource
+		listLock = sync.Mutex{}
+		limiter  = c.newListItemTaskLimiter()
+	)
+
 	resourceVersion, err := c.listResources(ctx, resClient, func(listPager *pager.ListPager) error {
 		return listPager.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
 			if un, ok := obj.(*unstructured.Unstructured); !ok {
 				return fmt.Errorf("object %s/%s has an unexpected type", un.GroupVersionKind().String(), un.GetName())
 			} else {
-				items = append(items, c.newResource(un))
+				if err := limiter.Run(ctx, func() {
+					newRes := c.newResource(un)
+					listLock.Lock()
+					items = append(items, newRes)
+					listLock.Unlock()
+				}); err != nil {
+					return fmt.Errorf("failed to process list item: %w", err)
+				}
 			}
 			return nil
 		})
 	})
+
+	// Wait until all items have completed processing.
+	limiter.Wait()
+
 	if err != nil {
 		return "", fmt.Errorf("failed to load initial state of resource %s: %w", api.GroupKind.String(), err)
 	}
@@ -934,19 +990,29 @@ func (c *clusterCache) sync() error {
 		lock.Unlock()
 
 		return c.processApi(client, api, func(resClient dynamic.ResourceInterface, ns string) error {
+			limiter := c.newListItemTaskLimiter()
+
 			resourceVersion, err := c.listResources(ctx, resClient, func(listPager *pager.ListPager) error {
 				return listPager.EachListItem(context.Background(), metav1.ListOptions{}, func(obj runtime.Object) error {
 					if un, ok := obj.(*unstructured.Unstructured); !ok {
 						return fmt.Errorf("object %s/%s has an unexpected type", un.GroupVersionKind().String(), un.GetName())
 					} else {
-						newRes := c.newResource(un)
-						lock.Lock()
-						c.setNode(newRes)
-						lock.Unlock()
+						if err := limiter.Run(ctx, func() {
+							newRes := c.newResource(un)
+							lock.Lock()
+							c.setNode(newRes)
+							lock.Unlock()
+						}); err != nil {
+							return fmt.Errorf("failed to process list item: %w", err)
+						}
 					}
 					return nil
 				})
 			})
+
+			// Wait until all items have completed processing.
+			limiter.Wait()
+
 			if err != nil {
 				if c.isRestrictedResource(err) {
 					keep := false
