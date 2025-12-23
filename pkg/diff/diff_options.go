@@ -2,6 +2,7 @@ package diff
 
 import (
 	"context"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -42,7 +43,7 @@ func applyOptions(opts []Option) options {
 }
 
 type KubeApplier interface {
-	ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string) (string, error)
+	ApplyResource(ctx context.Context, obj *unstructured.Unstructured, dryRunStrategy cmdutil.DryRunStrategy, force, validate, serverSideApply bool, manager string, cascadingStrategy metav1.DeletionPropagation) (string, error)
 }
 
 // ServerSideDryRunner defines the contract to run a server-side apply in
@@ -69,7 +70,7 @@ func NewK8sServerSideDryRunner(kubeApplier KubeApplier) *K8sServerSideDryRunner 
 // json as string.
 func (kdr *K8sServerSideDryRunner) Run(ctx context.Context, obj *unstructured.Unstructured, manager string) (string, error) {
 	//nolint:wrapcheck // trivial function, don't bother wrapping
-	return kdr.dryrunApplier.ApplyResource(ctx, obj, cmdutil.DryRunServer, false, false, true, manager)
+	return kdr.dryrunApplier.ApplyResource(ctx, obj, cmdutil.DryRunServer, false, false, true, manager, metav1.DeletePropagationForeground)
 }
 
 func IgnoreAggregatedRoles(ignore bool) Option {

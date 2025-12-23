@@ -1135,7 +1135,7 @@ func (sc *syncContext) needsClientSideApplyMigration(liveObj *unstructured.Unstr
 // The next time server-side apply is performed, kubernetes automatically migrates all fields from the manager
 // that owns 'last-applied-configuration' to the manager that uses server-side apply. This will remove the
 // specified manager from the resources managed fields. 'kubectl-client-side-apply' is used as the default manager.
-func (sc *syncContext) performClientSideApplyMigration(targetObj *unstructured.Unstructured, fieldManager string) error {
+func (sc *syncContext) performClientSideApplyMigration(targetObj *unstructured.Unstructured, fieldManager string, cascadingStrategy metav1.DeletionPropagation) error {
 	sc.log.WithValues("resource", kubeutil.GetResourceKey(targetObj)).V(1).Info("Performing client-side apply migration step")
 
 	// Apply with the specified manager to set up the migration
@@ -1147,6 +1147,7 @@ func (sc *syncContext) performClientSideApplyMigration(targetObj *unstructured.U
 		false,
 		false,
 		fieldManager,
+		cascadingStrategy,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to perform client-side apply migration on manager %s: %w", fieldManager, err)
@@ -1170,12 +1171,26 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 	var message string
 	shouldReplace := sc.replace || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionReplace)
 	force := sc.force || resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionForce)
+	// Default to foreground deletion, use sync context policy, then use object-level config
+	prunePropagationPolicy := metav1.DeletePropagationForeground
+	if sc.prunePropagationPolicy != nil {
+		prunePropagationPolicy = *sc.prunePropagationPolicy
+	}
+	switch {
+	case resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyBackground):
+		prunePropagationPolicy = metav1.DeletePropagationBackground
+	case resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyForeground):
+		prunePropagationPolicy = metav1.DeletePropagationForeground
+	case resourceutil.HasAnnotationOption(t.targetObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyOrphan):
+		prunePropagationPolicy = metav1.DeletePropagationOrphan
+	}
+
 	serverSideApply := sc.shouldUseServerSideApply(t.targetObj, dryRun)
 
 	// Check if we need to perform client-side apply migration for server-side apply
 	if serverSideApply && !dryRun && sc.enableClientSideApplyMigration {
 		if sc.needsClientSideApplyMigration(t.liveObj, sc.clientSideApplyMigrationManager) {
-			err = sc.performClientSideApplyMigration(t.targetObj, sc.clientSideApplyMigrationManager)
+			err = sc.performClientSideApplyMigration(t.targetObj, sc.clientSideApplyMigrationManager, prunePropagationPolicy)
 			if err != nil {
 				return common.ResultCodeSyncFailed, fmt.Sprintf("Failed to perform client-side apply migration: %v", err)
 			}
@@ -1197,13 +1212,13 @@ func (sc *syncContext) applyObject(t *syncTask, dryRun, validate bool) (common.R
 					message = fmt.Sprintf("error when updating: %v", err.Error())
 				}
 			} else {
-				message, err = sc.resourceOps.ReplaceResource(context.TODO(), t.targetObj, dryRunStrategy, force)
+				message, err = sc.resourceOps.ReplaceResource(context.TODO(), t.targetObj, dryRunStrategy, force, prunePropagationPolicy)
 			}
 		} else {
 			message, err = sc.resourceOps.CreateResource(context.TODO(), t.targetObj, dryRunStrategy, validate)
 		}
 	} else {
-		message, err = sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager)
+		message, err = sc.resourceOps.ApplyResource(context.TODO(), t.targetObj, dryRunStrategy, force, validate, serverSideApply, sc.serverSideApplyManager, prunePropagationPolicy)
 	}
 	if err != nil {
 		return common.ResultCodeSyncFailed, err.Error()
@@ -1230,6 +1245,20 @@ func (sc *syncContext) pruneObject(liveObj *unstructured.Unstructured, prune, dr
 	// Skip deletion if object is already marked for deletion, so we don't cause a resource update hotloop
 	deletionTimestamp := liveObj.GetDeletionTimestamp()
 	if deletionTimestamp == nil || deletionTimestamp.IsZero() {
+		propagationPolicy := metav1.DeletePropagationForeground
+		deleteOptions := sc.getDeleteOptions()
+		if deleteOptions.PropagationPolicy != nil {
+			propagationPolicy = *deleteOptions.PropagationPolicy
+		}
+		switch {
+		case resourceutil.HasAnnotationOption(liveObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyBackground):
+			propagationPolicy = metav1.DeletePropagationBackground
+		case resourceutil.HasAnnotationOption(liveObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyForeground):
+			propagationPolicy = metav1.DeletePropagationForeground
+		case resourceutil.HasAnnotationOption(liveObj, common.AnnotationSyncOptions, common.SyncOptionPrunePropagationPolicyOrphan):
+			propagationPolicy = metav1.DeletePropagationOrphan
+		}
+		deleteOptions.PropagationPolicy = &propagationPolicy
 		err := sc.kubectl.DeleteResource(context.TODO(), sc.config, liveObj.GroupVersionKind(), liveObj.GetName(), liveObj.GetNamespace(), sc.getDeleteOptions())
 		if err != nil {
 			return common.ResultCodeSyncFailed, err.Error()
