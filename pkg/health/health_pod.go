@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/kubectl/pkg/util/podutils"
 
+	"github.com/argoproj/gitops-engine/pkg/sync/common"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 )
 
@@ -93,9 +94,9 @@ func getCorev1PodHealth(pod *corev1.Pod) (*HealthStatus, error) {
 		}
 
 		return &HealthStatus{Status: HealthStatusDegraded, Message: ""}, nil
+
 	case corev1.PodRunning:
-		switch pod.Spec.RestartPolicy {
-		case corev1.RestartPolicyAlways:
+		getHealthStatus := func(pod *corev1.Pod) (*HealthStatus, error) {
 			// if pod is ready, it is automatically healthy
 			if podutils.IsPodReady(pod) {
 				return &HealthStatus{
@@ -117,10 +118,20 @@ func getCorev1PodHealth(pod *corev1.Pod) (*HealthStatus, error) {
 				Status:  HealthStatusProgressing,
 				Message: pod.Status.Message,
 			}, nil
-		case corev1.RestartPolicyOnFailure, corev1.RestartPolicyNever:
-			// pods set with a restart policy of OnFailure or Never, have a finite life.
+		}
+		policy := pod.Spec.RestartPolicy
+		// If the pod has the AnnotationIgnoreRestartPolicy annotation or its restart policy is Always,
+		// then treat it as a long-running pod and check its health status.
+		if _, ok := pod.Annotations[common.AnnotationIgnoreRestartPolicy]; ok || policy == corev1.RestartPolicyAlways {
+			return getHealthStatus(pod)
+		}
+
+		if policy == corev1.RestartPolicyOnFailure || policy == corev1.RestartPolicyNever {
+			// Most pods set with a restart policy of OnFailure or Never, have a finite life.
 			// These pods are typically resource hooks. Thus, we consider these as Progressing
-			// instead of healthy.
+			// instead of healthy. If this is unwanted, e.g., when the pod is managed by an
+			// operator and therefore has a restart policy of OnFailure or Never, then use the
+			// the AnnotationIgnoreRestartPolicy annotation.
 			return &HealthStatus{
 				Status:  HealthStatusProgressing,
 				Message: pod.Status.Message,
