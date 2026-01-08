@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -91,11 +92,11 @@ func newClusterWithOptions(_ testing.TB, opts []UpdateSettingsFunc, objs ...runt
 	client.PrependReactor("list", "*", func(action testcore.Action) (handled bool, ret runtime.Object, err error) {
 		handled, ret, err = reactor.React(action)
 		if err != nil || !handled {
-			return
+			return handled, ret, fmt.Errorf("reactor failed: %w", err)
 		}
 		// make sure list response have resource version
 		ret.(metav1.ListInterface).SetResourceVersion("123")
-		return
+		return handled, ret, nil
 	})
 
 	apiResources := []kube.APIResourceInfo{{
@@ -1157,6 +1158,389 @@ func TestIterateHierachyV2(t *testing.T) {
 	})
 }
 
+// TestIterateHierarchyV2_ClusterScopedParentOwnerReference tests that cluster-scoped parent
+// owner references work correctly, specifically cluster-scoped resources with
+// namespaced children
+func TestIterateHierarchyV2_ClusterScopedParentOwnerReference(t *testing.T) {
+	cluster := newCluster(t)
+
+	// Create cluster-scoped parent resource (ProviderRevision)
+	parentUID := types.UID("parent-uid-123")
+	clusterScopedParent := &Resource{
+		Ref: corev1.ObjectReference{
+			APIVersion: "pkg.crossplane.io/v1",
+			Kind:       "ProviderRevision",
+			Name:       "provider-aws-cloudformation-3b2c213545b8",
+			UID:        parentUID,
+			// No namespace = cluster-scoped
+		},
+		OwnerRefs: []metav1.OwnerReference{},
+	}
+
+	// Create namespaced child with ownerReference to cluster-scoped parent
+	namespacedChild := &Resource{
+		Ref: corev1.ObjectReference{
+			APIVersion: "apps/v1",
+			Kind:       "Deployment",
+			Name:       "provider-aws-cloudformation-3b2c213545b8",
+			Namespace:  "crossplane-system",
+			UID:        types.UID("child-uid-456"),
+		},
+		OwnerRefs: []metav1.OwnerReference{{
+			APIVersion: "pkg.crossplane.io/v1",
+			Kind:       "ProviderRevision",
+			Name:       "provider-aws-cloudformation-3b2c213545b8",
+			// UID: parentUID, // Don't set UID - let it be resolved via cross-namespace lookup
+		}},
+	}
+
+	// Create cluster-scoped child with ownerReference to cluster-scoped parent (this should work already)
+	clusterScopedChild := &Resource{
+		Ref: corev1.ObjectReference{
+			APIVersion: "rbac.authorization.k8s.io/v1",
+			Kind:       "ClusterRole",
+			Name:       "crossplane:provider:provider-aws-cloudformation-3b2c213545b8:system",
+			UID:        types.UID("child-uid-789"),
+			// No namespace = cluster-scoped
+		},
+		OwnerRefs: []metav1.OwnerReference{{
+			APIVersion: "pkg.crossplane.io/v1",
+			Kind:       "ProviderRevision",
+			Name:       "provider-aws-cloudformation-3b2c213545b8",
+			UID:        parentUID,
+		}},
+	}
+
+	// Add all resources to cluster cache
+	cluster.setNode(clusterScopedParent)
+	cluster.setNode(namespacedChild)
+	cluster.setNode(clusterScopedChild)
+
+	// Test hierarchy traversal starting from cluster-scoped parent
+	var visitedResources []*Resource
+	cluster.IterateHierarchyV2(
+		[]kube.ResourceKey{clusterScopedParent.ResourceKey()},
+		func(resource *Resource, _ map[kube.ResourceKey]*Resource) bool {
+			visitedResources = append(visitedResources, resource)
+			return true
+		},
+	)
+
+	// Should visit parent + both children (3 resources)
+	assert.Len(t, visitedResources, 3, "Should visit parent and both children")
+
+	visitedNames := make([]string, len(visitedResources))
+	for i, res := range visitedResources {
+		visitedNames[i] = res.Ref.Name
+	}
+
+	// Check we have the expected resources by type and namespace combination
+	foundParent := false
+	foundClusterChild := false
+	foundNamespacedChild := false
+
+	for _, res := range visitedResources {
+		switch {
+		case res.Ref.Kind == "ProviderRevision" && res.Ref.Namespace == "":
+			foundParent = true
+		case res.Ref.Kind == "ClusterRole" && res.Ref.Namespace == "":
+			foundClusterChild = true
+		case res.Ref.Kind == "Deployment" && res.Ref.Namespace == "crossplane-system":
+			foundNamespacedChild = true
+		}
+	}
+
+	assert.True(t, foundParent, "Should visit ProviderRevision parent")
+	assert.True(t, foundClusterChild, "Should visit ClusterRole child")
+	assert.True(t, foundNamespacedChild, "Should visit Deployment child (this tests the fix)")
+}
+
+// TestIterateHierarchyV2_DisabledClusterScopedParents tests that the environment variable
+// disables cluster-scoped parent owner reference resolution
+func TestIterateHierarchyV2_DisabledClusterScopedParents(t *testing.T) {
+	// Set environment variable to disable cluster-scoped parent functionality
+	t.Setenv("GITOPS_ENGINE_DISABLE_CLUSTER_SCOPED_PARENT_REFS", "1")
+
+	cluster := newCluster(t)
+
+	// Create cluster-scoped parent resource (ProviderRevision)
+	parentUID := types.UID("parent-uid-123")
+	clusterScopedParent := &Resource{
+		Ref: corev1.ObjectReference{
+			APIVersion: "pkg.crossplane.io/v1",
+			Kind:       "ProviderRevision",
+			Name:       "provider-aws-cloudformation-3b2c213545b8",
+			UID:        parentUID,
+			// No namespace = cluster-scoped
+		},
+		OwnerRefs: []metav1.OwnerReference{},
+	}
+
+	// Create namespaced child with ownerReference to cluster-scoped parent
+	namespacedChild := &Resource{
+		Ref: corev1.ObjectReference{
+			APIVersion: "apps/v1",
+			Kind:       "Deployment",
+			Name:       "provider-aws-cloudformation-3b2c213545b8",
+			Namespace:  "crossplane-system",
+			UID:        types.UID("child-uid-456"),
+		},
+		OwnerRefs: []metav1.OwnerReference{{
+			APIVersion: "pkg.crossplane.io/v1",
+			Kind:       "ProviderRevision",
+			Name:       "provider-aws-cloudformation-3b2c213545b8",
+		}},
+	}
+
+	// Add resources to cluster cache
+	cluster.setNode(clusterScopedParent)
+	cluster.setNode(namespacedChild)
+
+	// Test hierarchy traversal starting from cluster-scoped parent
+	var visitedResources []*Resource
+	cluster.IterateHierarchyV2(
+		[]kube.ResourceKey{clusterScopedParent.ResourceKey()},
+		func(resource *Resource, _ map[kube.ResourceKey]*Resource) bool {
+			visitedResources = append(visitedResources, resource)
+			return true
+		},
+	)
+
+	// When disabled, should only visit the parent (1 resource)
+	// because cluster-scoped parent resolution is disabled
+	assert.Len(t, visitedResources, 1, "Should only visit parent when cluster-scoped parent resolution disabled")
+	assert.Equal(t, "ProviderRevision", visitedResources[0].Ref.Kind)
+}
+
+// buildGraphTestHelper creates test resources and maps for buildGraph testing
+type buildGraphTestHelper struct {
+	parentUID types.UID
+	childUID  types.UID
+	parent    *Resource
+	child     *Resource
+}
+
+func newBuildGraphTestHelper() *buildGraphTestHelper {
+	parentUID := types.UID("parent-123")
+	childUID := types.UID("child-456")
+	return &buildGraphTestHelper{
+		parentUID: parentUID,
+		childUID:  childUID,
+	}
+}
+
+func (h *buildGraphTestHelper) createParent(namespace string) {
+	h.parent = &Resource{
+		Ref: corev1.ObjectReference{
+			APIVersion: "v1",
+			Kind:       "ConfigMap",
+			Name:       "parent",
+			Namespace:  namespace,
+			UID:        h.parentUID,
+		},
+	}
+}
+
+func (h *buildGraphTestHelper) createChild(ownerRefs ...metav1.OwnerReference) {
+	h.child = &Resource{
+		Ref: corev1.ObjectReference{
+			APIVersion: "v1",
+			Kind:       "Pod",
+			Name:       "child",
+			Namespace:  "test-ns",
+			UID:        h.childUID,
+		},
+		OwnerRefs: ownerRefs,
+	}
+}
+
+func (h *buildGraphTestHelper) standardOwnerRef() metav1.OwnerReference {
+	return metav1.OwnerReference{
+		APIVersion: "v1",
+		Kind:       "ConfigMap",
+		Name:       "parent",
+		UID:        h.parentUID,
+	}
+}
+
+func (h *buildGraphTestHelper) ownerRefWithoutUID() metav1.OwnerReference {
+	return metav1.OwnerReference{
+		APIVersion: "v1",
+		Kind:       "ConfigMap",
+		Name:       "parent",
+	}
+}
+
+func (h *buildGraphTestHelper) invalidOwnerRef() metav1.OwnerReference {
+	return metav1.OwnerReference{
+		APIVersion: "invalid/api/version",
+		Kind:       "ConfigMap",
+		Name:       "parent",
+	}
+}
+
+func (h *buildGraphTestHelper) nsNodes() map[kube.ResourceKey]*Resource {
+	result := make(map[kube.ResourceKey]*Resource)
+	if h.parent != nil {
+		result[h.parent.ResourceKey()] = h.parent
+	}
+	if h.child != nil {
+		result[h.child.ResourceKey()] = h.child
+	}
+	return result
+}
+
+func (h *buildGraphTestHelper) allResources() map[kube.ResourceKey]*Resource {
+	return h.nsNodes() // For simplicity, use same as nsNodes unless overridden
+}
+
+// Common assertion helpers
+func (h *buildGraphTestHelper) assertParentChildRelationship(t *testing.T, graph map[kube.ResourceKey]map[types.UID]*Resource) {
+	t.Helper()
+	assert.Contains(t, graph, h.parent.ResourceKey())
+	assert.Contains(t, graph[h.parent.ResourceKey()], h.childUID)
+}
+
+func (h *buildGraphTestHelper) assertEmptyGraph(t *testing.T, graph map[kube.ResourceKey]map[types.UID]*Resource) {
+	t.Helper()
+	assert.Empty(t, graph)
+}
+
+func (h *buildGraphTestHelper) assertUIDBackfilled(t *testing.T) {
+	t.Helper()
+	assert.Equal(t, h.parentUID, h.child.OwnerRefs[0].UID)
+}
+
+// TestBuildGraph_NilAllResources tests buildGraph with nil allResources parameter
+func TestBuildGraph_NilAllResources(t *testing.T) {
+	h := newBuildGraphTestHelper()
+	h.createParent("test-ns")
+	h.createChild(h.standardOwnerRef())
+
+	graph := buildGraph(h.nsNodes(), nil)
+	h.assertParentChildRelationship(t, graph)
+}
+
+// TestBuildGraph_InvalidAPIVersion tests handling of invalid API versions in owner references
+func TestBuildGraph_InvalidAPIVersion(t *testing.T) {
+	h := newBuildGraphTestHelper()
+	h.createChild(h.invalidOwnerRef())
+
+	graph := buildGraph(h.nsNodes(), h.allResources())
+	h.assertEmptyGraph(t, graph)
+}
+
+// TestBuildGraph_CrossNamespaceMissingUID tests cross-namespace parent resolution with missing UID
+func TestBuildGraph_CrossNamespaceMissingUID(t *testing.T) {
+	h := newBuildGraphTestHelper()
+	h.createParent("") // Cluster-scoped
+	h.createChild(h.ownerRefWithoutUID())
+
+	allResources := map[kube.ResourceKey]*Resource{
+		h.parent.ResourceKey(): h.parent,
+		h.child.ResourceKey():  h.child,
+	}
+	nsNodes := map[kube.ResourceKey]*Resource{h.child.ResourceKey(): h.child}
+
+	graph := buildGraph(nsNodes, allResources)
+	h.assertParentChildRelationship(t, graph)
+	h.assertUIDBackfilled(t)
+}
+
+// TestBuildGraph_NonExistentParent tests cross-namespace child with non-existent parent
+func TestBuildGraph_NonExistentParent(t *testing.T) {
+	h := newBuildGraphTestHelper()
+	nonExistentOwnerRef := metav1.OwnerReference{
+		APIVersion: "v1", Kind: "ConfigMap", Name: "non-existent-parent",
+	}
+	h.createChild(nonExistentOwnerRef)
+
+	graph := buildGraph(h.nsNodes(), h.allResources())
+	h.assertEmptyGraph(t, graph)
+}
+
+// TestBuildGraph_CrossNamespaceUIDLookup tests cross-namespace parent lookup by UID
+func TestBuildGraph_CrossNamespaceUIDLookup(t *testing.T) {
+	h := newBuildGraphTestHelper()
+	h.createParent("") // Cluster-scoped
+	h.createChild(h.standardOwnerRef())
+
+	nsNodes := map[kube.ResourceKey]*Resource{h.child.ResourceKey(): h.child}
+	allResources := map[kube.ResourceKey]*Resource{
+		h.parent.ResourceKey(): h.parent,
+		h.child.ResourceKey():  h.child,
+	}
+
+	graph := buildGraph(nsNodes, allResources)
+	h.assertParentChildRelationship(t, graph)
+}
+
+// TestBuildGraph_DuplicateUIDs tests handling of resources with duplicate UIDs
+func TestBuildGraph_DuplicateUIDs(t *testing.T) {
+	duplicateUID := types.UID("duplicate-456")
+	h := newBuildGraphTestHelper()
+	h.createParent("test-ns")
+
+	// Create two children with same UID but different API versions (simulating replicasets from different API groups)
+	child1 := &Resource{
+		Ref: corev1.ObjectReference{
+			APIVersion: "apps/v1",
+			Kind:       "ReplicaSet",
+			Name:       "child-apps",
+			Namespace:  "test-ns",
+			UID:        duplicateUID,
+		},
+		OwnerRefs: []metav1.OwnerReference{h.standardOwnerRef()},
+	}
+
+	child2 := &Resource{
+		Ref: corev1.ObjectReference{
+			APIVersion: "extensions/v1beta1",
+			Kind:       "ReplicaSet",
+			Name:       "child-extensions",
+			Namespace:  "test-ns",
+			UID:        duplicateUID,
+		},
+		OwnerRefs: []metav1.OwnerReference{h.standardOwnerRef()},
+	}
+
+	nsNodes := map[kube.ResourceKey]*Resource{
+		h.parent.ResourceKey(): h.parent,
+		child1.ResourceKey():   child1,
+		child2.ResourceKey():   child2,
+	}
+
+	graph := buildGraph(nsNodes, nil)
+
+	assert.Contains(t, graph, h.parent.ResourceKey())
+	assert.Contains(t, graph[h.parent.ResourceKey()], duplicateUID)
+	assert.NotNil(t, graph[h.parent.ResourceKey()][duplicateUID])
+}
+
+// TestIterateHierarchyV2_EdgeCases tests additional edge cases for hierarchy iteration
+func TestIterateHierarchyV2_EdgeCases(t *testing.T) {
+	cluster := newCluster(t)
+
+	t.Run("EmptyKeysList", func(t *testing.T) {
+		var visited []kube.ResourceKey
+		cluster.IterateHierarchyV2([]kube.ResourceKey{}, func(resource *Resource, _ map[kube.ResourceKey]*Resource) bool {
+			visited = append(visited, resource.ResourceKey())
+			return true
+		})
+		assert.Empty(t, visited)
+	})
+
+	t.Run("NonExistentKeys", func(t *testing.T) {
+		var visited []kube.ResourceKey
+		nonExistentKey := kube.ResourceKey{Group: "fake", Kind: "Fake", Namespace: "fake", Name: "fake"}
+		cluster.IterateHierarchyV2([]kube.ResourceKey{nonExistentKey}, func(resource *Resource, _ map[kube.ResourceKey]*Resource) bool {
+			visited = append(visited, resource.ResourceKey())
+			return true
+		})
+		assert.Empty(t, visited)
+	})
+}
+
 // Test_watchEvents_Deadlock validates that starting watches will not create a deadlock
 // caused by using improper locking in various callback methods when there is a high load on the
 // system.
@@ -1189,7 +1573,7 @@ func Test_watchEvents_Deadlock(t *testing.T) {
 			// deadlock.RLock()
 			// defer deadlock.RUnlock()
 
-			return
+			return info, cacheManifest
 		}),
 	}, res1, res2, testDeploy())
 	defer func() {
@@ -1273,7 +1657,7 @@ func BenchmarkBuildGraph(b *testing.B) {
 	testResources := buildTestResourceMap()
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		buildGraph(testResources)
+		buildGraph(testResources, nil)
 	}
 }
 
