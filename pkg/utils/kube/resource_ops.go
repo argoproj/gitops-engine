@@ -338,11 +338,13 @@ func (k *kubectlResourceOperations) ApplyResource(ctx context.Context, obj *unst
 	if dryRunStrategy != cmdutil.DryRunNone {
 		logWithLevel = logWithLevel.V(1)
 	}
-	logWithLevel.WithValues(
-		"dry-run", [...]string{"none", "client", "server"}[dryRunStrategy],
-		"manager", manager,
-		"serverSideApply", serverSideApply,
-		"serverSideDiff", true).Info(fmt.Sprintf("Applying resource %s/%s in cluster: %s, namespace: %s", obj.GetKind(), obj.GetName(), k.config.Host, obj.GetNamespace()))
+	if logWithLevel.V(0).Enabled() {
+		logWithLevel.WithValues(
+			"dry-run", [...]string{"none", "client", "server"}[dryRunStrategy],
+			"manager", manager,
+			"serverSideApply", serverSideApply,
+			"serverSideDiff", true).Info(fmt.Sprintf("Applying resource %s/%s in cluster: %s, namespace: %s", obj.GetKind(), obj.GetName(), k.config.Host, obj.GetNamespace()))
+	}
 
 	return k.runResourceCommand(ctx, obj, dryRunStrategy, func(ioStreams genericclioptions.IOStreams, fileName string) error {
 		cleanup, err := processKubectlRun(k.onKubectlRun, "apply")
