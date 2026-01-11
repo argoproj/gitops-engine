@@ -19,3 +19,14 @@ func Wave(obj *unstructured.Unstructured) int {
 	}
 	return helmhook.Weight(obj)
 }
+
+func UseBinaryTreeWaveOrdering(obj *unstructured.Unstructured) string {
+	text, ok := obj.GetAnnotations()[common.AnnotationUseBinaryTreeWaveOrdering]
+	if ok {
+		if text == "true" {
+			return text
+		}
+		return "false"
+	}
+	return "false"
+}

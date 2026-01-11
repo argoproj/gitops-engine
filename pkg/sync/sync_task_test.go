@@ -69,7 +69,11 @@ func Test_syncTask_deleteBeforeCreation(t *testing.T) {
 	assert.True(t, (&syncTask{liveObj: testingutils.Annotate(testingutils.Annotate(testingutils.NewPod(), "argocd.argoproj.io/hook", "Sync"), "argocd.argoproj.io/hook-delete-policy", "BeforeHookCreation")}).deleteBeforeCreation())
 }
 
-func Test_syncTask_wave(t *testing.T) {
+func TestSyncTaskWave(t *testing.T) {
 	assert.Equal(t, 0, (&syncTask{targetObj: testingutils.NewPod()}).wave())
-	assert.Equal(t, 1, (&syncTask{targetObj: testingutils.Annotate(testingutils.NewPod(), "argocd.argoproj.io/sync-wave", "1")}).wave())
+	assert.Equal(t, "false", (&syncTask{targetObj: testingutils.NewPod()}).waveUseBinaryTreeOrdering())
+	assert.Equal(t, 1, (&syncTask{targetObj: testingutils.Annotate(testingutils.NewPod(), common.AnnotationSyncWave, "1")}).wave())
+	assert.Equal(t, "false", (&syncTask{targetObj: testingutils.Annotate(testingutils.NewPod(), common.AnnotationSyncWave, "1")}).waveUseBinaryTreeOrdering())
+	assert.Equal(t, 1, (&syncTask{targetObj: testingutils.Annotate(testingutils.Annotate(testingutils.NewPod(), common.AnnotationSyncWave, "1"), common.AnnotationUseBinaryTreeWaveOrdering, "true")}).wave())
+	assert.Equal(t, "true", (&syncTask{targetObj: testingutils.Annotate(testingutils.Annotate(testingutils.NewPod(), common.AnnotationSyncWave, "1"), common.AnnotationUseBinaryTreeWaveOrdering, "true")}).waveUseBinaryTreeOrdering())
 }
