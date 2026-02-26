@@ -1,0 +1,468 @@
+# This workflow will initiate a Veracode Static Analysis Pipeline scan, return a results.json and convert to SARIF for upload as a code scanning alert
+
+name: Veracode Static Analysis Pipeline Scan
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    # The branches below must be a subset of the branches above
+    branches: [ master ]
+  schedule:
+    - cron: '33 23 * * 6'
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a job to build and submit pipeline scan, you will need to customize the build process accordingly and make sure the artifact you build is used as the file input to the pipeline scan file parameter
+  build-and-pipeline-scan:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+    steps:
+
+    # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it and copies all sources into ZIP file for submitting for analysis. Replace this section with your applications build steps
+    - uses: actions/checkout@v2
+      with:
+        repository: ''
+
+    - uses: papeloto/action-zip@v1
+      with:
+        files: /
+        recursive: true
+        dest: veracode-pipeline-scan-results-to-sarif.zip
+
+    - uses: actions/upload-artifact@v1
+      with:
+        name: my-artifact
+        path: veracode-pipeline-scan-results-to-sarif.zip
+
+    # download the Veracode Static Analysis Pipeline scan jar
+    - uses: wei/curl@master
+      with:
+        args: -O https://downloads.veracode.com/securityscan/pipeline-scan-LATEST.zip
+    - run: unzip -o pipeline-scan-LATEST.zip
+
+    - uses: actions/setup-java@v1
+      with:
+        java-version: 1.8
+    - run: java -jar pipeline-scan.jar --veracode_api_id "${{secrets.VERACODE_API_ID}}" --veracode_api_key "${{secrets.VERACODE_API_KEY}}" --fail_on_severity="Very High, High" --file veracode-pipeline-scan-results-to-sarif.zip
+      continue-on-error: true
+    - uses: actions/upload-artifact@v1
+      with:
+        name: ScanResults
+        path: results.json
+    - name: Convert pipeline scan output to SARIF format
+      id: convert
+      uses: veracode/veracode-pipeline-scan-results-to-sarif@master
+      with:
+        pipeline-results-json: results.json
+    - uses: github/codeql-action/upload-sarif@v1
+      with:
+        # Path to SARIF file relative to the root of the repository
+        sarif_file: veracode-results.sarif
+- name: Cache
+  uses: actions/cache@v2.1.6
+  with:
+    # A list of files, directories, and wildcard patterns to cache and restore
+    path: 
+    # An explicit key for restoring and saving the cache
+    key: 
+    # An ordered list of keys to use for restoring the cache if no cache hit occurred for key
+    restore-keys: # optional
+    # The chunk size used to split up large files during upload, in bytes
+    upload-chunk-size: # optional
+    - name: Cache
+  uses: actions/cache@v2.1.6
+  with:
+    # A list of files, directories, and wildcard patterns to cache and restore
+    path: 
+    # An explicit key for restoring and saving the cache
+    key: 
+    # An ordered list of keys to use for restoring the cache if no cache hit occurred for key
+    restore-keys: # optional
+    # The chunk size used to split up large files during upload, in bytes
+    upload-chunk-size: # optional
+    - name: Setup Node.js environment
+  uses: actions/setup-node@v2.2.0
+  with:
+    # Set always-auth in npmrc
+    always-auth: # optional, default is false
+    # Version Spec of the version to use.  Examples: 12.x, 10.15.1, >=10.15.0
+    node-version: # optional
+    # Target architecture for Node to use. Examples: x86, x64. Will use system architecture by default.
+    architecture: # optional
+    # Set this option if you want the action to check for the latest available version that satisfies the version spec
+    check-latest: # optional
+    # Optional registry to set up for auth. Will set the registry in a project level .npmrc and .yarnrc file, and set up auth to read in from env.NODE_AUTH_TOKEN
+    registry-url: # optional
+    # Optional scope for authenticating against scoped registries
+    scope: # optional
+    # Used to pull node distributions from node-versions.  Since there's a default, this is typically not supplied by the user.
+    token: # optional, default is ${{ github.token }}
+    # Used to specify a package manager for caching in the default directory. Supported values: npm, yarn
+    cache: # optional
+    # Deprecated. Use node-version instead. Will not be supported after October 1, 2019
+    version: # optional
+    - name: Setup Go environment
+  uses: actions/setup-go@v2.1.3
+  with:
+    # The Go version to download (if necessary) and use. Supports semver spec and ranges.
+    go-version: # optional
+    # Whether to download only stable versions
+    stable: # optional, default is true
+    # Used to pull node distributions from go-versions.  Since there's a default, this is typically not supplied by the user.
+    token: # optional, default is ${{ github.token }}
+    - name: Download a Build Artifact
+  uses: actions/download-artifact@v2.0.10
+  with:
+    # Artifact name
+    name: # optional
+    # Destination path
+    path: # optional
+    - name: Setup .NET Core SDK
+  uses: actions/setup-dotnet@v1.8.1
+  with:
+    # Optional SDK version to use. If not provided, will install global.json version when available. Examples: 2.2.104, 3.1, 3.1.x
+    dotnet-version: # optional
+    # Optional package source for which to set up authentication. Will consult any existing NuGet.config in the root of the repo and provide a temporary NuGet.config using the NUGET_AUTH_TOKEN environment variable as a ClearTextPassword
+    source-url: # optional
+    # Optional OWNER for using packages from GitHub Package Registry organizations/users other than the current repository's owner. Only used if a GPR URL is also provided in source-url
+    owner: # optional
+    # Optional NuGet.config location, if your NuGet.config isn't located in the root of the repo.
+    config-file: # optional
+    # Whether prerelease versions should be matched with non-exact versions (for example 5.0.0-preview.6 being matched by 5, 5.0, 5.x or 5.0.x). Defaults to false if not provided.
+    include-prerelease: # optional
+    - name: Trigger Buildkite Pipeline
+  # You may pin to the exact commit or the version.
+  # uses: buildkite/trigger-pipeline-action@d03b6f2760252274dc019e1298095c3b61baeaf8
+  uses: buildkite/trigger-pipeline-action@v1.2.0
+  - name: Trigger Buildkite Pipeline
+  # You may pin to the exact commit or the version.
+  # uses: buildkite/trigger-pipeline-action@d03b6f2760252274dc019e1298095c3b61baeaf8
+  uses: buildkite/trigger-pipeline-action@v1.2.0
+  - name: Terraform Apply for GorillaStack
+  # You may pin to the exact commit or the version.
+  # uses: GorillaStack/github-action-apply-on-merge@71fab58db0a839b1e9b34e87601a5e4347c52c88
+  uses: GorillaStack/github-action-apply-on-merge@v0.1.0
+  with:
+    # The action type (currently "validate" and "apply" are available)
+    action: # default is validate
+    # The name of the tfstate bucket stack
+    stack_name: # default is github-actions-gorillastack-tfstate
+    # The region in which you deployed the tfstate bucket stack
+    aws_default_region: # default is us-east-1
+    # The AWS Access Key Id for the user with privileges to access the tfstate bucket
+    aws_access_key_id: # default is defaulted-for-everything-but-apply
+    # The AWS Secret Access Key for the user with privileges to access the tfstate bucket
+    aws_secret_access_key: # default is defaulted-for-everything-but-apply
+    # GorillaStack API Key, which is read-write or read-only, tied to your user identity
+    gorillastack_api_key: # default is defaulted-for-everything-but-apply
+    # GorillaStack Team Id, sets context of which team/tenant you are targeting
+    gorillastack_team_id: # default is defaulted-for-everything-but-apply
+    - name: Deploy to Cloudflare Workers with Wrangler
+  # You may pin to the exact commit or the version.
+  # uses: cloudflare/wrangler-action@21f14faa062c33c938e3f37c30d52021bed521cb
+  uses: cloudflare/wrangler-action@1.2.0
+  with:
+    # (Legacy) Your Cloudflare API Key
+    apiKey: # optional
+    # Your Cloudflare API Token
+    apiToken: # optional
+    # (Legacy) Your Cloudflare Email
+    email: # optional
+    # The environment you'd like to publish your Workers project to - must be defined in wrangler.toml
+    environment: # optional
+    # The relative path which Wrangler commands should be run from
+    workingDirectory: # optional
+    # The version of Wrangler you'd like to use to publish your Workers project
+    wranglerVersion: # optional
+    # A new line deliminated string of environment variable names that should be configured as Worker secrets
+    secrets: # optional
+    - name: HashiCorp - Setup Terraform
+  # You may pin to the exact commit or the version.
+  # uses: hashicorp/setup-terraform@d22444889af304a44b997011fbabb81ff705a7b4
+  uses: hashicorp/setup-terraform@v1.2.1
+  with:
+    # The hostname of a Terraform Cloud/Enterprise instance to place within the credentials block of the Terraform CLI configuration file. Defaults to `app.terraform.io`.
+    cli_config_credentials_hostname: # optional, default is app.terraform.io
+    # The API token for a Terraform Cloud/Enterprise instance to place within the credentials block of the Terraform CLI configuration file.
+    cli_config_credentials_token: # optional
+    # The version of Terraform CLI to install. Instead of full version string you can also specify constraint string starting with "<" (for example `<1.13.0`) to install the latest version satisfying the constraint. A value of `latest` will install the latest version of Terraform CLI. Defaults to `latest`.
+    terraform_version: # optional, default is latest
+    # Whether or not to install a wrapper to wrap subsequent calls of the `terraform` binary and expose its STDOUT, STDERR, and exit code as outputs named `stdout`, `stderr`, and `exitcode` respectively. Defaults to `true`.
+    terraform_wrapper: # optional, default is true
+    - name: Deploy to Cloudflare Workers with Wrangler
+  # You may pin to the exact commit or the version.
+  # uses: cloudflare/wrangler-action@21f14faa062c33c938e3f37c30d52021bed521cb
+  uses: cloudflare/wrangler-action@1.2.0
+  with:
+    # (Legacy) Your Cloudflare API Key
+    apiKey: # optional
+    # Your Cloudflare API Token
+    apiToken: # optional
+    # (Legacy) Your Cloudflare Email
+    email: # optional
+    # The environment you'd like to publish your Workers project to - must be defined in wrangler.toml
+    environment: # optional
+    # The relative path which Wrangler commands should be run from
+    workingDirectory: # optional
+    # The version of Wrangler you'd like to use to publish your Workers project
+    wranglerVersion: # optional
+    # A new line deliminated string of environment variable names that should be configured as Worker secrets
+    secrets: # optional
+    - name: HashiCorp - Setup Terraform
+  # You may pin to the exact commit or the version.
+  # uses: hashicorp/setup-terraform@d22444889af304a44b997011fbabb81ff705a7b4
+  uses: hashicorp/setup-terraform@v1.2.1
+  with:
+    # The hostname of a Terraform Cloud/Enterprise instance to place within the credentials block of the Terraform CLI configuration file. Defaults to `app.terraform.io`.
+    cli_config_credentials_hostname: # optional, default is app.terraform.io
+    # The API token for a Terraform Cloud/Enterprise instance to place within the credentials block of the Terraform CLI configuration file.
+    cli_config_credentials_token: # optional
+    # The version of Terraform CLI to install. Instead of full version string you can also specify constraint string starting with "<" (for example `<1.13.0`) to install the latest version satisfying the constraint. A value of `latest` will install the latest version of Terraform CLI. Defaults to `latest`.
+    terraform_version: # optional, default is latest
+    # Whether or not to install a wrapper to wrap subsequent calls of the `terraform` binary and expose its STDOUT, STDERR, and exit code as outputs named `stdout`, `stderr`, and `exitcode` respectively. Defaults to `true`.
+    terraform_wrapper: # optional, default is true
+    - name: Set up gcloud Cloud SDK environment
+  # You may pin to the exact commit or the version.
+  # uses: google-github-actions/setup-gcloud@94337306dda8180d967a56932ceb4ddcf01edae7
+  uses: google-github-actions/setup-gcloud@v0.2.0
+  with:
+    # Version of the gcloud SDK to install. If unspecified or set to "latest",
+the latest available gcloud SDK version for the target platform will be
+installed. Example: "290.0.1".
+    version: # optional, default is latest
+    # Service account email address to use for authentication. This is required
+for legacy .p12 keys but can be omitted for .json keys. This is usually of
+the format <name>@<project-id>.iam.gserviceaccount.com.
+    service_account_email: # optional
+    # Service account key to use for authentication. This should be the JSON
+formatted private key which can be exported from the Cloud Console. The
+value can be raw or base64-encoded.
+    service_account_key: # optional
+    # ID of the Google Cloud project. If provided, this will configure gcloud to
+use this project ID by default for commands. Individual commands can still
+override the project using the --project flag which takes precedence.
+    project_id: # optional
+    # Export the provided credentials as Google Default Application Credentials.
+This will make the credentials available to later steps via the
+GOOGLE_APPLICATION_CREDENTIALS environment variable. Future steps that
+consume Default Application Credentials will automatically detect and use
+these credentials.
+    export_default_credentials: # optional
+    - name: Set up gcloud Cloud SDK environment
+  # You may pin to the exact commit or the version.
+  # uses: google-github-actions/setup-gcloud@94337306dda8180d967a56932ceb4ddcf01edae7
+  uses: google-github-actions/setup-gcloud@v0.2.0
+  with:
+    # Version of the gcloud SDK to install. If unspecified or set to "latest",
+the latest available gcloud SDK version for the target platform will be
+installed. Example: "290.0.1".
+    version: # optional, default is latest
+    # Service account email address to use for authentication. This is required
+for legacy .p12 keys but can be omitted for .json keys. This is usually of
+the format <name>@<project-id>.iam.gserviceaccount.com.
+    service_account_email: # optional
+    # Service account key to use for authentication. This should be the JSON
+formatted private key which can be exported from the Cloud Console. The
+value can be raw or base64-encoded.
+    service_account_key: # optional
+    # ID of the Google Cloud project. If provided, this will configure gcloud to
+use this project ID by default for commands. Individual commands can still
+override the project using the --project flag which takes precedence.
+    project_id: # optional
+    # Export the provided credentials as Google Default Application Credentials.
+This will make the credentials available to later steps via the
+GOOGLE_APPLICATION_CREDENTIALS environment variable. Future steps that
+consume Default Application Credentials will automatically detect and use
+these credentials.
+    export_default_credentials: # optional
+    - name: Lightstep Services Change Report
+  # You may pin to the exact commit or the version.
+  # uses: lightstep/lightstep-action-snapshot@166ec5f31d611858ebe9ed3437848e8fe675fb89
+  uses: lightstep/lightstep-action-snapshot@v0.2.1
+  with:
+    # The organization associated with your Lightstep account (usually your company name)
+    lightstep_organization: # optional
+    # The Lightstep project associated with this repository
+    lightstep_project: # optional
+    # Only show services in the snapshot from this comma-separated list
+    lightstep_service_filter: # optional
+    # The query to use when taking a snapshot
+    lightstep_snapshot_query: # optional
+    # The Lightstep snapshot id to summarize
+    lightstep_snapshot_id: # optional
+    # The Lightstep snapshot id to compare with lightstep_snapshot_id
+    lightstep_snapshot_compare_id: # optional
+    # The key to access the Lightstep Public API
+    lightstep_api_key: # optional
+    # Github API Token
+    github_token: # optional
+    # If set to true, will not add a comment to pull-requests
+    disable_comment: # optional
+    - name: Lightstep Pre-Deploy Check
+  # You may pin to the exact commit or the version.
+  # uses: lightstep/lightstep-action-predeploy@22bec553a6d0fb3de5026acb1159085601f76408
+  uses: lightstep/lightstep-action-predeploy@v0.2.6
+  with:
+    # The organization associated with your Lightstep account (usually your company name)
+    lightstep_organization: # optional
+    # The Lightstep project associated with this repository
+    lightstep_project: # optional
+    # The key to access the Lightstep Public API
+    lightstep_api_key: # optional
+    # The token to access the Rollbar API
+    rollbar_api_token: # optional
+    # The token to access the PagerDuty API
+    pagerduty_api_token: # optional
+    # If set to true, collapse all conditions to a single table row
+    rollup_conditions: # optional
+    # If set to true, will not add a comment to pull-requests
+    disable_comment: # optional
+    - name: AWS CloudFormation "Deploy CloudFormation Stack" Action for GitHub Actions
+  # You may pin to the exact commit or the version.
+  # uses: aws-actions/aws-cloudformation-github-deploy@dfbee8a4fec90af61b71bafda3890f8c4a2075ef
+  uses: aws-actions/aws-cloudformation-github-deploy@v1.0.3
+  with:
+    # The name of the CloudFormation stack
+    name: 
+    # The path or URL to the CloudFormation template
+    template: 
+    # The comma-delimited list of stack template capabilities to acknowledge. Defaults to 'CAPABILITY_IAM'
+    capabilities: # optional, default is CAPABILITY_IAM
+    # The parameters to override in the stack inputs. The list is comma-delimited, with each entry formatted as <ParameterName>=<ParameterValue>.
+    parameter-overrides: # optional
+    # If the CloudFormation change set is empty, do not fail. Defaults to '0' (will fail on empty change set)
+    no-fail-on-empty-changeset: # optional, default is 0
+    # Disable rollback of the stack if stack creation fails. Defaults to '0' (will rollback if stack creation fails). This input is only used for stack creation, not for stack update
+    disable-rollback: # optional, default is 0
+    # The amount of time that can pass before the stack status becomes CREATE_FAILED. This input is only used for stack creation, not for stack update
+    timeout-in-minutes: # optional
+    # The comma-delimited list of Amazon SNS topic ARNs to publish stack related events
+    notification-arns: # optional
+    # The Amazon Resource Name (ARN) of an AWS Identity and Access Management (IAM) role that AWS CloudFormation assumes to create the stack. AWS CloudFormation uses the role's credentials to make calls on your behalf. AWS CloudFormation always uses this role for all future operations on the stack. As long as users have permission to operate on the stack, AWS CloudFormation uses this role even if the users don't have permission to pass it. Ensure that the role grants least privilege. If you don't specify a value, AWS CloudFormation uses the role that was previously associated with the stack
+    role-arn: # optional
+    # Key-value pairs to associate with this stack. This input should be JSON-formatted, for example [ { "Key": "string", "Value": "string" } ]
+    tags: # optional
+    # Whether to enable termination protection on the specified stack. Defaults to '0' (terminated protection will be disabled) This input is only used for stack creation, not for stack update
+    termination-protection: # optional, default is 0
+    - name: AWS CloudFormation "Deploy CloudFormation Stack" Action for GitHub Actions
+  # You may pin to the exact commit or the version.
+  # uses: aws-actions/aws-cloudformation-github-deploy@dfbee8a4fec90af61b71bafda3890f8c4a2075ef
+  uses: aws-actions/aws-cloudformation-github-deploy@v1.0.3
+  with:
+    # The name of the CloudFormation stack
+    name: 
+    # The path or URL to the CloudFormation template
+    template: 
+    # The comma-delimited list of stack template capabilities to acknowledge. Defaults to 'CAPABILITY_IAM'
+    capabilities: # optional, default is CAPABILITY_IAM
+    # The parameters to override in the stack inputs. The list is comma-delimited, with each entry formatted as <ParameterName>=<ParameterValue>.
+    parameter-overrides: # optional
+    # If the CloudFormation change set is empty, do not fail. Defaults to '0' (will fail on empty change set)
+    no-fail-on-empty-changeset: # optional, default is 0
+    # Disable rollback of the stack if stack creation fails. Defaults to '0' (will rollback if stack creation fails). This input is only used for stack creation, not for stack update
+    disable-rollback: # optional, default is 0
+    # The amount of time that can pass before the stack status becomes CREATE_FAILED. This input is only used for stack creation, not for stack update
+    timeout-in-minutes: # optional
+    # The comma-delimited list of Amazon SNS topic ARNs to publish stack related events
+    notification-arns: # optional
+    # The Amazon Resource Name (ARN) of an AWS Identity and Access Management (IAM) role that AWS CloudFormation assumes to create the stack. AWS CloudFormation uses the role's credentials to make calls on your behalf. AWS CloudFormation always uses this role for all future operations on the stack. As long as users have permission to operate on the stack, AWS CloudFormation uses this role even if the users don't have permission to pass it. Ensure that the role grants least privilege. If you don't specify a value, AWS CloudFormation uses the role that was previously associated with the stack
+    role-arn: # optional
+    # Key-value pairs to associate with this stack. This input should be JSON-formatted, for example [ { "Key": "string", "Value": "string" } ]
+    tags: # optional
+    # Whether to enable termination protection on the specified stack. Defaults to '0' (terminated protection will be disabled) This input is only used for stack creation, not for stack update
+    termination-protection: # optional, default is 0
+    - name: AWS CloudFormation "Deploy CloudFormation Stack" Action for GitHub Actions
+  # You may pin to the exact commit or the version.
+  # uses: aws-actions/aws-cloudformation-github-deploy@dfbee8a4fec90af61b71bafda3890f8c4a2075ef
+  uses: aws-actions/aws-cloudformation-github-deploy@v1.0.3
+  with:
+    # The name of the CloudFormation stack
+    name: 
+    # The path or URL to the CloudFormation template
+    template: 
+    # The comma-delimited list of stack template capabilities to acknowledge. Defaults to 'CAPABILITY_IAM'
+    capabilities: # optional, default is CAPABILITY_IAM
+    # The parameters to override in the stack inputs. The list is comma-delimited, with each entry formatted as <ParameterName>=<ParameterValue>.
+    parameter-overrides: # optional
+    # If the CloudFormation change set is empty, do not fail. Defaults to '0' (will fail on empty change set)
+    no-fail-on-empty-changeset: # optional, default is 0
+    # Disable rollback of the stack if stack creation fails. Defaults to '0' (will rollback if stack creation fails). This input is only used for stack creation, not for stack update
+    disable-rollback: # optional, default is 0
+    # The amount of time that can pass before the stack status becomes CREATE_FAILED. This input is only used for stack creation, not for stack update
+    timeout-in-minutes: # optional
+    # The comma-delimited list of Amazon SNS topic ARNs to publish stack related events
+    notification-arns: # optional
+    # The Amazon Resource Name (ARN) of an AWS Identity and Access Management (IAM) role that AWS CloudFormation assumes to create the stack. AWS CloudFormation uses the role's credentials to make calls on your behalf. AWS CloudFormation always uses this role for all future operations on the stack. As long as users have permission to operate on the stack, AWS CloudFormation uses this role even if the users don't have permission to pass it. Ensure that the role grants least privilege. If you don't specify a value, AWS CloudFormation uses the role that was previously associated with the stack
+    role-arn: # optional
+    # Key-value pairs to associate with this stack. This input should be JSON-formatted, for example [ { "Key": "string", "Value": "string" } ]
+    tags: # optional
+    # Whether to enable termination protection on the specified stack. Defaults to '0' (terminated protection will be disabled) This input is only used for stack creation, not for stack update
+    termination-protection: # optional, default is 0
+    - name: AWS CloudFormation "Deploy CloudFormation Stack" Action for GitHub Actions
+  # You may pin to the exact commit or the version.
+  # uses: aws-actions/aws-cloudformation-github-deploy@dfbee8a4fec90af61b71bafda3890f8c4a2075ef
+  uses: aws-actions/aws-cloudformation-github-deploy@v1.0.3
+  with:
+    # The name of the CloudFormation stack
+    name: 
+    # The path or URL to the CloudFormation template
+    template: 
+    # The comma-delimited list of stack template capabilities to acknowledge. Defaults to 'CAPABILITY_IAM'
+    capabilities: # optional, default is CAPABILITY_IAM
+    # The parameters to override in the stack inputs. The list is comma-delimited, with each entry formatted as <ParameterName>=<ParameterValue>.
+    parameter-overrides: # optional
+    # If the CloudFormation change set is empty, do not fail. Defaults to '0' (will fail on empty change set)
+    no-fail-on-empty-changeset: # optional, default is 0
+    # Disable rollback of the stack if stack creation fails. Defaults to '0' (will rollback if stack creation fails). This input is only used for stack creation, not for stack update
+    disable-rollback: # optional, default is 0
+    # The amount of time that can pass before the stack status becomes CREATE_FAILED. This input is only used for stack creation, not for stack update
+    timeout-in-minutes: # optional
+    # The comma-delimited list of Amazon SNS topic ARNs to publish stack related events
+    notification-arns: # optional
+    # The Amazon Resource Name (ARN) of an AWS Identity and Access Management (IAM) role that AWS CloudFormation assumes to create the stack. AWS CloudFormation uses the role's credentials to make calls on your behalf. AWS CloudFormation always uses this role for all future operations on the stack. As long as users have permission to operate on the stack, AWS CloudFormation uses this role even if the users don't have permission to pass it. Ensure that the role grants least privilege. If you don't specify a value, AWS CloudFormation uses the role that was previously associated with the stack
+    role-arn: # optional
+    # Key-value pairs to associate with this stack. This input should be JSON-formatted, for example [ { "Key": "string", "Value": "string" } ]
+    tags: # optional
+    # Whether to enable termination protection on the specified stack. Defaults to '0' (terminated protection will be disabled) This input is only used for stack creation, not for stack update
+    termination-protection: # optional, default is 0
+    - name: AWS CloudFormation "Deploy CloudFormation Stack" Action for GitHub Actions
+  # You may pin to the exact commit or the version.
+  # uses: aws-actions/aws-cloudformation-github-deploy@dfbee8a4fec90af61b71bafda3890f8c4a2075ef
+  uses: aws-actions/aws-cloudformation-github-deploy@v1.0.3
+  with:
+    # The name of the CloudFormation stack
+    name: 
+    # The path or URL to the CloudFormation template
+    template: 
+    # The comma-delimited list of stack template capabilities to acknowledge. Defaults to 'CAPABILITY_IAM'
+    capabilities: # optional, default is CAPABILITY_IAM
+    # The parameters to override in the stack inputs. The list is comma-delimited, with each entry formatted as <ParameterName>=<ParameterValue>.
+    parameter-overrides: # optional
+    # If the CloudFormation change set is empty, do not fail. Defaults to '0' (will fail on empty change set)
+    no-fail-on-empty-changeset: # optional, default is 0
+    # Disable rollback of the stack if stack creation fails. Defaults to '0' (will rollback if stack creation fails). This input is only used for stack creation, not for stack update
+    disable-rollback: # optional, default is 0
+    # The amount of time that can pass before the stack status becomes CREATE_FAILED. This input is only used for stack creation, not for stack update
+    timeout-in-minutes: # optional
+    # The comma-delimited list of Amazon SNS topic ARNs to publish stack related events
+    notification-arns: # optional
+    # The Amazon Resource Name (ARN) of an AWS Identity and Access Management (IAM) role that AWS CloudFormation assumes to create the stack. AWS CloudFormation uses the role's credentials to make calls on your behalf. AWS CloudFormation always uses this role for all future operations on the stack. As long as users have permission to operate on the stack, AWS CloudFormation uses this role even if the users don't have permission to pass it. Ensure that the role grants least privilege. If you don't specify a value, AWS CloudFormation uses the role that was previously associated with the stack
+    role-arn: # optional
+    # Key-value pairs to associate with this stack. This input should be JSON-formatted, for example [ { "Key": "string", "Value": "string" } ]
+    tags: # optional
+    # Whether to enable termination protection on the specified stack. Defaults to '0' (terminated protection will be disabled) This input is only used for stack creation, not for stack update
+    termination-protection: # optional, default is 0
+    - name: Amazon ECR "Login" Action for GitHub Actions
+  # You may pin to the exact commit or the version.
+  # uses: aws-actions/amazon-ecr-login@aaf69d68aa3fb14c1d5a6be9ac61fe15b48453a2
+  uses: aws-actions/amazon-ecr-login@v1
+  with:
+    # A comma-delimited list of AWS account IDs that are associated with the ECR registries. If you do not specify a registry, the default ECR registry is assumed.
+    registries: # optional
+    # Whether to skip explicit logout of the registries during post-job cleanup. Exists for backward compatibility on self-hosted runners. Not recommended.
+    skip-logout: # optional
+    - name: EKS on Fargate
+  # You may pin to the exact commit or the version.
+  # uses: aws-actions/amazon-eks-fargate@fa91b1ce6e342eb17a1d57df976506d02f074640
+  uses: aws-actions/amazon-eks-fargate@v0.1.1
